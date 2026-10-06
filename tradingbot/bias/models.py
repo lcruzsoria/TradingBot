@@ -1,0 +1,42 @@
+"""Tipos del módulo Bias."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from enum import Enum
+
+
+class Bias(str, Enum):
+    BULLISH = "Bullish"
+    BEARISH = "Bearish"
+    NO_BIAS = "No Bias"
+
+
+class Direction(str, Enum):
+    LONG = "Long"
+    SHORT = "Short"
+
+
+@dataclass(frozen=True)
+class RuleVote:
+    """Resultado de una regla: +1 alcista, -1 bajista, 0 sin opinión."""
+    rule: str
+    vote: int
+    detail: str
+
+
+@dataclass(frozen=True)
+class BiasResult:
+    bias: Bias
+    day: date | None
+    votes: tuple[RuleVote, ...] = ()
+    levels: dict[str, float] = field(default_factory=dict)
+    summary: str = ""
+
+    def allows(self, direction: Direction) -> bool:
+        """Filtro de operativa: Bullish solo Long, Bearish solo Short, No Bias ambas."""
+        if self.bias is Bias.NO_BIAS:
+            return True
+        if self.bias is Bias.BULLISH:
+            return direction is Direction.LONG
+        return direction is Direction.SHORT

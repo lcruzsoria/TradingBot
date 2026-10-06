@@ -1,0 +1,17 @@
+# Secretos: nunca al repositorio
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Preferencias personales de la interfaz (colores elegidos en la app)
+theme.local.json
+
+# Datos locales y capturas
+data/
+*.log

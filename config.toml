@@ -1,0 +1,63 @@
+# Ajustes de TradingBot (sin secretos: las cuentas van en el .env)
+
+[app]
+symbol = "EURUSD"          # símbolo inicial (se puede cambiar en la interfaz)
+timeframe = "15m"          # 1m, 3m, 5m o 15m
+max_bars = 2000000         # tope de seguridad al cargar historial
+# Panel "Mercados": cotizaciones de solo lectura. Usa los nombres EXACTOS de tu broker
+# (en MT5: Ver > Símbolos). Los que no existan se muestran como "No disponible".
+watchlist = ["NAS100", "US500", "GER40", "EURUSD", "XAUUSD", "USOIL", "BTCUSD", "ETHUSD"]
+
+# ---------------------------------------------------------------------------
+# Tema visual. Presets: "negro" (fondo negro, texto azul, verde y rojo) o "pizarra".
+# Cualquier color se puede sobrescribir aquí con formato #RRGGBB. Los cambios hechos en la
+# app (botón "Colores") se guardan aparte en theme.local.json y tienen prioridad sobre esto.
+# Colores: bg, panel, border, text, muted, accent, bull, bear, warn, chart_bg
+# ---------------------------------------------------------------------------
+[theme]
+preset = "negro"
+# text = "#6cb2ff"     # texto principal (azul)
+# bull = "#19d98b"     # verde: alcista / positivo
+# bear = "#ff4757"     # rojo: bajista / negativo
+
+# ---------------------------------------------------------------------------
+# Bias: sesgo de la sesión del día en curso
+#   Bullish  -> solo se permiten operaciones alcistas (Long)
+#   Bearish  -> solo se permiten operaciones bajistas (Short)
+#   No Bias  -> se permiten ambas direcciones
+# Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión).
+# ---------------------------------------------------------------------------
+[bias]
+min_votes = 1        # votos mínimos en una dirección para que haya sesgo
+require_all = false  # true: TODAS las reglas activas deben votar lo mismo
+
+# Reglas de EJEMPLO para ver el sistema funcionando. Sustitúyelas por tus criterios.
+[[bias.rules]]
+type = "prev_day_break"
+enabled = true
+
+[[bias.rules]]
+type = "above_below_open"
+enabled = true
+tolerance_pct = 0.0
+
+# ---------------------------------------------------------------------------
+# Skills: cada una es un hexágono del panel "Skills" y se comunica con las demás
+# por mensajes. "slot" fija su posición: 0-5 (anillo, en sentido horario desde
+# arriba), "center" o "aux1"-"aux3" (satélites). Pon enabled = false para apagar una.
+# ---------------------------------------------------------------------------
+[[skills]]
+type = "cortex"
+slot = "center"
+
+[[skills]]
+type = "feed"
+slot = 0
+
+[[skills]]
+type = "bias"
+slot = 1
+
+[[skills]]
+type = "quotes"
+slot = 5
