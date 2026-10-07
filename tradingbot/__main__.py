@@ -8,7 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .bias import BiasEngine
+from .skills.bias import BiasEngine
 from .core import EventBus, Services, SkillManager
 from . import envconfig, settings
 from .config import (DEFAULT_CONFIG_FILE, DEFAULT_ENV_FILE, ConfigError, load_app_config, load_profiles,
@@ -58,10 +58,10 @@ def main(argv=None) -> int:
 
         demo = cfg["app"]["demo"] if args.demo is None else args.demo
         if demo:
-            from .demo_data import DemoSource
+            from .skills.feed.demo_data import DemoSource
             source, subtitle = DemoSource(), "Modo demo sin conexión a MT5"
         else:
-            from .mt5_client import Mt5Source
+            from .skills.feed.mt5_client import Mt5Source
             profiles, default = load_profiles(args.env)
             profile = select_profile(profiles, default, args.profile or cfg["app"]["profile"])
             source = Mt5Source(profile, int(cfg["app"]["max_bars"]))

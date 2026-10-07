@@ -193,7 +193,7 @@ El sesgo se calcula al cargar velas y al pulsar *Recalcular sesgo*.
 
 ### Añadir una regla nueva
 
-1. En `tradingbot/bias/rules.py`, copia una de las existentes:
+1. En `tradingbot/skills/bias/rules.py`, copia una de las existentes:
 
 ```python
 @register_rule("mi_regla")
@@ -288,9 +288,14 @@ Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar co
 
 ### Añadir una skill nueva
 
-1. Copia `tradingbot/skills/_plantilla.py` con otro nombre (sin guion bajo inicial) y descomenta `@register_skill`.
-2. Define `subscribes` (qué escucha), `publishes` (qué dice) y la lógica en `handle(event)`.
-3. Actívala en `config.toml`:
+Cada skill tiene su propia carpeta en `tradingbot/skills/`, también las que se creen en el futuro.
+
+1. Copia la carpeta `tradingbot/skills/_plantilla/` con el nombre de la skill, sin guion bajo inicial
+   (por ejemplo `tradingbot/skills/risk/`). Tiene `__init__.py` y `skill.py`; en `skill.py`, descomenta `@register_skill`.
+2. Define `subscribes` (qué escucha), `publishes` (qué dice) y la lógica en `handle(event)`. Los módulos propios de la
+   skill (cálculos, reglas, modelos...) van en su misma carpeta.
+3. Si necesita ajustes, añade su bloque (`RISK_...`) comentado a `tradingbot.env` y léelo con `self.settings`.
+4. Actívala en `config.toml`:
 
 ```toml
 [[skills]]
@@ -298,8 +303,8 @@ type = "risk"
 slot = 2
 ```
 
-La plantilla incluye la lista de temas que ya existen y su contenido. Un módulo nuevo en `tradingbot/skills/`
-se registra solo; los que empiezan por `_` se ignoran.
+La plantilla incluye la lista de temas que ya existen y su contenido. Una carpeta nueva en `tradingbot/skills/`
+con su `skill.py` se registra sola; las que empiezan por `_` se ignoran.
 
 ## Estructura
 
@@ -307,19 +312,24 @@ se registra solo; los que empiezan por `_` se ignoran.
 tradingbot/
   __main__.py        punto de entrada
   config.py          .env (perfiles), config.toml y valores por defecto de tradingbot.env
-  mt5_client.py      conexión y carga de velas (solo lectura)
-  demo_data.py       datos sintéticos (--demo)
-  core/              bus de eventos y base de las skills
-  skills/            feed, quotes, bias, tbr, levels, cortex y la plantilla para nuevas skills
   envconfig.py       lectura de tradingbot.env (bloques por skill)
-  bias/              modelos, contexto, reglas, motor y filtro de operativa
-  tbr.py             zonas horarias TBR y sus niveles High / Low / 50 %
-  levels.py          niveles del día (TDO, Midnight, PDH / PDL) y separadores de día
+  settings.py        preferencias guardadas desde la app (settings.local.json)
+  clock.py           horas: servidor del broker <-> Nueva York
+  timeframes.py      timeframes disponibles
+  core/              bus de eventos y base de las skills
+  skills/            una carpeta por skill (se registran solas)
+    feed/            conexión con MT5 y velas: skill.py, datasource.py, mt5_client.py (solo lectura), demo_data.py
+    quotes/          cotizaciones, cuenta y desfase del servidor: skill.py
+    bias/            sesgo del día: skill.py, engine.py, rules.py, context.py, models.py, filter.py
+    cortex/          coordinador y filtro de operativa: skill.py
+    tbr/             zonas horarias TBR: skill.py, zones.py
+    levels/          TDO, Midnight, PDH / PDL y separadores de día: skill.py, daylevels.py
+    _plantilla/      carpeta a copiar para crear una skill nueva
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
 tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
-tests/               pruebas del Bias
+tests/               pruebas (uv run pytest)
 ```
 
 ## Pruebas

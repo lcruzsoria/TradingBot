@@ -31,6 +31,18 @@ def ny_from_server(server_ts: int, utc_offset_seconds: int | None) -> tuple[date
     return naive - timedelta(hours=NY_CLOSE_SERVER_AHEAD_HOURS), True
 
 
+def server_minus_ny(utc_offset_seconds: int | None, now: datetime | None = None) -> tuple[int, bool]:
+    """(segundos que el servidor va por delante de NY, estimado).
+
+    Con el desfase del servidor respecto a UTC ya medido, se resta el de Nueva York en este momento. Sin él se asume
+    el habitual de los brokers con cierre en Nueva York (+7 h) y se marca como estimado.
+    """
+    if utc_offset_seconds is None or NY is None:
+        return NY_CLOSE_SERVER_AHEAD_HOURS * 3600, True
+    ny_offset = (now or datetime.now(NY)).astimezone(NY).utcoffset()
+    return int(utc_offset_seconds - ny_offset.total_seconds()), False
+
+
 class OffsetDetector:
     """Mide el desfase del servidor respecto a UTC con ticks en vivo.
 

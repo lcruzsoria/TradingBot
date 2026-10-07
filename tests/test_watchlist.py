@@ -8,9 +8,9 @@ import pytest
 
 import tradingbot.skills  # noqa: F401
 from tradingbot import settings
-from tradingbot.bias import BiasEngine
+from tradingbot.skills.bias import BiasEngine
 from tradingbot.core import EventBus, Services, SkillManager
-from tradingbot.demo_data import DemoSource
+from tradingbot.skills.feed.demo_data import DemoSource
 from tradingbot.ui.watchlist_dialog import WatchlistDialog, filter_symbols
 
 BROKER = ["AUDUSD", "BTCUSD", "DJ30", "ETHUSD", "EURUSD", "GER40", "NAS100", "NAS100FT.r", "SP500", "UK100",

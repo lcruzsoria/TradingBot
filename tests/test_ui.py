@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from tradingbot.datasource import Quote
+from tradingbot.skills.feed.datasource import Quote
 from tradingbot.ui.fmt import hace
 from tradingbot.ui.widgets import MarketsGrid
 

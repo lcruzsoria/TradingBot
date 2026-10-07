@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
 import numpy as np
 
-from .clock import NY, NY_CLOSE_SERVER_AHEAD_HOURS
 
 DAY = 86_400
 EXTEND_BARS = 8          # un nivel aún no tomado se prolonga hasta este margen a la derecha de la última vela
@@ -103,18 +102,6 @@ def zones_from_settings(settings) -> list[Zone]:
         start, end = parse_hours(hours, f"{key}_HOURS")
         zones.append(Zone(key, settings.get(f"{key}_NAME", name), start, end, color.upper()))
     return zones
-
-
-def server_minus_ny(utc_offset_seconds: int | None, now: datetime | None = None) -> tuple[int, bool]:
-    """(segundos que el servidor va por delante de NY, estimado).
-
-    Con el desfase del servidor respecto a UTC ya medido, se resta el de Nueva York en este momento. Sin él se asume
-    el habitual de los brokers con cierre en Nueva York (+7 h) y se marca como estimado.
-    """
-    if utc_offset_seconds is None or NY is None:
-        return NY_CLOSE_SERVER_AHEAD_HOURS * 3600, True
-    ny_offset = (now or datetime.now(NY)).astimezone(NY).utcoffset()
-    return int(utc_offset_seconds - ny_offset.total_seconds()), False
 
 
 def compute(ts, high, low, zones: list[Zone], server_ahead: int, tf_minutes: int,

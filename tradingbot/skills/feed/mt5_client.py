@@ -10,9 +10,9 @@ import time
 
 import pandas as pd
 
-from .config import Mt5Profile
+from ...config import Mt5Profile
 from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
-from .timeframes import DERIVED, base_timeframe, minutes, mt5_constant
+from ...timeframes import DERIVED, base_timeframe, minutes, mt5_constant
 
 CHUNK = 50_000
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from ..bias import Bias, BiasResult, Direction
-from ..bias.rules import fmt_price
-from ..datasource import Quote
+from ..skills.bias import Bias, BiasResult, Direction
+from ..skills.bias.rules import fmt_price
+from ..skills.feed.datasource import Quote
 from . import theme
 from .fmt import fecha_larga, hace
 

@@ -3,8 +3,8 @@ import pandas as pd
 import pytest
 
 import tradingbot.skills  # noqa: F401
-from tradingbot.datasource import aggregate_candles, normalize_candles
-from tradingbot.demo_data import DemoSource
+from tradingbot.skills.feed.datasource import aggregate_candles, normalize_candles
+from tradingbot.skills.feed.demo_data import DemoSource
 from tradingbot.timeframes import DERIVED, NATIVE, TIMEFRAMES, base_timeframe, display_label, minutes, mt5_constant
 
 
@@ -69,7 +69,7 @@ def test_los_timeframes_largos_terminan_en_el_mismo_precio():
 
 def test_bias_no_se_calcula_con_velas_semanales_pero_si_con_diarias():
     import time
-    from tradingbot.bias import BiasEngine
+    from tradingbot.skills.bias import BiasEngine
     from tradingbot.core import EventBus, Services, SkillManager
 
     bus, events = EventBus(), []

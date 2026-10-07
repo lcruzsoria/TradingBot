@@ -4,7 +4,7 @@ import re
 import pytest
 
 from tradingbot import envconfig
-from tradingbot.bias import BiasEngine
+from tradingbot.skills.bias import BiasEngine
 from tradingbot.config import (DEFAULT_BIAS_RULES, DEFAULT_MAX_BARS, DEFAULT_SYMBOL, ConfigError,
                                load_app_config)
 from tradingbot.envconfig import EnvConfig, parse
@@ -130,5 +130,5 @@ def test_las_opciones_de_la_linea_de_comandos_mandan(monkeypatch):
 
 
 def test_las_zonas_tbr_del_proyecto_son_las_del_codigo():
-    from tradingbot.tbr import zones_from_settings
+    from tradingbot.skills.tbr.zones import zones_from_settings
     assert zones_from_settings(envconfig.load(environ={}).section("TBR")) == zones_from_settings(EnvConfig())

@@ -1,10 +1,10 @@
 """Skill TBR: zonas horarias (Time-Based Ranges) en hora de Nueva York y sus niveles High, Low y 50 %."""
 from __future__ import annotations
 
-from ..core import Event, Skill, register_skill
-from ..tbr import (DEFAULT_DAYS, DEFAULT_MAX_TF_MINUTES, DEFAULT_OPACITY, compute, server_minus_ny,
-                   zones_from_settings)
-from ..timeframes import display_label, minutes
+from ...core import Event, Skill, register_skill
+from ...clock import server_minus_ny
+from .zones import DEFAULT_DAYS, DEFAULT_MAX_TF_MINUTES, DEFAULT_OPACITY, compute, zones_from_settings
+from ...timeframes import display_label, minutes
 
 
 @register_skill("tbr")

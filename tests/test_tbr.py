@@ -10,9 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradingbot import tbr
+from tradingbot.skills.tbr import zones as tbr
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.tbr import Zone, compute, parse_hours, server_minus_ny, zones_from_settings
+from tradingbot.clock import server_minus_ny
+from tradingbot.skills.tbr.zones import Zone, compute, parse_hours, zones_from_settings
 
 AHEAD = 7 * 3600                                      # servidor = NY + 7 h
 NY_DAY = datetime(2026, 10, 6, tzinfo=timezone.utc)   # medianoche NY del día de prueba (como época "ingenua")

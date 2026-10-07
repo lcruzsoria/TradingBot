@@ -64,9 +64,11 @@ def test_set_value_activa_la_opcion_elegida_y_comenta_las_demas(tmp_path):
 def test_el_tradingbot_env_del_proyecto():
     text = envconfig.ENV_FILE.read_text(encoding="utf-8")
     env = load(environ={})
-    assert env.get("UI_THEME") == "matrix"                                     # por defecto, Matrix
+    active = env.get("UI_THEME")                       # la que elija el usuario (botón Skins > Guardar)
+    assert active in PRESETS
     alternatives = {line.split("=", 1)[1] for line in text.splitlines() if line.startswith("#UI_THEME=")}
-    assert alternatives == set(PRESETS) - {"matrix"}                           # el resto, comentadas
+    assert alternatives == set(PRESETS) - {active}                             # el resto, comentadas
+    assert theme.DEFAULT_PRESET == "matrix"                                     # sin UI_THEME, Matrix
     assert {p.stem for p in (envconfig.ENV_FILE.parent / "screenshots").glob("*.png")} == set(PRESETS)
     assert env.get_bool("APP_AUTO_UPDATE") is True
     assert "contraseña" in text.lower() and "PASSWORD" not in text            # aviso, y sin secretos

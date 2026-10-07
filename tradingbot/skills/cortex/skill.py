@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..bias import Direction, TradeFilter
-from ..core import Event, Skill, register_skill
+from ...core import Event, Skill, register_skill
 
 
 @register_skill("cortex")

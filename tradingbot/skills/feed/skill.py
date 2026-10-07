@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from ..core import Event, Skill, register_skill
-from ..timeframes import display_label
+from ...core import Event, Skill, register_skill
+from ...timeframes import display_label
 
 
 @register_skill("feed")

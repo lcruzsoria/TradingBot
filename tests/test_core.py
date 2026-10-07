@@ -5,10 +5,10 @@ import time
 import pytest
 
 import tradingbot.skills  # noqa: F401  (registra las skills)
-from tradingbot.bias import BiasEngine, Direction
+from tradingbot.skills.bias import BiasEngine, Direction
 from tradingbot.core import EventBus, Services, Skill, SkillManager, SkillState, register_skill
 from tradingbot.core.bus import matches
-from tradingbot.demo_data import DemoSource
+from tradingbot.skills.feed.demo_data import DemoSource
 
 
 def wait_for(cond, timeout=5.0):
@@ -128,3 +128,17 @@ def test_config_de_skills_valida():
                      [{"type": "feed", "slot": 2}, {"type": "bias", "slot": 2}])
     m = SkillManager(EventBus(), Services(None, None, {"app": {}}), [{"type": "feed", "enabled": False}])
     assert m.skills == {}
+
+
+def test_cada_skill_tiene_su_carpeta():
+    """Cada skill vive en tradingbot/skills/<clave>/skill.py (también las futuras)."""
+    from pathlib import Path
+    from tradingbot.core.skill import SKILL_REGISTRY
+    root = Path(tradingbot.skills.__file__).parent
+    assert {"feed", "quotes", "bias", "cortex", "tbr", "levels"} <= set(SKILL_REGISTRY)
+    for key, cls in SKILL_REGISTRY.items():
+        if not cls.__module__.startswith("tradingbot."):
+            continue                                    # skills de prueba definidas dentro de los tests
+        assert cls.__module__ == f"tradingbot.skills.{key}.skill", f"{key} no está en su carpeta"
+        assert (root / key / "__init__.py").exists()
+    assert not [p.name for p in root.glob("*.py") if p.name != "__init__.py"]   # nada suelto en skills/

@@ -1,8 +1,8 @@
 """Skill Bias: sesgo (Bullish / Bearish / No Bias) de la sesión del día en curso."""
 from __future__ import annotations
 
-from ..core import Event, Skill, register_skill
-from ..timeframes import minutes
+from ...core import Event, Skill, register_skill
+from ...timeframes import minutes
 
 
 @register_skill("bias")

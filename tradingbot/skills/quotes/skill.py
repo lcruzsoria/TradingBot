@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from ..clock import OffsetDetector
-from ..core import Event, Skill, register_skill
+from ...clock import OffsetDetector
+from ...core import Event, Skill, register_skill
 
 
 @register_skill("quotes")

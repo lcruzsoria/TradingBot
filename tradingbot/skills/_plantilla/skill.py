@@ -1,8 +1,12 @@
 """Plantilla para crear una skill nueva.
 
-1. Copia este fichero con otro nombre SIN guion bajo inicial (p. ej. risk.py).
-2. Cambia la clave de @register_skill, el título, los temas y la lógica de handle().
-3. Actívala en config.toml:
+Cada skill vive en su propia carpeta dentro de tradingbot/skills/ (p. ej. tradingbot/skills/risk/).
+
+1. Copia la carpeta _plantilla con el nombre de la skill, SIN guion bajo inicial (p. ej. risk/).
+   Debe tener __init__.py y skill.py; sus módulos propios (cálculos, reglas...) van en la misma carpeta.
+2. En skill.py, descomenta @register_skill y cambia la clave, el título, los temas y la lógica de handle().
+3. Si necesita ajustes, añade su bloque RISK_... comentado a tradingbot.env y léelo con self.settings.
+4. Actívala en config.toml:
 
        [[skills]]
        type = "risk"
@@ -28,7 +32,7 @@ Temas que ya existen (payload entre llaves):
   trade.request {request_id, direction}   "¿puedo operar?"        (cualquiera -> cortex)
   trade.verdict {request_id, direction, allowed, reason}          (cortex)
 """
-from ..core import Event, Skill, register_skill
+from ...core import Event, Skill, register_skill
 
 
 # @register_skill("mi_skill")        # <- descomenta al copiar la plantilla

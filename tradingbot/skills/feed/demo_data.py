@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
-from .timeframes import DERIVED, minutes
+from ...timeframes import DERIVED, minutes
 
 SERVER_OFFSET = 3 * 3600   # el servidor simulado va 3 h por delante de UTC (como muchos brokers en verano)
 DAYS = 150          # historial de velas de minutos

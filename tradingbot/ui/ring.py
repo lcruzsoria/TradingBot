@@ -261,4 +261,4 @@ def describe_skill(info: SkillInfo, view: _View, last_in: str | None, last_out: 
 
 
 FREE_SLOT_TEXT = ("<b>Slot libre</b><br><span style='color:%s'>Aquí puede vivir una skill nueva (Risk, Exit, Macro...). "
-                  "Créala en <i>tradingbot/skills/</i> y actívala en <i>config.toml</i> con este slot: <b>%s</b>.</span>")
+                  "Créala copiando la carpeta <i>tradingbot/skills/_plantilla/</i> y actívala en <i>config.toml</i> con este slot: <b>%s</b>.</span>")

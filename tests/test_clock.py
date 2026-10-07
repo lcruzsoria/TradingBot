@@ -9,7 +9,7 @@ import pytest
 import tradingbot.skills  # noqa: F401
 from tradingbot.clock import NY, OffsetDetector, format_offset, ny_from_server
 from tradingbot.core import EventBus, Services, SkillManager
-from tradingbot.datasource import Quote
+from tradingbot.skills.feed.datasource import Quote
 
 
 def server_epoch(y, mo, d, h, mi, s=0):

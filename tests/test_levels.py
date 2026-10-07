@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from tradingbot import levels
+from tradingbot.skills.levels import daylevels as levels
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.levels import compute, separators
+from tradingbot.skills.levels.daylevels import compute, separators
 
 AHEAD = 7 * 3600                                       # servidor = NY + 7 h
 DAY0 = int(datetime(2026, 10, 6, tzinfo=timezone.utc).timestamp())   # martes 6 oct (día del servidor)

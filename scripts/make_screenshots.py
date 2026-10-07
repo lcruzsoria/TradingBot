@@ -36,10 +36,10 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     import tradingbot.skills  # noqa: F401  (registra las skills)
-    from tradingbot.bias import BiasEngine
+    from tradingbot.skills.bias import BiasEngine
     from tradingbot.config import load_app_config
     from tradingbot.core import EventBus, Services, SkillManager
-    from tradingbot.demo_data import DemoSource
+    from tradingbot.skills.feed.demo_data import DemoSource
     from tradingbot.ui.main_window import MainWindow
 
     app = QApplication(sys.argv[:1])

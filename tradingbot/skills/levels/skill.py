@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import re
 
-from ..core import Event, Skill, register_skill
-from ..levels import DEFAULT_COLORS, DEFAULT_DAYS, DEFAULT_MAX_TF_MINUTES, compute, separators
-from ..tbr import server_minus_ny
-from ..timeframes import display_label, minutes
+from ...core import Event, Skill, register_skill
+from .daylevels import DEFAULT_COLORS, DEFAULT_DAYS, DEFAULT_MAX_TF_MINUTES, compute, separators
+from ...clock import server_minus_ny
+from ...timeframes import display_label, minutes
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 

@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradingbot.bias import Bias, BiasEngine, Direction, TradeFilter
-from tradingbot.bias.rules import AboveBelowOpen, PrevDayBreak
-from tradingbot.datasource import normalize_candles
+from tradingbot.skills.bias import Bias, BiasEngine, Direction, TradeFilter
+from tradingbot.skills.bias.rules import AboveBelowOpen, PrevDayBreak
+from tradingbot.skills.feed.datasource import normalize_candles
 
 
 def make_candles(prev_range, today_open, today_close):

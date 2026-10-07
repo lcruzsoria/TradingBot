@@ -5,9 +5,9 @@ import types
 import numpy as np
 import pytest
 
-from tradingbot import mt5_client
+from tradingbot.skills.feed import mt5_client
 from tradingbot.config import Mt5Profile
-from tradingbot.mt5_client import Mt5Error, Mt5Source
+from tradingbot.skills.feed.mt5_client import Mt5Error, Mt5Source
 
 
 class FakeMt5(types.ModuleType):

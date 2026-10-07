@@ -9,7 +9,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsRectItem
 
-from ..bias.rules import fmt_price
+from ..skills.bias.rules import fmt_price
 from . import theme
 from .fmt import fecha_hora
 
@@ -264,7 +264,7 @@ class ChartView(pg.PlotWidget):
 
     # -- TBR: zonas horarias y sus niveles ---------------------------------------------------------
     def set_tbr(self, sessions: list, opacity: float | None = None) -> None:
-        """Zonas TBR calculadas (tradingbot.tbr.Session); solo se ven con show_tbr(True)."""
+        """Zonas TBR calculadas (tradingbot.skills.tbr.zones.Session); solo se ven con show_tbr(True)."""
         self._tbr_sessions = list(sessions)
         if opacity is not None:
             self._tbr_opacity = opacity

@@ -11,10 +11,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow, QPlainTextEdit,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
-from ..bias import BiasResult
+from ..skills.bias import BiasResult
 from ..clock import format_offset, ny_from_server
 from ..core import Event, EventBus, SkillManager
-from ..datasource import AccountSnapshot
+from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
 from .bridge import UiBridge
