@@ -132,7 +132,8 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **TBR** — zonas horarias del botón TBR | | |
 | `TBR_SHOW` | `false` | Botón TBR activado al arrancar. |
 | `TBR_DAYS` | `10` | Días naturales hacia atrás que se dibujan. |
-| `TBR_OPACITY` | `25` | Opacidad del relleno de las zonas, en % (0-100). |
+| `TBR_OPACITY` | `12` | Opacidad del relleno de las zonas, en % (0 invisible, 100 opaco); valores bajos dan el efecto traslúcido. |
+| `TBR_LINE_OPACITY` | `60` | Opacidad de las líneas High, Low y 50 % de las zonas, en % (0-100). |
 | `TBR_MAX_TF_MINUTES` | `60` | Timeframe máximo (en minutos) con el que se dibujan. |
 | `TBR_ZONES` | `ASIA, LONDON, PRE_NY, NY_AM, NY_PM` | Zonas activas y su orden. |
 | `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |

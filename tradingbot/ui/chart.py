@@ -253,7 +253,8 @@ class ChartView(pg.PlotWidget):
         self._n = 0
         self._tbr_items: list = []
         self._tbr_sessions: list = []
-        self._tbr_opacity = 0.25
+        self._tbr_opacity = 0.12
+        self._tbr_line_opacity = 0.6
         self._tbr_visible = False
         self._day_items: list = []
         self._day_lines: list = []
@@ -371,11 +372,13 @@ class ChartView(pg.PlotWidget):
         self._lines.clear()
 
     # -- TBR: zonas horarias y sus niveles ---------------------------------------------------------
-    def set_tbr(self, sessions: list, opacity: float | None = None) -> None:
+    def set_tbr(self, sessions: list, opacity: float | None = None, line_opacity: float | None = None) -> None:
         """Zonas TBR calculadas (tradingbot.skills.tbr.zones.Session); solo se ven con show_tbr(True)."""
         self._tbr_sessions = list(sessions)
         if opacity is not None:
             self._tbr_opacity = opacity
+        if line_opacity is not None:
+            self._tbr_line_opacity = line_opacity
         self._draw_tbr()
 
     def show_tbr(self, visible: bool) -> None:
@@ -406,7 +409,7 @@ class ChartView(pg.PlotWidget):
                 ys += [level.price, level.price]
         for (color, kind), (xs, ys) in lines.items():
             pen_color = QColor(color)
-            pen_color.setAlphaF(0.85)
+            pen_color.setAlphaF(self._tbr_line_opacity)
             style = Qt.PenStyle.DotLine if kind == "mid" else Qt.PenStyle.SolidLine   # 50 %: punteada
             curve = pg.PlotCurveItem(x=np.array(xs), y=np.array(ys), connect="pairs",
                                      pen=pg.mkPen(pen_color, width=1, style=style))

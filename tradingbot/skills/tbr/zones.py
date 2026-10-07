@@ -23,7 +23,8 @@ EXTEND_BARS = 8          # un nivel aún no tomado se prolonga hasta este margen
 # Valores por defecto (se cambian en tradingbot.env, bloque TBR)
 DEFAULT_SHOW = False
 DEFAULT_DAYS = 10
-DEFAULT_OPACITY = 25     # % de opacidad del relleno de las zonas
+DEFAULT_OPACITY = 12     # % de opacidad del relleno de las zonas (traslúcido)
+DEFAULT_LINE_OPACITY = 60   # % de opacidad de las líneas High, Low y 50 %
 DEFAULT_MAX_TF_MINUTES = 60
 DEFAULT_ZONES = (        # clave, nombre, horario NY, color
     ("ASIA", "Asia", "20:00-00:00", "#FFD60A"),

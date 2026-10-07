@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from ...core import Event, Skill, register_skill
 from ...clock import server_minus_ny
-from .zones import DEFAULT_DAYS, DEFAULT_MAX_TF_MINUTES, DEFAULT_OPACITY, compute, zones_from_settings
+from .zones import (DEFAULT_DAYS, DEFAULT_LINE_OPACITY, DEFAULT_MAX_TF_MINUTES, DEFAULT_OPACITY, compute,
+                    zones_from_settings)
 from ...timeframes import display_label, minutes
 
 
@@ -34,11 +35,14 @@ class TbrSkill(Skill):
         self.days = self.settings.get_int("DAYS", DEFAULT_DAYS)
         self.max_tf = self.settings.get_int("MAX_TF_MINUTES", DEFAULT_MAX_TF_MINUTES)
         opacity = self.settings.get_float("OPACITY", DEFAULT_OPACITY)
-        if not 0 <= opacity <= 100:
-            raise ValueError(f"TBR_OPACITY={opacity:g} debe estar entre 0 y 100 (%).")
+        line_opacity = self.settings.get_float("LINE_OPACITY", DEFAULT_LINE_OPACITY)
+        for key, value in (("OPACITY", opacity), ("LINE_OPACITY", line_opacity)):
+            if not 0 <= value <= 100:
+                raise ValueError(f"TBR_{key}={value:g} debe estar entre 0 y 100 (%).")
         if self.days < 1:
             raise ValueError(f"TBR_DAYS={self.days} debe ser 1 o más.")
         self.opacity = opacity / 100
+        self.line_opacity = line_opacity / 100
 
     def handle(self, event: Event) -> None:
         if self.error:
@@ -65,4 +69,5 @@ class TbrSkill(Skill):
         self.set_caption(f"{len(sessions)} zonas" if available else f"no en {display_label(tf)}")
         self.publish("tbr.updated", {"symbol": p["symbol"], "timeframe": tf, "sessions": sessions,
                                      "available": available, "estimated": estimated, "opacity": self.opacity,
+                                     "line_opacity": self.line_opacity,
                                      "zones": self.zones, "max_tf": self.max_tf})

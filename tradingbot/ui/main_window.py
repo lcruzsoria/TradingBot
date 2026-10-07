@@ -512,7 +512,7 @@ class MainWindow(QMainWindow):
     def _on_tbr(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return                                      # llega tarde: ya se está viendo otro gráfico
-        self.chart.set_tbr(p["sessions"], p["opacity"])
+        self.chart.set_tbr(p["sessions"], p["opacity"], p.get("line_opacity"))
         zones = ", ".join(f"{z.name} {z.hours}" for z in p["zones"])
         if p["available"]:
             tip = (f"Zonas TBR en hora de Nueva York: {zones}.\n"

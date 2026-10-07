@@ -129,9 +129,9 @@ def run_skill(env_text, timeframe="15m", offset=None):
 
 
 def test_la_skill_publica_las_zonas():
-    skill, events = run_skill("TBR_OPACITY=20\nTBR_DAYS=1\n", offset=None)
+    skill, events = run_skill("TBR_OPACITY=20\nTBR_LINE_OPACITY=50\nTBR_DAYS=1\n", offset=None)
     p = events[-1].payload
-    assert p["available"] and p["estimated"] and p["opacity"] == 0.2
+    assert p["available"] and p["estimated"] and p["opacity"] == 0.2 and p["line_opacity"] == 0.5
     assert [s.zone.name for s in p["sessions"]] == ["Pre-NY", "NY-AM"]
     _, events = run_skill("", timeframe="4h")
     assert events[-1].payload["available"] is False and events[-1].payload["sessions"] == []
@@ -140,6 +140,8 @@ def test_la_skill_publica_las_zonas():
 def test_la_skill_rechaza_valores_no_validos():
     skill, events = run_skill("TBR_OPACITY=150\n")
     assert skill.state.value == "error" and "TBR_OPACITY" in skill.note and not events
+    skill, events = run_skill("TBR_LINE_OPACITY=-5\n")
+    assert skill.state.value == "error" and "TBR_LINE_OPACITY" in skill.note and not events
 
 
 def test_el_boton_tbr_muestra_y_oculta_las_zonas(tmp_path, monkeypatch):
