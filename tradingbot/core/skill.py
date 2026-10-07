@@ -63,6 +63,7 @@ class Services:
     source: Any            # DataSource (MT5 real o sintético)
     engine: Any            # BiasEngine
     app_cfg: dict
+    env: Any = None        # EnvConfig de tradingbot.env (opcional)
 
 
 class Skill:
@@ -97,6 +98,16 @@ class Skill:
     def on_start(self) -> None: ...
 
     def on_stop(self) -> None: ...
+
+    @property
+    def settings(self):
+        """Bloque de tradingbot.env de esta skill (claves <SKILL>_..., sin el prefijo).
+
+        Ejemplo: con BIAS_MIN_VOTES=2 en tradingbot.env, la skill «bias» lee self.settings.get_int("MIN_VOTES").
+        """
+        from ..envconfig import EnvConfig
+        env = self.services.env
+        return env.section(self.key) if env is not None else EnvConfig()
 
     def publish(self, topic: str, payload: dict | None = None) -> None:
         self.bus.publish(topic, payload, source=self.key)

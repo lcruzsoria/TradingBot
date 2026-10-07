@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .bias import BiasEngine
 from .core import EventBus, Services, SkillManager
+from . import envconfig, settings
 from .config import (DEFAULT_CONFIG_FILE, DEFAULT_ENV_FILE, ConfigError, load_app_config, load_profiles,
                      select_profile)
 from .timeframes import TIMEFRAMES
@@ -20,6 +21,7 @@ def parse_args(argv):
     p.add_argument("--demo", action="store_true", help="usar datos sintéticos (no requiere MT5)")
     p.add_argument("--symbol", help="símbolo inicial")
     p.add_argument("--timeframe", choices=list(TIMEFRAMES), help="timeframe inicial")
+    p.add_argument("--theme", help="paleta de arranque (sustituye a UI_THEME de tradingbot.env)")
     p.add_argument("--screenshot", type=Path, help=argparse.SUPPRESS)  # solo desarrollo
     return p.parse_args(argv)
 
@@ -38,14 +40,16 @@ def main(argv=None) -> int:
 
     try:
         cfg = load_app_config(args.config)
-        theme_name, palette = theme.resolve(cfg["theme"])
+        env = envconfig.load()
+        theme_name, palette = theme.resolve(cfg["theme"], startup=args.theme or env.get("UI_THEME"))
         theme.apply(palette)
         app.setStyleSheet(theme.stylesheet())
         pg.setConfigOptions(antialias=False, background=theme.CHART_BG, foreground=theme.MUTED)
         if args.symbol:
-            cfg["app"]["symbol"] = args.symbol.upper()
+            cfg["app"]["symbol"] = args.symbol.strip()
         if args.timeframe:
             cfg["app"]["timeframe"] = args.timeframe
+        cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"])
         engine = BiasEngine.from_config(cfg["bias"])
 
         if args.demo:
@@ -64,7 +68,7 @@ def main(argv=None) -> int:
     try:
         import tradingbot.skills  # noqa: F401  (registra todas las skills de la carpeta)
         bus = EventBus()
-        manager = SkillManager(bus, Services(source, engine, cfg), cfg["skills"])
+        manager = SkillManager(bus, Services(source, engine, cfg, env), cfg["skills"])
     except ValueError as exc:
         QMessageBox.critical(None, "TradingBot", f"Configuración de skills no válida:\n{exc}")
         return 2

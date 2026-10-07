@@ -6,12 +6,14 @@ from typing import Callable
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QColorDialog, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-                               QVBoxLayout)
+                               QTabWidget, QVBoxLayout, QWidget)
 
+from .. import envconfig
 from . import theme
-from .theme import LABELS, PRESETS, Palette
+from .theme import CHART_KEYS, LABELS, PRESETS, UI_KEYS, Palette
 
-PRESET_NAMES = {"negro": "Negro (texto azul, verde y rojo)", "pizarra": "Azul pizarra"}
+PRESET_NAMES = {"negro": "Negro (texto azul, verde y rojo)", "pizarra": "Azul pizarra", "matrix": "Matrix (verde sobre negro)",
+                "blanco": "Blanco (velas huecas)"}
 
 
 def contrast_text(hex_color: str) -> str:
@@ -43,19 +45,26 @@ class ThemeDialog(QDialog):
         top.addWidget(self.preset_box, 1)
         lay.addLayout(top)
 
-        grid = QGridLayout()
-        grid.setVerticalSpacing(6)
-        for row, (key, label) in enumerate(LABELS.items()):
-            grid.addWidget(QLabel(label), row, 0)
-            btn = QPushButton()
-            btn.setMinimumWidth(120)
-            btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
-            grid.addWidget(btn, row, 1)
-            self.swatches[key] = btn
-        lay.addLayout(grid)
+        tabs = QTabWidget()
+        for title, keys in (("Interfaz", UI_KEYS), ("Gráfico", CHART_KEYS)):
+            page = QWidget()
+            grid = QGridLayout(page)
+            grid.setContentsMargins(8, 10, 8, 8)
+            grid.setVerticalSpacing(6)
+            for row, key in enumerate(keys):
+                grid.addWidget(QLabel(LABELS[key]), row, 0)
+                btn = QPushButton()
+                btn.setMinimumWidth(120)
+                btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
+                grid.addWidget(btn, row, 1)
+                self.swatches[key] = btn
+            grid.setRowStretch(len(keys), 1)
+            tabs.addTab(page, title)
+        self.tabs = tabs
+        lay.addWidget(tabs)
 
-        self.hint = QLabel("Los cambios se ven al instante. «Guardar» los conserva para la próxima vez "
-                           "(theme.local.json, no se sube a git).")
+        self.hint = QLabel("Los cambios se ven al instante. «Guardar» deja esta paleta como la de arranque "
+                           "(UI_THEME en tradingbot.env) y guarda tus colores en theme.local.json.")
         self.hint.setObjectName("Muted")
         self.hint.setWordWrap(True)
         lay.addWidget(self.hint)
@@ -78,8 +87,9 @@ class ThemeDialog(QDialog):
     # -- cambios -------------------------------------------------------------------------------
     def _refresh_swatches(self) -> None:
         for key, btn in self.swatches.items():
-            value = getattr(self.palette, key)
-            btn.setText(value.upper())
+            value = theme.effective(self.palette, key)
+            same_as_line = key == "level_label" and not self.palette.level_label
+            btn.setText("COLOR DE SU LÍNEA" if same_as_line else value.upper())
             btn.setStyleSheet(f"background: {value}; color: {contrast_text(value)}; "
                               f"border: 1px solid {theme.BORDER}; font-weight: 600;")
 
@@ -93,7 +103,7 @@ class ThemeDialog(QDialog):
         self._emit()
 
     def _pick(self, key: str) -> None:
-        color = QColorDialog.getColor(QColor(getattr(self.palette, key)), self, LABELS[key])
+        color = QColorDialog.getColor(QColor(theme.effective(self.palette, key)), self, LABELS[key])
         if color.isValid():
             self.set_color(key, color.name())
 
@@ -106,7 +116,8 @@ class ThemeDialog(QDialog):
     def save(self) -> None:
         try:
             theme.save_local(self.preset, self.palette)
+            envconfig.set_value(envconfig.ENV_FILE, "UI_THEME", self.preset)
         except OSError as exc:
             self.hint.setText(f"No se pudo guardar: {exc}")
             return
-        self.hint.setText(f"Guardado en {theme.LOCAL_THEME_FILE.name}.")
+        self.hint.setText(f"Guardado: arrancará con «{self.preset}» (UI_THEME en {envconfig.ENV_FILE.name}).")

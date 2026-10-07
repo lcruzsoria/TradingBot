@@ -47,8 +47,8 @@ class CandlestickItem(pg.GraphicsObject):
         self.set_colors()
 
     def set_colors(self) -> None:
-        self._bull = QColor(theme.BULL)
-        self._bear = QColor(theme.BEAR)
+        self._up_fill, self._up_line = QColor(theme.CANDLE_UP_FILL), QColor(theme.CANDLE_UP_LINE)
+        self._down_fill, self._down_line = QColor(theme.CANDLE_DOWN_FILL), QColor(theme.CANDLE_DOWN_LINE)
         self.update()
 
     def set_data(self, o, h, l, c) -> None:
@@ -99,14 +99,14 @@ class CandlestickItem(pg.GraphicsObject):
             p.drawPolyline(poly)
             return
 
-        bull_pen = QPen(self._bull); bull_pen.setCosmetic(True); bull_pen.setWidth(1)
-        bear_pen = QPen(self._bear); bear_pen.setCosmetic(True); bear_pen.setWidth(1)
+        up_pen = QPen(self._up_line); up_pen.setCosmetic(True); up_pen.setWidthF(1.2)
+        down_pen = QPen(self._down_line); down_pen.setCosmetic(True); down_pen.setWidthF(1.2)
         body_w = 0.34
         for i in range(i0, i1):
             o, h, l, c = self._o[i], self._h[i], self._l[i], self._c[i]
             up = c >= o
-            p.setPen(bull_pen if up else bear_pen)
-            p.setBrush(self._bull if up else self._bear)
+            p.setPen(up_pen if up else down_pen)
+            p.setBrush(self._up_fill if up else self._down_fill)
             p.drawLine(QPointF(i, l), QPointF(i, h))
             top, bottom = (c, o) if up else (o, c)
             if top - bottom <= 0:
@@ -120,7 +120,6 @@ class ChartView(pg.PlotWidget):
         self.time_axis = TimeAxis()
         super().__init__(axisItems={"bottom": self.time_axis}, background=theme.CHART_BG)
         pi = self.getPlotItem()
-        pi.showGrid(x=False, y=True, alpha=0.07)
         pi.hideAxis("left")
         pi.showAxis("right")
         self._style_axes()
@@ -139,10 +138,13 @@ class ChartView(pg.PlotWidget):
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
+        explicit = bool(theme.CHART_GRID)
         for name in ("right", "bottom"):
             ax = pi.getAxis(name)
-            ax.setPen(pg.mkPen(theme.BORDER))
-            ax.setTextPen(pg.mkPen(theme.MUTED))
+            ax.setPen(pg.mkPen(theme.CHART_GRID if explicit else theme.BORDER))
+            ax.setTextPen(pg.mkPen(theme.CHART_TEXT))
+        # Con color de rejilla propio: se pinta tal cual (intensidad completa) y también en vertical.
+        pi.showGrid(x=explicit, y=True, alpha=1.0 if explicit else 0.07)
 
     def apply_theme(self) -> None:
         """Repinta con la paleta activa (fondo, ejes, velas, niveles y último precio)."""
@@ -185,13 +187,14 @@ class ChartView(pg.PlotWidget):
     def set_levels(self, levels: dict[str, float]) -> None:
         self.clear_levels()
         self._levels = dict(levels)
-        palette = {"Máx. previo": theme.BEAR, "Mín. previo": theme.BULL, "Apertura": theme.ACCENT}
-        for name, value in levels.items():
+        palette = {"Máx. previo": theme.LEVEL_HIGH, "Mín. previo": theme.LEVEL_LOW, "Apertura": theme.LEVEL_OPEN}
+        for i, (name, value) in enumerate(levels.items()):
             color = palette.get(name, theme.NEUTRAL)
             pen = pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine)
             line = pg.InfiniteLine(pos=value, angle=0, pen=pen, movable=False,
                                    label=f"{name} {fmt_price(value)}",
-                                   labelOpts={"position": 0.01, "color": color, "movable": False, "anchors": [(0, 1), (0, 1)]})
+                                   labelOpts={"position": 0.01 + 0.19 * i, "color": theme.LEVEL_LABEL or color, "movable": False,   # escalonadas para no pisarse
+                                           "anchors": [(0, 1), (0, 1)]})
             self.getPlotItem().addItem(line, ignoreBounds=True)
             self._lines.append(line)
 

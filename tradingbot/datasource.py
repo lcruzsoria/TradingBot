@@ -37,6 +37,9 @@ class DataSource(Protocol):
 
     def symbols(self) -> list[str]: ...
 
+    def all_symbols(self) -> list[str]:
+        """Todos los símbolos que ofrece el broker (para elegir la watchlist)."""
+
     def load_candles(self, symbol: str, timeframe: str, progress: ProgressFn | None = None) -> pd.DataFrame: ...
 
     def quotes(self, symbols: list[str]) -> dict[str, Quote | None]:
@@ -46,6 +49,24 @@ class DataSource(Protocol):
         """Saldo, equity y P&L flotante de la cuenta conectada."""
 
     def close(self) -> None: ...
+
+
+def aggregate_candles(df: pd.DataFrame, seconds: int, anchor: int = 0) -> pd.DataFrame:
+    """Agrupa velas en velas más largas de `seconds` segundos.
+
+    - Menos de un día: las velas se alinean con la medianoche (hora del servidor) de cada día, así que
+      la última vela del día puede ser más corta (por ejemplo, con 7 h: 00-07, 07-14, 14-21 y 21-24).
+    - Un día o más: ventanas consecutivas desde `anchor` (epoch en segundos).
+    """
+    ts = df["ts"].to_numpy(dtype=np.int64)
+    if seconds < 86400:
+        start = ts - ts % 86400 + (ts % 86400) // seconds * seconds
+    else:
+        start = (ts - anchor) // seconds * seconds + anchor
+    grouped = df.assign(ts=start).groupby("ts", sort=True)
+    out = grouped.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"),
+                      close=("close", "last"), tick_volume=("tick_volume", "sum")).reset_index()
+    return normalize_candles(out)
 
 
 def normalize_candles(df: pd.DataFrame) -> pd.DataFrame:

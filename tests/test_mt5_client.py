@@ -14,12 +14,16 @@ class FakeMt5(types.ModuleType):
     ACCOUNT_TRADE_MODE_DEMO = 0
     ACCOUNT_TRADE_MODE_REAL = 2
     TIMEFRAME_M1, TIMEFRAME_M3, TIMEFRAME_M5, TIMEFRAME_M15 = 1, 3, 5, 15
+    TIMEFRAME_H1, TIMEFRAME_H3, TIMEFRAME_H4, TIMEFRAME_H12 = 16385, 16387, 16388, 16396
+    TIMEFRAME_D1, TIMEFRAME_W1 = 16408, 32769
 
     def __init__(self, total_bars=120_000, login=26231460, trade_mode=0):
         super().__init__("MetaTrader5")
         self.total, self._login, self._mode = total_bars, login, trade_mode
         self.init_kwargs = None
         self.shutdown_called = False
+        self.names = ["EURUSD", "NAS100FT.r", "NAS100", "SINPRECIO"]   # como el real: distingue mayúsculas
+        self.selected = []
         # velas ascendentes en el tiempo: la posición 0 es la MÁS RECIENTE
         self.ts = 1_700_000_000 + np.arange(total_bars) * 900
 
@@ -40,11 +44,15 @@ class FakeMt5(types.ModuleType):
     def login(self, *a, **k):
         return False
 
+    def symbols_get(self):
+        return [types.SimpleNamespace(name=n, visible=True) for n in self.names]
+
     def symbol_select(self, symbol, enable):
-        return symbol != "NOEXISTE"
+        self.selected.append(symbol)
+        return symbol in self.names
 
     def symbol_info_tick(self, symbol):
-        if symbol == "NOEXISTE":
+        if symbol not in self.names:
             return None
         if symbol == "SINPRECIO":
             return types.SimpleNamespace(bid=0.0, ask=0.0, time=0)
@@ -118,7 +126,7 @@ def test_simbolo_inexistente(install):
     install()
     src = Mt5Source(PROFILE)
     src.connect()
-    with pytest.raises(Mt5Error, match="NOEXISTE"):
+    with pytest.raises(Mt5Error, match="no existe"):
         src.load_candles("NOEXISTE", "15m")
 
 
@@ -149,3 +157,61 @@ def test_cuenta(install):
     src.connect()
     acc = src.account()
     assert (acc.balance, acc.equity, acc.profit, acc.currency) == (100000.0, 100125.99, 125.99, "USD")
+
+
+def test_el_simbolo_se_respeta_aunque_se_escriba_con_otras_mayusculas(install):
+    """Regresión: 'NAS100FT.R' se convertía en un símbolo inexistente (el real es 'NAS100FT.r')."""
+    fake = install(total_bars=100)
+    src = Mt5Source(PROFILE)
+    src.connect()
+    assert src.resolve_symbol("NAS100FT.R") == "NAS100FT.r" and src.resolve_symbol("nas100ft.r") == "NAS100FT.r"
+    df = src.load_candles("NAS100FT.R", "15m")
+    assert len(df) == 100 and "NAS100FT.r" in fake.selected and "NAS100FT.R" not in fake.selected
+    q = src.quotes(["NAS100FT.R"])
+    assert q["NAS100FT.R"] is not None and q["NAS100FT.R"].bid == 1.12138
+
+
+def test_simbolo_inexistente_sugiere_nombres_parecidos(install):
+    install()
+    src = Mt5Source(PROFILE)
+    src.connect()
+    with pytest.raises(Mt5Error) as err:
+        src.load_candles("NAS100FT.x", "15m")
+    msg = str(err.value)
+    assert "no existe" in msg and "NAS100" in msg and "NAS100FT.r" in msg
+    assert src.similar_symbols("ZZZ") == []
+
+
+def test_todos_los_simbolos_del_broker(install):
+    install()
+    src = Mt5Source(PROFILE)
+    src.connect()
+    assert src.all_symbols() == ["EURUSD", "NAS100", "NAS100FT.r", "SINPRECIO"]
+
+
+def test_h7_se_construye_agrupando_velas_de_1h(install):
+    """MT5 no tiene H7: se piden velas de 1h y se agrupan en bloques de 7 horas."""
+    fake = install(total_bars=500)
+    fake.ts = (1_700_006_400 - 1_700_006_400 % 86400) + __import__("numpy").arange(500) * 3600   # velas de 1 h
+    asked = []
+    original = fake.copy_rates_from_pos
+    fake.copy_rates_from_pos = lambda s, tf, pos, n: (asked.append(tf), original(s, tf, pos, n))[1]
+    src = Mt5Source(PROFILE)
+    src.connect()
+    h1 = src.load_candles("EURUSD", "1h")
+    h7 = src.load_candles("EURUSD", "7h")
+    assert set(asked) == {FakeMt5.TIMEFRAME_H1} and len(h7) < len(h1) / 3
+    assert h7["tick_volume"].sum() == h1["tick_volume"].sum()
+
+
+def test_timeframes_nativos_usan_su_constante(install):
+    fake = install(total_bars=50)
+    src = Mt5Source(PROFILE)
+    src.connect()
+    asked = []
+    original = fake.copy_rates_from_pos
+    fake.copy_rates_from_pos = lambda s, tf, pos, n: (asked.append(tf), original(s, tf, pos, n))[1]
+    for tf in ("3h", "4h", "12h", "1d", "1w"):
+        src.load_candles("EURUSD", tf)
+    assert asked == [FakeMt5.TIMEFRAME_H3, FakeMt5.TIMEFRAME_H4, FakeMt5.TIMEFRAME_H12,
+                     FakeMt5.TIMEFRAME_D1, FakeMt5.TIMEFRAME_W1]

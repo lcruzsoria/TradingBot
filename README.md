@@ -11,12 +11,28 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro fijo de la interfaz. |
 
-Cabecera: estado de la conexión, cuenta, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick (hora del servidor).
+Cabecera: estado de la conexión, cuenta, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
+**en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
+servidor comparando los ticks en vivo con el reloj de tu PC (unos segundos tras conectar) y convierte a Nueva York
+respetando el cambio de horario de EE. UU. Hasta que lo mide, la hora se marca como *(estimada)* y asume servidor = Nueva York + 7 h.
+Pasa el ratón sobre la caja para ver la hora del servidor y el desfase detectado. Si no lo detecta bien (PC desincronizado),
+fíjalo a mano con `server_utc_offset_hours` en `config.toml`. Las horas del eje del gráfico siguen siendo las del servidor.
 
-Panel **Mercados**: cotizaciones de solo lectura de la `watchlist` de `config.toml` (se refrescan cada segundo).
+Panel **Mercados**: cotizaciones de solo lectura (se refrescan cada segundo). Con el botón **Editar** del panel eliges
+qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
+*oro*, *petróleo*, *bitcoin*...), añade, quita y reordena. Se aplica al instante y se guarda en `settings.local.json`
+(no se sube a git), que tiene prioridad sobre la `watchlist` de `config.toml`. Borrar ese fichero devuelve la lista de `config.toml`.
 Pulsa una tarjeta para cargar su gráfico. Un símbolo cuyo último tick va más de 5 minutos por detrás del más
 reciente se marca como *Mercado cerrado*, y uno que el broker no tiene aparece como *No disponible*.
 Usa los nombres exactos de tu broker (en MT5: Ver > Símbolos).
+
+Pinchar una tarjeta carga su gráfico (no hay selector de símbolo ni botón de cargar): para ver un símbolo nuevo,
+añádelo primero con **Editar**. Si quitas el mercado que estás viendo, el gráfico carga el primero de la lista.
+
+**Timeframes** (chips sobre el gráfico): M1, M3, M5, M15, H1, H3, H4, H7, H12, 1D y 1W. Cambiar de timeframe recarga el mercado actual.
+- MT5 no tiene H7 (solo H1, H2, H3, H4, H6, H8 y H12). H7 se construye agrupando velas de 1 hora, alineadas con la
+  medianoche de cada día (hora del servidor): 00-07, 07-14, 14-21 y 21-24, esta última más corta (3 horas).
+- Con velas semanales (1W) el sesgo no se recalcula, porque "el día" no existe en ese timeframe: se conserva el último.
 
 Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long), con **Bearish** solo bajistas (Short), y con **No Bias** ambas. La futura capa de ejecución debe consultar `TradeFilter.check(direction)` antes de abrir cualquier trade.
 
@@ -34,7 +50,29 @@ cd C:\Users\claude\DEV\TradingBot
 .\scripts\run.ps1 --profile real
 ```
 
-Opciones: `--profile`, `--env RUTA`, `--symbol EURUSD`, `--timeframe 5m`, `--demo`.
+Opciones: `--profile`, `--env RUTA`, `--symbol EURUSD`, `--timeframe 5m`, `--theme blanco`, `--demo`.
+
+`run.ps1` hace, por este orden:
+1. Lee `tradingbot.env` (ver abajo) y pasa sus valores a la app.
+2. Si `APP_AUTO_UPDATE=true`, trae de GitHub el código nuevo (`git pull`) antes de arrancar.
+3. Arranca la app con `uv`.
+
+## Configuración (tradingbot.env)
+
+`tradingbot.env`, en la raíz del proyecto, gobierna el arranque y las skills. Es texto `CLAVE=valor`, organizado
+en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el nombre de su bloque:
+
+| Bloque | Claves | Para qué |
+|---|---|---|
+| APP | `APP_AUTO_UPDATE` | Actualizar el código desde GitHub al arrancar (`true`/`false`) |
+| UI | `UI_THEME` | Paleta de arranque: `matrix` (por defecto), `negro`, `pizarra` o `blanco` |
+
+Las opciones no usadas se dejan comentadas con `#`, así cambiar de paleta es mover el `#` de línea.
+Una variable de entorno con el mismo nombre tiene prioridad sobre el fichero, y `--theme` sobre ambas.
+No pongas contraseñas en este fichero: las cuentas de MT5 siguen en `C:\Users\claude\mt5\.env`.
+
+Para desarrolladores: cada skill lee su bloque con `self.settings` (por ejemplo, con `BIAS_MIN_VOTES=2`,
+la skill `bias` lee `self.settings.get_int("MIN_VOTES")`). Hay lectores para texto, enteros, decimales, sí/no y listas.
 
 ### Cuentas (.env)
 
@@ -94,20 +132,54 @@ class MiRegla(BiasRule):
 
 ## Colores y tema
 
-Por defecto la interfaz usa el preset **negro**: fondo negro, texto en azul y verde/rojo para alcista/bajista
-(velas, sesgo, P&L y el precio de cada tarjeta, que se tiñe según el último tick suba o baje).
-El otro preset es **pizarra** (azul oscuro).
+La paleta de arranque se elige con `UI_THEME` en `tradingbot.env`; por defecto, **matrix** (verde fósforo sobre negro,
+con rojo para lo bajista). Las demás: **negro** (fondo negro, texto en azul y verde/rojo para alcista/bajista),
+**pizarra** (azul oscuro) y **blanco** (fondo blanco con velas huecas: borde y mecha azul marino, cuerpo blanco las alcistas y gris azulado las bajistas).
 
-Tres formas de personalizarlo, de menor a mayor prioridad:
+El formato de las velas también forma parte de la paleta: `candle_up_fill`, `candle_up_line`, `candle_down_fill` y
+`candle_down_line` (relleno y borde/mecha de cada tipo). Si se dejan vacíos, las velas se rellenan con el verde y el
+rojo de la paleta; si se rellenan, se pueden hacer velas huecas como en el preset blanco. El editor de colores
+los incluye, en la pestaña **Gráfico**, junto con el resto de colores del gráfico: fondo, números del eje (`chart_text`),
+rejilla (`chart_grid`), líneas de nivel (`level_high`, `level_low`, `level_open`) y el texto de sus etiquetas
+(`level_label`). Todos esos campos son opcionales: vacíos, el gráfico se ve como siempre (números del eje en el
+texto secundario, rejilla horizontal muy tenue y niveles en rojo, verde y color de acento). Con `chart_grid` definido, la
+rejilla se pinta con ese color exacto y también en vertical.
 
-1. **`config.toml`**, sección `[theme]`: elige `preset` y sobrescribe colores sueltos en formato `#RRGGBB`.
-2. **Botón "Colores"** de la cabecera: cambia cada color con un selector y se ve al instante.
-   Pulsa *Guardar* para conservarlo; se escribe en `theme.local.json` (no se sube a git).
-3. **`theme.local.json`**: se puede editar a mano. Borrarlo devuelve el tema de `config.toml`.
+Cómo personalizarlo:
+
+1. **`tradingbot.env`**: `UI_THEME` elige la paleta de arranque.
+2. **Botón "Colores"** de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
+   *Guardar* deja esa paleta como la de arranque (cambia `UI_THEME` en `tradingbot.env`) y guarda tus colores
+   retocados en `theme.local.json` (no se sube a git).
+3. **`config.toml`**, sección `[theme]`: colores sueltos (`#RRGGBB`) que se aplican encima de la paleta de arranque.
+
+Los colores retocados (de `config.toml` o del editor) solo se aplican a la paleta para la que se guardaron.
 
 Colores base: `bg`, `panel`, `border`, `text`, `muted`, `accent`, `bull`, `bear`, `warn`, `chart_bg`.
 El resto de tonos (fondos de tarjetas, hexágonos, bordes de estado) se derivan de ellos, así que al cambiar uno todo sigue coherente.
 Para añadir un preset nuevo, agrégalo a `PRESETS` en `tradingbot/ui/theme.py`.
+
+### Capturas de cada paleta
+
+En la carpeta `screenshots/` hay una captura de la interfaz con cada paleta (con datos sintéticos):
+`negro.png`, `pizarra.png`, `matrix.png` y `blanco.png`.
+
+| Negro | Pizarra |
+|---|---|
+| ![negro](screenshots/negro.png) | ![pizarra](screenshots/pizarra.png) |
+
+| Matrix | Blanco |
+|---|---|
+| ![matrix](screenshots/matrix.png) | ![blanco](screenshots/blanco.png) |
+
+Para regenerarlas (por ejemplo, tras añadir o retocar una paleta):
+
+```powershell
+uv run python scripts\make_screenshots.py                 # todas
+uv run python scripts\make_screenshots.py matrix blanco   # solo algunas
+```
+
+Las capturas se hacen con la fuente del sistema donde se ejecuta el script, así que en Windows el texto se verá algo distinto.
 
 ## Skills (panel de hexágonos)
 
@@ -154,8 +226,10 @@ tradingbot/
   demo_data.py       datos sintéticos (--demo)
   core/              bus de eventos y base de las skills
   skills/            feed, quotes, bias, cortex y la plantilla para nuevas skills
+  envconfig.py       lectura de tradingbot.env (bloques por skill)
   bias/              modelos, contexto, reglas, motor y filtro de operativa
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
+tradingbot.env       configuración de arranque (paleta, actualización automática... y, en adelante, las skills)
 config.toml          ajustes y reglas del Bias
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
 tests/               pruebas del Bias
@@ -167,23 +241,30 @@ tests/               pruebas del Bias
 uv run pytest
 ```
 
-## Git
+## Git y actualizaciones
 
-Primera vez (crea antes un repositorio **privado y vacío** llamado TradingBot en GitHub):
+El código vive en el repositorio privado **github.com/lcruzsoria/TradingBot**. Los cambios que prepara Claude se suben
+directamente ahí, y tu PC los recibe solo: `run.ps1` hace `git pull` al arrancar (si `APP_AUTO_UPDATE=true`).
+Ya no hay zips ni carpetas que copiar.
+
+Configuración inicial (una sola vez), en PowerShell:
 
 ```powershell
-cd C:\Users\claude\DEV\TradingBot
-git init -b main
-git add -A
-git commit -m "TradingBot: estructura inicial"
-git remote add origin https://github.com/TU_USUARIO/TradingBot.git
-git push -u origin main
+cd C:\Users\claude\DEV
+Rename-Item TradingBot TradingBot_antiguo          # guarda la copia anterior por si acaso
+git clone https://github.com/lcruzsoria/TradingBot.git
+cd TradingBot
+Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File
 ```
 
-Después, para sincronizar cualquier cambio:
+Después, recupera de la copia anterior tus ficheros personales (si existen): `settings.local.json`,
+`theme.local.json` y la carpeta `screenshots` con sus PNG.
+
+Para subir **tus** cambios (por ejemplo, tras editar `tradingbot.env` o regenerar las capturas):
 
 ```powershell
 .\scripts\sync.ps1 "descripcion del cambio"
 ```
 
-`.gitignore` excluye los `.env`, y `sync.ps1` se niega a subir uno si lo detecta dentro del repositorio.
+`sync.ps1` confirma tus cambios, trae los de GitHub y sube. `.gitignore` excluye los `.env` con contraseñas
+(se versiona solo `tradingbot.env`, que no lleva secretos), y `sync.ps1` se niega a subir un `.env` si lo detecta.

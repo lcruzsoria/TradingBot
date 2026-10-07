@@ -12,7 +12,7 @@ DEFAULT_ENV_FILE = Path(os.environ.get("TRADINGBOT_ENV", r"C:\Users\claude\mt5\.
 DEFAULT_CONFIG_FILE = PROJECT_ROOT / "config.toml"
 
 
-DEFAULT_WATCHLIST = ("NAS100", "US500", "GER40", "EURUSD", "XAUUSD", "USOIL", "BTCUSD", "ETHUSD")
+DEFAULT_WATCHLIST = ("NAS100", "SP500", "DJ30", "EURUSD", "XAUUSD", "USOIL", "BTCUSD", "ETHUSD")
 
 
 DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type": "quotes"})

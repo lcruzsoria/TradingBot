@@ -33,8 +33,8 @@ name = "metatrader5"
 version = "5.0.6231"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform == 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c5/46/2d85a3ea15a93123e6b4c49ff600e59c0bb9d0c3fc84462091595b76d8ff/metatrader5-5.0.6231-cp311-cp311-win_amd64.whl", hash = "sha256:1e0fb5e43437f426be3e5aef614f6798a918377db4cdb380593a66d1908f918d", size = 48022, upload-time = "2026-09-27T12:22:33.889Z" },
@@ -286,6 +286,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyqtgraph" },
     { name = "pyside6" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -300,6 +301,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.1" },
     { name = "pyqtgraph", specifier = ">=0.13.3" },
     { name = "pyside6", specifier = ">=6.6" },
+    { name = "tzdata", specifier = ">=2024.1" },
 ]
 
 [package.metadata.requires-dev]

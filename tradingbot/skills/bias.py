@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..core import Event, Skill, register_skill
+from ..timeframes import minutes
 
 
 @register_skill("bias")
@@ -17,6 +18,10 @@ class BiasSkill(Skill):
 
     def handle(self, event: Event) -> None:
         if event.topic == "candles.loaded":
+            if minutes(event.payload["timeframe"]) > 1440:
+                # Con velas semanales "el día" no existe: se conserva el último sesgo calculado.
+                self.set_caption("sin velas semanales")
+                return
             self._last = event.payload
         if self._last is None:
             return

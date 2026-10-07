@@ -8,19 +8,23 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QPlainTextEdit,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow, QPlainTextEdit,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..bias import BiasResult
+from ..clock import format_offset, ny_from_server
 from ..core import Event, EventBus, SkillManager
 from ..datasource import AccountSnapshot
-from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, minutes
+from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
 from .bridge import UiBridge
 from .chart import ChartView
+from .errors import explain_error
 from .fmt import fecha_corta, fecha_hora, miles
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .theme_dialog import ThemeDialog
+from .watchlist_dialog import WatchlistDialog
+from .. import settings
 from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesList, StatBlock, repolish
 
 
@@ -33,13 +37,16 @@ class MainWindow(QMainWindow):
         self.bus = bus
         self.manager = manager
         self.bridge = UiBridge(bus)
-        self.watchlist: list[str] = [s.upper() for s in app_cfg["app"].get("watchlist", [])]
+        self.watchlist: list[str] = [s.strip() for s in app_cfg["app"].get("watchlist", [])]
         self.candles = None
         self.connected = False
         self._busy = False
         self._first_done = False
         self._probe_id = 0
         self.theme_name = theme_name
+        self.all_symbols: list[str] = []
+        self.charted_symbol = ""
+        self.current_symbol = self._match_symbol(app_cfg["app"]["symbol"]) or (self.watchlist[0] if self.watchlist else "")
 
         self.setWindowTitle("TradingBot")
         self.resize(1540, 960)
@@ -61,12 +68,10 @@ class MainWindow(QMainWindow):
         body.addWidget(right)
         outer.addLayout(body, 1)
 
-        self.load_btn.clicked.connect(self.load_candles)
         self.tf_group.buttonClicked.connect(lambda _b: self.load_candles())
-        self.symbol.activated.connect(lambda _i: self.load_candles())
-        self.symbol.lineEdit().returnPressed.connect(self.load_candles)
         self.recalc_btn.clicked.connect(lambda: self.bus.publish("bias.recalc", {}, source="ui"))
         self.colors_btn.clicked.connect(self.open_theme_editor)
+        self.edit_markets_btn.clicked.connect(self.edit_watchlist)
         self.markets.symbol_selected.connect(self._on_market_clicked)
         self.bias_card.probe.connect(self._probe_trade)
         self.ring.skill_clicked.connect(self._show_skill)
@@ -84,12 +89,15 @@ class MainWindow(QMainWindow):
         }
         self._set_status("Sin conectar", "busy")
         self.recalc_btn.setEnabled(False)
-        self.markets.set_selected(self.symbol.currentText())
+        self.markets.set_selected(self.current_symbol)
         first = "cortex" if "cortex" in manager.skills else next(iter(manager.skills), None)
         if first:
             self.ring.selected = first
             self._show_skill(first)
         self.log("TradingBot listo.")
+        wanted = app_cfg["app"]["symbol"]
+        if self.watchlist and self._match_symbol(wanted) is None:
+            self.log(f"'{wanted}' no está en el panel Mercados: se usa {self.current_symbol}.")
 
     # -- construcción de la interfaz ---------------------------------------------------------
     def _build_header(self, subtitle: str, demo: bool) -> QFrame:
@@ -148,10 +156,12 @@ class MainWindow(QMainWindow):
         left.setSpacing(10)
 
         self.markets_panel = Panel("Mercados", "Pulsa una tarjeta para ver su gráfico")
+        self.edit_markets_btn = QPushButton("Editar")
+        self.edit_markets_btn.setToolTip("Elegir qué mercados se muestran")
+        self.markets_panel.add_header_widget(self.edit_markets_btn)
         self.markets = MarketsGrid(self.watchlist)
         self.markets_panel.body.addWidget(self.markets)
-        if self.watchlist:
-            left.addWidget(self.markets_panel)
+        left.addWidget(self.markets_panel)
 
         chart_panel = Panel("Gráfico", "Precio bid - hora del servidor del broker")
         self.chart_panel = chart_panel
@@ -161,22 +171,13 @@ class MainWindow(QMainWindow):
         self.tf_group.setExclusive(True)
         wanted = app_cfg["app"].get("timeframe", DEFAULT_TIMEFRAME)
         for label in TIMEFRAMES:
-            btn = QPushButton(f"M{minutes(label)}")
+            btn = QPushButton(display_label(label))
             btn.setProperty("chip", "true")
             btn.setProperty("tf", label)
             btn.setCheckable(True)
             btn.setChecked(label == wanted)
             self.tf_group.addButton(btn)
             tools.addWidget(btn)
-        tools.addSpacing(10)
-        self.symbol = QComboBox()
-        self.symbol.setEditable(True)
-        self.symbol.addItem(app_cfg["app"]["symbol"])
-        self.symbol.setToolTip("Símbolo: escribe uno o elige de la lista")
-        tools.addWidget(self.symbol)
-        self.load_btn = QPushButton("Cargar velas")
-        self.load_btn.setObjectName("Primary")
-        tools.addWidget(self.load_btn)
         tools.addStretch(1)
         self.progress_label = QLabel("")
         self.progress_label.setObjectName("Muted")
@@ -186,6 +187,13 @@ class MainWindow(QMainWindow):
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 1)
         chart_panel.body.addWidget(self.progress)
+        self.error_banner = QLabel("")
+        self.error_banner.setObjectName("ErrorBanner")
+        self.error_banner.setWordWrap(True)
+        self.error_banner.setTextFormat(Qt.TextFormat.RichText)
+        self.error_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.error_banner.hide()
+        chart_panel.body.addWidget(self.error_banner)
         self.chart = ChartView()
         chart_panel.body.addWidget(self.chart, 1)
         self.chart_stats = QLabel("Sin velas cargadas")
@@ -246,8 +254,6 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
-        for w in (self.load_btn, self.symbol):
-            w.setEnabled(not busy)
         for b in self.tf_group.buttons():
             b.setEnabled(not busy)
         self.recalc_btn.setEnabled(not busy and self.candles is not None)
@@ -263,25 +269,33 @@ class MainWindow(QMainWindow):
         self.manager.start()
         self.load_candles()
 
+    def _match_symbol(self, name: str) -> str | None:
+        """Nombre exacto del mercado en el panel (sin distinguir mayúsculas), o None si no está."""
+        wanted = name.strip().lower()
+        return next((s for s in self.watchlist if s.lower() == wanted), None)
+
     def _on_market_clicked(self, symbol: str) -> None:
+        """Pinchar un mercado del panel carga su gráfico."""
         if self._busy:
             return
-        self.symbol.setCurrentText(symbol)
+        self.current_symbol = self._match_symbol(symbol) or symbol
         self.load_candles()
 
     def load_candles(self) -> None:
         if self._busy:
             return
-        symbol = self.symbol.currentText().strip().upper()
+        symbol = self.current_symbol
         if not symbol:
-            self.log("Indica un símbolo.")
+            self.log("No hay mercados en el panel Mercados: añade alguno con el botón Editar.")
             return
         tf = self.current_tf()
-        self._set_busy(True, "Conectando…" if not self.connected else f"Cargando {symbol} M{minutes(tf)}…")
+        self._set_busy(True, "Conectando…" if not self.connected else f"Cargando {symbol} {display_label(tf)}…")
         if not self.connected:
             self._set_status("Conectando…", "busy")
         self.markets.set_selected(symbol)
-        self.log(f"ui -> feed: cargar {symbol} M{minutes(tf)}")
+        self.error_banner.hide()
+        self.status.setToolTip("")
+        self.log(f"ui -> feed: cargar {symbol} {display_label(tf)}")
         self.bus.publish("feed.load", {"symbol": symbol, "timeframe": tf}, source="ui")
 
     def _probe_trade(self, direction) -> None:
@@ -291,6 +305,33 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self.manager.stop()
         super().closeEvent(event)
+
+    # -- lista de mercados ------------------------------------------------------------------------
+    def edit_watchlist(self) -> None:
+        dialog = WatchlistDialog(self, self.all_symbols, self.watchlist)
+        if dialog.exec():
+            self.set_watchlist(dialog.symbols)
+
+    def set_watchlist(self, symbols: list[str]) -> None:
+        """Cambia los mercados mostrados, avisa a la skill Quotes y guarda la elección."""
+        symbols = settings.clean_symbols(symbols)
+        self.watchlist = symbols
+        self.markets.set_symbols(symbols)
+        kept = self._match_symbol(self.current_symbol)
+        self.current_symbol = kept or (symbols[0] if symbols else "")
+        self.markets.set_selected(self.current_symbol)
+        self.stat_open.set_value("-", "")
+        self.markets_panel.note.setText("Pulsa una tarjeta para ver su gráfico")
+        try:
+            settings.save_watchlist(symbols)
+        except OSError as exc:
+            self.log(f"No se pudo guardar la lista de mercados: {exc}")
+        self.log(f"mercados: {', '.join(symbols) or 'ninguno'}")
+        self.bus.publish("watchlist.changed", {"symbols": symbols}, source="ui")
+        if kept is None and symbols and self.connected:
+            self.log(f"El gráfico mostraba {self.charted_symbol or 'otro mercado'}, que ya no está en la lista: "
+                     f"se carga {self.current_symbol}.")
+            self.load_candles()
 
     # -- tema -------------------------------------------------------------------------------------
     def open_theme_editor(self) -> None:
@@ -320,13 +361,7 @@ class MainWindow(QMainWindow):
         self.account.setText(p["info"])
         self.account.show()
         self.log(f"feed: conectado - {p['info']}")
-        if p["symbols"]:
-            current = self.symbol.currentText()
-            self.symbol.blockSignals(True)
-            self.symbol.clear()
-            self.symbol.addItems(p["symbols"])
-            self.symbol.setCurrentText(current)
-            self.symbol.blockSignals(False)
+        self.all_symbols = p.get("all_symbols", [])
 
     def _on_progress(self, p: dict) -> None:
         self.progress_label.setText(f"{miles(p['count'])} velas cargadas…")
@@ -334,16 +369,26 @@ class MainWindow(QMainWindow):
     def _on_failed(self, p: dict) -> None:
         self.log(f"feed: error - {p['error']}")
         self._set_status("Error de conexión" if p["stage"] == "connect" else "Error al cargar", "error")
+        self.status.setToolTip(p["error"])
+        what = (f"No se pudieron cargar las velas de {p['symbol']}." if p.get("symbol")
+                else "No se pudo conectar con MT5.")
+        self.error_banner.setText(f"<b>{what}</b><br>{p['error']}<br>"
+                                  f"<span style='color:{theme.MUTED}'>{explain_error(p['error'])}</span>")
+        self.error_banner.show()
         self._set_busy(False)
 
     def _on_candles(self, p: dict) -> None:
         df, symbol, tf = p["df"], p["symbol"], p["timeframe"]
+        self.charted_symbol = symbol
+        self.error_banner.hide()
+        if self.connected:
+            self._set_status("Conectado", "ok")
         self.candles = df
         self.chart.set_candles(df)
         first, last = df["time"].iloc[0], df["time"].iloc[-1]
-        self.chart_panel.title.setText(f"{symbol}  M{minutes(tf)}")
+        self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self.chart_stats.setText(f"{miles(len(df))} velas  -  desde {fecha_corta(first)}  -  última {fecha_hora(last)}")
-        self.log(f"feed: {miles(len(df))} velas de {symbol} M{minutes(tf)} "
+        self.log(f"feed: {miles(len(df))} velas de {symbol} {display_label(tf)} "
                  f"({first:%Y-%m-%d} a {last:%Y-%m-%d %H:%M}) en {p['seconds']:.1f}s")
         self._set_busy(False)
         if not self._first_done:
@@ -356,12 +401,22 @@ class MainWindow(QMainWindow):
         live = [q for q in quotes.values() if q]
         if live:
             freshest = max(q.ts for q in live)
-            self.stat_tick.set_value(datetime.fromtimestamp(freshest, tz=timezone.utc).strftime("%H:%M:%S"),
-                                     "hora del servidor")
+            self._show_last_tick(freshest, p.get("server_offset"), p.get("offset_source"))
             open_n = sum(1 for q in live if freshest - q.ts <= STALE_AFTER_SECONDS)
             self.stat_open.set_value(f"{open_n} de {len(self.watchlist)}", "con precio en vivo")
             self.markets_panel.note.setText(f"{open_n} abiertos. Pulsa una tarjeta para ver su gráfico")
         self._apply_account(account)
+
+    def _show_last_tick(self, server_ts: int, offset: int | None, source: str | None) -> None:
+        """Hora del último tick en Nueva York (la de los mercados americanos)."""
+        ny, estimated = ny_from_server(server_ts, offset)
+        server_clock = datetime.fromtimestamp(server_ts, tz=timezone.utc).strftime("%H:%M:%S")
+        if estimated:
+            sub, how = "Nueva York (estimada)", "Desfase del servidor aún sin medir: se asume servidor = Nueva York + 7 h."
+        else:
+            sub, how = f"Nueva York ({ny.tzname()})", f"Desfase del servidor {format_offset(offset)} ({source})."
+        self.stat_tick.set_value(ny.strftime("%H:%M:%S"), sub)
+        self.stat_tick.setToolTip(f"Último tick en hora de Nueva York.\nHora del servidor del broker: {server_clock}.\n{how}")
 
     def _apply_account(self, account: AccountSnapshot | None) -> None:
         if account is None:

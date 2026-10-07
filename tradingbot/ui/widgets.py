@@ -60,6 +60,7 @@ class Panel(QFrame):
         outer.setContentsMargins(14, 11, 14, 12)
         outer.setSpacing(8)
         head = QHBoxLayout()
+        self.head = head
         self.title = QLabel(title)
         self.title.setObjectName("CardTitle")
         self.note = QLabel(note)
@@ -71,6 +72,10 @@ class Panel(QFrame):
         self.body = QVBoxLayout()
         self.body.setSpacing(8)
         outer.addLayout(self.body, 1)
+
+    def add_header_widget(self, widget: QWidget) -> None:
+        """Coloca un control (p. ej. un botón) en la cabecera, a la derecha de la nota."""
+        self.head.addWidget(widget)
 
 
 class MarketCard(QFrame):
@@ -156,20 +161,32 @@ class MarketsGrid(QWidget):
     def __init__(self, symbols: list[str], columns: int = 4) -> None:
         super().__init__()
         self.cards: dict[str, MarketCard] = {}
-        grid = QGridLayout(self)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(8)
+        self._columns = columns
+        self._selected = ""
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(8)
+        for c in range(columns):
+            self._grid.setColumnStretch(c, 1)
+        self.set_symbols(symbols)
+
+    def set_symbols(self, symbols: list[str]) -> None:
+        """Reconstruye las tarjetas con una lista nueva (conserva la selección si sigue en la lista)."""
+        for card in self.cards.values():
+            self._grid.removeWidget(card)
+            card.deleteLater()
+        self.cards = {}
         for i, sym in enumerate(symbols):
             card = MarketCard(sym)
             card.clicked.connect(self.symbol_selected)
             self.cards[sym] = card
-            grid.addWidget(card, i // columns, i % columns)
-        for c in range(columns):
-            grid.setColumnStretch(c, 1)
+            self._grid.addWidget(card, i // self._columns, i % self._columns)
+        self.set_selected(self._selected)
 
     def set_selected(self, symbol: str) -> None:
+        self._selected = symbol
         for sym, card in self.cards.items():
-            card.set_selected(sym == symbol.upper())
+            card.set_selected(sym.lower() == symbol.strip().lower())
 
     def set_quotes(self, quotes: dict[str, Quote | None]) -> None:
         # Edad relativa al tick más reciente de la lista: no depende de la zona horaria del servidor.

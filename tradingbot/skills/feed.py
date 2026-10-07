@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from ..core import Event, Skill, register_skill
-from ..timeframes import minutes
+from ..timeframes import display_label
 
 
 @register_skill("feed")
@@ -19,7 +19,7 @@ class FeedSkill(Skill):
         self.connected = False
 
     def handle(self, event: Event) -> None:
-        symbol = str(event.payload["symbol"]).upper()
+        symbol = str(event.payload["symbol"]).strip()
         tf = event.payload["timeframe"]
         source = self.services.source
         started = time.perf_counter()
@@ -29,8 +29,8 @@ class FeedSkill(Skill):
                 info = source.connect()
                 symbols = source.symbols()
                 self.connected = True
-                self.publish("feed.connected", {"info": info, "symbols": symbols})
-            self.set_caption(f"{symbol} M{minutes(tf)}")
+                self.publish("feed.connected", {"info": info, "symbols": symbols, "all_symbols": source.all_symbols()})
+            self.set_caption(f"{symbol} {display_label(tf)}")
             last_report = 0.0
 
             def progress(count: int) -> None:
@@ -43,6 +43,7 @@ class FeedSkill(Skill):
         except Exception as exc:  # noqa: BLE001
             self.set_caption("error")
             self.publish("feed.failed", {"stage": "load" if self.connected else "connect",
+                                         "symbol": symbol, "timeframe": tf,
                                          "error": f"{type(exc).__name__}: {exc}"})
             raise
         self.publish("candles.loaded", {"symbol": symbol, "timeframe": tf, "df": df,

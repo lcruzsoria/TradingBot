@@ -2,6 +2,7 @@
 .env
 *.env
 !.env.example
+!tradingbot.env
 
 # Python
 __pycache__/
@@ -11,6 +12,7 @@ __pycache__/
 
 # Preferencias personales de la interfaz (colores elegidos en la app)
 theme.local.json
+settings.local.json
 
 # Datos locales y capturas
 data/

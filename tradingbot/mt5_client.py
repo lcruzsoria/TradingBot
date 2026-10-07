@@ -4,14 +4,15 @@ Solo LECTURA: no hay ninguna llamada para enviar o modificar órdenes.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 
 import pandas as pd
 
 from .config import Mt5Profile
-from .datasource import AccountSnapshot, ProgressFn, Quote, normalize_candles
-from .timeframes import mt5_constant
+from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
+from .timeframes import DERIVED, base_timeframe, minutes, mt5_constant
 
 CHUNK = 50_000
 
@@ -29,6 +30,7 @@ class Mt5Source:
         # La API de MT5 no es reentrante: se serializan las llamadas entre hilos.
         self._lock = threading.RLock()
         self._missing: set[str] = set()
+        self._names: dict[str, str] | None = None   # nombre en minúsculas -> nombre exacto del broker
 
     # -- conexión ---------------------------------------------------------
     def connect(self) -> str:
@@ -76,11 +78,16 @@ class Mt5Source:
             if self._mt5 is not None:
                 self._mt5.shutdown()
                 self._mt5 = None
+            self._names = None
 
     # -- datos ------------------------------------------------------------
     def symbols(self) -> list[str]:
         with self._lock:
             return self._symbols()
+
+    def all_symbols(self) -> list[str]:
+        with self._lock:
+            return sorted(self._broker_names(self._require()).values(), key=str.lower)
 
     def _symbols(self) -> list[str]:
         mt5 = self._require()
@@ -103,12 +110,14 @@ class Mt5Source:
                 if name in self._missing:
                     out[name] = None
                     continue
-                tick = mt5.symbol_info_tick(name)
-                if tick is None and not mt5.symbol_select(name, True):
+                exact = self._broker_names(mt5).get(name.strip().lower())
+                if exact is None:
                     self._missing.add(name)  # no existe en este broker: no reintentar cada segundo
                     out[name] = None
                     continue
-                tick = tick or mt5.symbol_info_tick(name)
+                tick = mt5.symbol_info_tick(exact)
+                if tick is None and mt5.symbol_select(exact, True):
+                    tick = mt5.symbol_info_tick(exact)
                 if tick is None or (tick.bid == 0 and tick.ask == 0):
                     out[name] = None
                 else:
@@ -122,9 +131,16 @@ class Mt5Source:
     def _load_candles(self, symbol: str, timeframe: str, progress: ProgressFn | None = None) -> pd.DataFrame:
         """Carga todas las velas que el terminal pueda entregar, de la más reciente hacia atrás."""
         mt5 = self._require()
-        tf = mt5_constant(mt5, timeframe)
+        base = base_timeframe(timeframe)
+        tf = mt5_constant(mt5, base)
+        exact = self.resolve_symbol(symbol)
+        if exact is None:
+            hints = self.similar_symbols(symbol)
+            raise Mt5Error(f"El símbolo '{symbol}' no existe en este broker."
+                           + (f" Nombres parecidos: {', '.join(hints)}." if hints else ""))
+        symbol = exact
         if not mt5.symbol_select(symbol, True):
-            raise Mt5Error(f"Símbolo '{symbol}' no disponible en este broker: {mt5.last_error()}")
+            raise Mt5Error(f"No se pudo activar el símbolo '{symbol}' en MT5: {mt5.last_error()}")
 
         frames: list[pd.DataFrame] = []
         total = 0
@@ -142,8 +158,32 @@ class Mt5Source:
         if not frames:
             raise Mt5Error(f"Sin velas para {symbol} {timeframe}: {mt5.last_error()}")
 
-        df = pd.concat(frames[::-1], ignore_index=True).rename(columns={"time": "ts"})
-        return normalize_candles(df)
+        df = normalize_candles(pd.concat(frames[::-1], ignore_index=True).rename(columns={"time": "ts"}))
+        if timeframe in DERIVED:          # p. ej. 7h: MT5 no lo tiene, se agrupa desde 1h
+            df = aggregate_candles(df, minutes(timeframe) * 60)
+        return df
+
+    # -- nombres de símbolo -----------------------------------------------
+    def _broker_names(self, mt5) -> dict[str, str]:
+        if self._names is None:
+            self._names = {}
+            for sym in mt5.symbols_get() or []:
+                self._names.setdefault(sym.name.lower(), sym.name)
+        return self._names
+
+    def resolve_symbol(self, name: str) -> str | None:
+        """Nombre exacto del símbolo en este broker. MT5 distingue mayúsculas: 'NAS100FT.R' no es 'NAS100FT.r'."""
+        with self._lock:
+            return self._broker_names(self._require()).get(name.strip().lower())
+
+    def similar_symbols(self, name: str, limit: int = 8) -> list[str]:
+        """Símbolos del broker que contienen la parte principal del nombre (antes del primer . - _ #)."""
+        with self._lock:
+            names = self._broker_names(self._require())
+        base = re.split(r"[.\-_#]", name.strip())[0].lower()
+        if not base:
+            return []
+        return sorted(actual for low, actual in names.items() if base in low)[:limit]
 
     # -- internos ---------------------------------------------------------
     def _require(self):
