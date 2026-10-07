@@ -132,12 +132,9 @@ class MainWindow(QMainWindow):
         chips.addWidget(self.status)
         chips.addWidget(self.account)
         chips.addStretch(1)
-        self.colors_btn = QPushButton("Colores")
-        self.colors_btn.setToolTip("Personalizar los colores de la interfaz")
-        chips.addWidget(self.colors_btn)
         left.addLayout(title_row)
         left.addLayout(chips)
-        h.addLayout(left, 1)
+        h.addLayout(left)
 
         self.stat_balance = StatBlock("Saldo")
         self.stat_pnl = StatBlock("P&L abierto")
@@ -149,6 +146,12 @@ class MainWindow(QMainWindow):
                 divider.setObjectName("StatDivider")
                 h.addWidget(divider)
             h.addWidget(block)
+
+        # Las cifras van justo después de la cuenta; el botón Skins, solo en la esquina derecha.
+        h.addStretch(1)
+        self.colors_btn = QPushButton("Skins")
+        self.colors_btn.setToolTip("Cambiar la paleta (skin) y personalizar los colores de la interfaz")
+        h.addWidget(self.colors_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         return bar
 
     def _build_left(self, app_cfg: dict) -> QVBoxLayout:

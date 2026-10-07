@@ -26,7 +26,7 @@ class ThemeDialog(QDialog):
     def __init__(self, parent, preset: str, palette: Palette,
                  on_change: Callable[[str, Palette], None]) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Colores")
+        self.setWindowTitle("Skins")
         self.setMinimumWidth(380)
         self.preset, self.palette, self._on_change = preset, palette, on_change
         self.swatches: dict[str, QPushButton] = {}

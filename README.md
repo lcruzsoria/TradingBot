@@ -11,7 +11,7 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro fijo de la interfaz. |
 
-Cabecera: estado de la conexión, cuenta, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
+Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
 servidor comparando los ticks en vivo con el reloj de tu PC (unos segundos tras conectar) y convierte a Nueva York
 respetando el cambio de horario de EE. UU. Hasta que lo mide, la hora se marca como *(estimada)* y asume servidor = Nueva York + 7 h.
@@ -177,7 +177,7 @@ rejilla se pinta con ese color exacto y también en vertical.
 Cómo personalizarlo:
 
 1. **`tradingbot.env`**: `UI_THEME` elige la paleta de arranque.
-2. **Botón "Colores"** de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
+2. **Botón "Skins"**, en la esquina superior derecha de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
    *Guardar* deja esa paleta como la de arranque (cambia `UI_THEME` en `tradingbot.env`) y guarda tus colores
    retocados en `theme.local.json` (no se sube a git).
 3. **`config.toml`**, sección `[theme]`: colores sueltos (`#RRGGBB`) que se aplican encima de la paleta de arranque.
