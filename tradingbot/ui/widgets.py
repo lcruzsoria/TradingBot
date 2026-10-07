@@ -211,10 +211,10 @@ class BiasCard(QFrame):
         super().__init__()
         self.setObjectName("BiasCard")
         self.setProperty("state", "idle")
-        # Compacto, a la altura del panel Mercados: sesgo a la izquierda y chips Long / Short a la derecha.
+        # Compacto, dentro de la cabecera del gráfico: sesgo a la izquierda y chips Long / Short a la derecha.
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 8, 12, 8)
-        lay.setSpacing(12)
+        lay.setContentsMargins(12, 3, 6, 3)
+        lay.setSpacing(10)
         text = QVBoxLayout()
         text.setSpacing(0)
 
@@ -227,7 +227,7 @@ class BiasCard(QFrame):
         self.detail.setWordWrap(True)
 
         chips = QVBoxLayout()
-        chips.setSpacing(4)
+        chips.setSpacing(3)
         self.long_chip = ClickableLabel("Long")
         self.short_chip = ClickableLabel("Short")
         for chip, direction in ((self.long_chip, Direction.LONG), (self.short_chip, Direction.SHORT)):

@@ -297,13 +297,13 @@ QFrame#BiasCard {{ border-radius: 6px; border: 1px solid {BORDER}; background: {
 QFrame#BiasCard[state="bull"] {{ background: {mix(PANEL, BULL, 0.18)}; border: 1px solid {BULL}; }}
 QFrame#BiasCard[state="bear"] {{ background: {mix(PANEL, BEAR, 0.18)}; border: 1px solid {BEAR}; }}
 QFrame#BiasCard[state="none"] {{ background: {PANEL_ALT}; border: 1px solid {MUTED}; }}
-QLabel#BiasCaption {{ color: {MUTED}; font-size: 12px; background: transparent; }}
-QLabel#BiasValue {{ font-size: 28px; font-weight: 800; background: transparent; color: {NEUTRAL}; }}
+QLabel#BiasCaption {{ color: {MUTED}; font-size: 10px; background: transparent; }}
+QLabel#BiasValue {{ font-size: 20px; font-weight: 800; background: transparent; color: {NEUTRAL}; }}
 QFrame#BiasCard[state="bull"] QLabel#BiasValue {{ color: {BULL}; }}
 QFrame#BiasCard[state="bear"] QLabel#BiasValue {{ color: {BEAR}; }}
-QLabel#BiasDetail {{ color: {MUTED}; background: transparent; }}
+QLabel#BiasDetail {{ color: {MUTED}; font-size: 10px; background: transparent; }}
 
-QLabel#Chip {{ border-radius: 4px; padding: 4px 10px; font-weight: 600; background: {mix(PANEL, TEXT, 0.06)}; color: {MUTED}; }}
+QLabel#Chip {{ border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; background: {mix(PANEL, TEXT, 0.06)}; color: {MUTED}; }}
 QLabel#Chip[allowed="true"] {{ background: {mix(PANEL, BULL, 0.20)}; color: {BULL}; }}
 QLabel#Chip[allowed="false"] {{ background: {mix(PANEL, BEAR, 0.18)}; color: {mix(BEAR, TEXT, 0.15)}; }}
 

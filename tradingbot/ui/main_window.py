@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow, QPlainTextEdit,
-                               QProgressBar, QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
+                               QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..skills.bias import BiasResult
 from ..clock import format_offset, ny_from_server, server_minus_ny
@@ -196,9 +196,7 @@ class MainWindow(QMainWindow):
             btn.setProperty("tip", tip)
             btn.setVisible(levels_skill is not None)
             btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool(key, False))
-            chart_panel.add_header_widget(btn)
             self.level_btns[group] = btn
-        chart_panel.add_header_widget(self.tbr_btn)
         tools = QHBoxLayout()
         tools.setSpacing(6)
         self.tf_group = QButtonGroup(self)
@@ -216,7 +214,26 @@ class MainWindow(QMainWindow):
         self.progress_label = QLabel("")
         self.progress_label.setObjectName("Muted")
         tools.addWidget(self.progress_label)
-        chart_panel.body.addLayout(tools)
+
+        # Cabecera del gráfico: título y timeframes | botones de niveles en 2x2 | sesgo de la sesión (compacto)
+        chart_panel.layout().removeItem(chart_panel.head)      # el título pasa a la columna de la izquierda
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        left_col = QVBoxLayout()
+        left_col.setSpacing(6)
+        left_col.addWidget(chart_panel.title)
+        left_col.addLayout(tools)
+        top.addLayout(left_col, 1)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
+                                 self.level_btns["pdhl"], self.tbr_btn)):
+            grid.addWidget(btn, i // 2, i % 2)
+        top.addLayout(grid)
+        self.bias_card = BiasCard()
+        top.addWidget(self.bias_card)
+        chart_panel.body.addLayout(top)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 1)
@@ -254,9 +271,6 @@ class MainWindow(QMainWindow):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
 
-        self.bias_card = BiasCard()
-        col.addWidget(self.bias_card)
-
         skills = Panel("Skills", "Cada hexágono es una skill")
         self.ring = RingView()
         skills.body.addWidget(self.ring, 1)
@@ -279,10 +293,8 @@ class MainWindow(QMainWindow):
 
     # -- utilidades -----------------------------------------------------------------------------
     def _sync_top_heights(self) -> None:
-        """Mercados y Sesgo, con la altura justa y la misma: el resto va al gráfico y al panel Skills."""
-        h = max(self.markets_panel.sizeHint().height(), self.bias_card.sizeHint().height())
-        self.markets_panel.setFixedHeight(h)
-        self.bias_card.setFixedHeight(h)
+        """Mercados, con la altura justa para sus tarjetas: el resto va al gráfico."""
+        self.markets_panel.setFixedHeight(self.markets_panel.sizeHint().height())
 
     def log(self, message: str) -> None:
         self.log_view.appendPlainText(f"[{datetime.now():%H:%M:%S}] {message}")
