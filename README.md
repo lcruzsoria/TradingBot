@@ -16,7 +16,8 @@ Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L ab
 servidor comparando los ticks en vivo con el reloj de tu PC (unos segundos tras conectar) y convierte a Nueva York
 respetando el cambio de horario de EE. UU. Hasta que lo mide, la hora se marca como *(estimada)* y asume servidor = Nueva York + 7 h.
 Pasa el ratón sobre la caja para ver la hora del servidor y el desfase detectado. Si no lo detecta bien (PC desincronizado),
-fíjalo a mano con `QUOTES_SERVER_UTC_OFFSET` en `tradingbot.env`. Las horas del eje del gráfico siguen siendo las del servidor.
+fíjalo a mano con `QUOTES_SERVER_UTC_OFFSET` en `tradingbot.env`. El eje de tiempo del gráfico también va en hora de
+Nueva York (hasta medir el desfase, estimada; lo indica la línea bajo el gráfico).
 
 Panel **Mercados**: cotizaciones de solo lectura (se refrescan cada segundo; se cambia con `QUOTES_INTERVAL`). Con el botón **Editar** del panel eliges
 qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
@@ -28,6 +29,12 @@ Usa los nombres exactos de tu broker (en MT5: Ver > Símbolos).
 
 Pinchar una tarjeta carga su gráfico (no hay selector de símbolo ni botón de cargar): para ver un símbolo nuevo,
 añádelo primero con **Editar**. Si quitas el mercado que estás viendo, el gráfico carga el primero de la lista.
+
+**Ejes del gráfico**: se redimensionan arrastrándolos con el ratón, como en TradingView.
+- Eje de precio (derecha): arrastrar hacia abajo comprime el precio y hacia arriba lo estira. Al tocarlo, el precio
+  deja de ajustarse solo y el gráfico también se puede mover en vertical.
+- Eje de tiempo (abajo): arrastrar a la izquierda muestra más velas y a la derecha menos, sin mover la vela más reciente.
+- Doble clic en un eje: vuelve a la escala automática (en el de tiempo, también a las últimas 220 velas).
 
 **Timeframes** (chips sobre el gráfico): M1, M3, M5, M15, H1, H3, H4, H7, H12, 1D y 1W. Cambiar de timeframe recarga el mercado actual.
 - MT5 no tiene H7 (solo H1, H2, H3, H4, H6, H8 y H12). H7 se construye agrupando velas de 1 hora, alineadas con la

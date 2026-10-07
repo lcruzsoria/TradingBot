@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, 
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..skills.bias import BiasResult
-from ..clock import format_offset, ny_from_server
+from ..clock import format_offset, ny_from_server, server_minus_ny
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self.theme_name = theme_name
         self.all_symbols: list[str] = []
         self.charted_symbol = ""
+        self.ny_shift, self.ny_estimated = server_minus_ny(None)   # servidor - Nueva York (estimado hasta medirlo)
         self.current_symbol = self._match_symbol(app_cfg["app"]["symbol"]) or (self.watchlist[0] if self.watchlist else "")
 
         self.setWindowTitle("TradingBot")
@@ -171,7 +172,8 @@ class MainWindow(QMainWindow):
 
         chart_panel = Panel("Gráfico")
         self.chart_panel = chart_panel
-        chart_panel.title.setToolTip("Precio bid. El eje de tiempo va en hora del servidor del broker.")
+        chart_panel.title.setToolTip("Precio bid. El eje de tiempo va en hora de Nueva York.\n"
+                                     "Arrastra un eje para redimensionarlo; doble clic en él: escala automática.")
         # TBR: zonas horarias de NY y sus niveles (skill tbr; horarios y colores en tradingbot.env, bloque TBR)
         self.tbr_btn = QPushButton("TBR")
         self.tbr_btn.setProperty("chip", "true")
@@ -428,18 +430,37 @@ class MainWindow(QMainWindow):
             self._set_status("Conectado", "ok")
         self.candles = df
         self.chart.set_candles(df)
-        first, last = df["time"].iloc[0], df["time"].iloc[-1]
+        self.chart.set_ny_shift(self.ny_shift)
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
-        self.chart_stats.setText(f"{miles(len(df))} velas  -  desde {fecha_corta(first)}  -  última {fecha_hora(last)}")
+        self._update_chart_stats()
+        first, last = self._ny(df["ts"].iloc[0]), self._ny(df["ts"].iloc[-1])
         self.log(f"feed: {miles(len(df))} velas de {symbol} {display_label(tf)} "
-                 f"({first:%Y-%m-%d} a {last:%Y-%m-%d %H:%M}) en {p['seconds']:.1f}s")
+                 f"({first:%Y-%m-%d} a {last:%Y-%m-%d %H:%M} NY) en {p['seconds']:.1f}s")
         self._set_busy(False)
         if not self._first_done:
             self._first_done = True
             self.first_loaded.emit()
 
+    def _ny(self, server_ts) -> datetime:
+        """Hora de Nueva York de una marca de tiempo del servidor (sin zona, para mostrar)."""
+        return datetime.fromtimestamp(int(server_ts) - self.ny_shift, tz=timezone.utc).replace(tzinfo=None)
+
+    def _update_chart_stats(self) -> None:
+        df = self.candles
+        if df is None or not len(df):
+            return
+        first, last = self._ny(df["ts"].iloc[0]), self._ny(df["ts"].iloc[-1])
+        zone = "hora de Nueva York (estimada)" if self.ny_estimated else "hora de Nueva York"
+        self.chart_stats.setText(f"{miles(len(df))} velas  -  desde {fecha_corta(first)}  -  "
+                                 f"última {fecha_hora(last)}  -  {zone}")
+
     def _on_quotes(self, p: dict) -> None:
         quotes, account = p["quotes"], p["account"]
+        shift, estimated = server_minus_ny(p.get("server_offset"))
+        if (shift, estimated) != (self.ny_shift, self.ny_estimated):
+            self.ny_shift, self.ny_estimated = shift, estimated     # desfase medido: el eje pasa a hora exacta
+            self.chart.set_ny_shift(shift)
+            self._update_chart_stats()
         self.markets.set_quotes(quotes)
         live = [q for q in quotes.values() if q]
         if live:

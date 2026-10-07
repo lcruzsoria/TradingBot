@@ -1,6 +1,7 @@
-"""Gráfico de velas rápido (pyqtgraph) con eje X por índice y niveles de referencia."""
+"""Gráfico de velas rápido (pyqtgraph) con eje X por índice (hora de Nueva York) y ejes redimensionables."""
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 import numpy as np
@@ -9,6 +10,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsRectItem
 
+from ..clock import NY_CLOSE_SERVER_AHEAD_HOURS
 from ..skills.bias.rules import fmt_price
 from . import theme
 from .fmt import fecha_hora
@@ -60,15 +62,71 @@ class DaySeparators(pg.GraphicsObject):
             p.drawText(QPointF(pt.x() + 5, pt.y() - 6), label)
 
 
-class TimeAxis(pg.AxisItem):
-    """Eje X por índice de vela: muestra la hora del servidor del broker."""
+class ScaleAxis(pg.AxisItem):
+    """Eje que se redimensiona al arrastrarlo, como en TradingView. Doble clic: vuelve a la escala automática.
+
+    - Eje de precio: arrastrar hacia abajo comprime el precio, hacia arriba lo estira.
+    - Eje de tiempo: arrastrar a la izquierda muestra más velas, a la derecha menos (anclado a la derecha).
+    """
+
+    SENSITIVITY = 0.01      # factor de escala por píxel arrastrado
+
+    def __init__(self, orientation: str, **kw):
+        super().__init__(orientation=orientation, **kw)
+        self.chart: "ChartView | None" = None
+        vertical = orientation in ("left", "right")
+        self.setCursor(Qt.CursorShape.SizeVerCursor if vertical else Qt.CursorShape.SizeHorCursor)
+        self.setToolTip("Arrastra para redimensionar el eje. Doble clic: escala automática.")
+
+    @property
+    def vertical(self) -> bool:
+        return self.orientation in ("left", "right")
+
+    def mouseDragEvent(self, event):
+        vb = self.linkedView()
+        if self.chart is None or vb is None or event.button() != Qt.MouseButton.LeftButton:
+            return super().mouseDragEvent(event)
+        if vb.sceneBoundingRect().contains(event.buttonDownScenePos()):
+            event.ignore()                              # el arrastre empezó dentro del gráfico, no en el eje
+            return
+        event.accept()
+        delta = event.pos() - event.lastPos()
+        if self.vertical:
+            self.chart.scale_price(math.exp(delta.y() * self.SENSITIVITY))
+        else:
+            self.chart.scale_time(math.exp(-delta.x() * self.SENSITIVITY))
+
+    def mouseClickEvent(self, event):
+        if self.chart is not None and event.double() and event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            if self.vertical:
+                self.chart.reset_price_scale()
+            else:
+                self.chart.reset_time_scale()
+            return
+        return super().mouseClickEvent(event)
+
+
+class TimeAxis(ScaleAxis):
+    """Eje X por índice de vela: muestra la hora de Nueva York.
+
+    Las velas llegan en hora del servidor del broker; `ny_shift` es cuánto va el servidor por delante de Nueva York
+    (en Vantage, 7 h). Hasta que Quotes mide el desfase real se usa ese valor estimado.
+    """
 
     def __init__(self, **kw):
-        super().__init__(orientation="bottom", **kw)
+        super().__init__("bottom", **kw)
         self._ts: np.ndarray = np.empty(0, dtype=np.int64)
+        self.ny_shift = NY_CLOSE_SERVER_AHEAD_HOURS * 3600
 
     def set_times(self, ts: np.ndarray) -> None:
         self._ts = ts
+
+    def set_ny_shift(self, seconds: int) -> None:
+        if seconds != self.ny_shift:
+            self.ny_shift = seconds
+            self.picture = None                         # fuerza a redibujar las etiquetas
+            self.update()
 
     def tickStrings(self, values, scale, spacing):
         out = []
@@ -76,7 +134,7 @@ class TimeAxis(pg.AxisItem):
         for v in values:
             i = int(round(v))
             if 0 <= i < n:
-                dt = datetime.fromtimestamp(int(self._ts[i]), tz=timezone.utc)
+                dt = datetime.fromtimestamp(int(self._ts[i]) - self.ny_shift, tz=timezone.utc)
                 out.append(fecha_hora(dt))
             else:
                 out.append("")
@@ -161,9 +219,14 @@ class CandlestickItem(pg.GraphicsObject):
 
 
 class ChartView(pg.PlotWidget):
+    VIEW_BARS = 220          # velas visibles al cargar (y al hacer doble clic en el eje de tiempo)
+    MIN_BARS = 10            # zoom máximo del eje de tiempo
+
     def __init__(self) -> None:
         self.time_axis = TimeAxis()
-        super().__init__(axisItems={"bottom": self.time_axis}, background=theme.CHART_BG)
+        self.price_axis = ScaleAxis("right")
+        super().__init__(axisItems={"bottom": self.time_axis, "right": self.price_axis}, background=theme.CHART_BG)
+        self.time_axis.chart = self.price_axis.chart = self
         pi = self.getPlotItem()
         pi.hideAxis("left")
         pi.showAxis("right")
@@ -214,7 +277,7 @@ class ChartView(pg.PlotWidget):
             self.set_levels(dict(self._levels))
         self.update()
 
-    def set_candles(self, df, view_bars: int = 220) -> None:
+    def set_candles(self, df, view_bars: int | None = None) -> None:
         o, h = df["open"].to_numpy(), df["high"].to_numpy()
         l, c = df["low"].to_numpy(), df["close"].to_numpy()
         self._n = len(df)
@@ -227,8 +290,45 @@ class ChartView(pg.PlotWidget):
         self.set_last_price(float(c[-1]))
         vb = self.getPlotItem().getViewBox()
         vb.setLimits(xMin=-5, xMax=self._n + 60)
-        vb.setXRange(max(0, self._n - view_bars), self._n + 8, padding=0)
+        vb.setXRange(max(0, self._n - (view_bars or self.VIEW_BARS)), self._n + 8, padding=0)
+        self.reset_price_scale()
+
+    # -- escala de los ejes (arrastrando sobre ellos) -------------------------------------------------
+    @property
+    def price_auto(self) -> bool:
+        """True mientras el eje de precio se ajusta solo a las velas visibles."""
+        return bool(self.getPlotItem().getViewBox().autoRangeEnabled()[1])
+
+    def set_ny_shift(self, seconds: int) -> None:
+        """Cuánto va el servidor del broker por delante de Nueva York (para las etiquetas del eje de tiempo)."""
+        self.time_axis.set_ny_shift(seconds)
+
+    def scale_price(self, factor: float) -> None:
+        """Estira (factor < 1) o comprime (factor > 1) el precio alrededor del centro; pasa a escala manual."""
+        vb = self.getPlotItem().getViewBox()
+        y0, y1 = vb.viewRange()[1]
+        center, half = (y0 + y1) / 2, (y1 - y0) / 2 * factor
+        vb.disableAutoRange(axis=vb.YAxis)
+        vb.setMouseEnabled(x=True, y=True)              # con escala manual, también se puede mover en vertical
+        vb.setYRange(center - half, center + half, padding=0)
+
+    def reset_price_scale(self) -> None:
+        vb = self.getPlotItem().getViewBox()
+        vb.setMouseEnabled(x=True, y=False)
+        vb.setAutoVisible(y=True)
         vb.enableAutoRange(axis="y")
+
+    def scale_time(self, factor: float) -> None:
+        """Más velas (factor > 1) o menos (factor < 1), manteniendo fijo el borde derecho."""
+        vb = self.getPlotItem().getViewBox()
+        x0, x1 = vb.viewRange()[0]
+        width = min(max((x1 - x0) * factor, self.MIN_BARS), self._n + 65)
+        vb.setXRange(x1 - width, x1, padding=0)
+
+    def reset_time_scale(self) -> None:
+        vb = self.getPlotItem().getViewBox()
+        vb.setXRange(max(0, self._n - self.VIEW_BARS), self._n + 8, padding=0)
+        self.reset_price_scale()
 
     def set_last_price(self, value: float) -> None:
         """Línea punteada y etiqueta con el último precio, como en los gráficos de MT5."""
