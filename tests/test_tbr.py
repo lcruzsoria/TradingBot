@@ -64,13 +64,13 @@ def test_niveles_high_low_y_50_se_prolongan_hasta_que_se_toman():
     lows = [99, 98, 95, 99,        101, 100.5, 101, 99]
     ts, high, low = candles(10, 8, highs=highs, lows=lows)
     [s] = compute(ts, high, low, [zone("10:00", "11:00")], AHEAD, 15, days=1)
-    assert (s.x0, s.x1, s.complete) == (-0.5, 3.5, True)
+    assert (s.x0, s.x1, s.complete, s.high, s.low) == (-0.5, 3.5, True, 105, 95)   # caja del Low al High
     lv = {level.kind: level for level in s.levels}
     assert (lv["high"].price, lv["low"].price, lv["mid"].price) == (105, 95, 100)
     assert lv["high"].taken and lv["high"].x1 == 6           # la vela 6 (máx. 106) toma el High
     assert lv["mid"].taken and lv["mid"].x1 == 7             # la 7 baja hasta 99: toca el 50 %
     assert not lv["low"].taken and lv["low"].x1 == 7 + tbr.EXTEND_BARS   # intacto: hasta el borde derecho
-    assert all(level.x0 == s.x0 for level in s.levels)       # arrancan en el inicio de la zona
+    assert all(level.x0 == s.x1 for level in s.levels)       # salen del borde derecho de la caja
 
 
 def test_zona_que_cruza_medianoche_y_zona_en_curso_sin_niveles():
@@ -79,7 +79,7 @@ def test_zona_que_cruza_medianoche_y_zona_en_curso_sin_niveles():
     assert (asia.x0, asia.x1, asia.complete) == (3.5, 19.5, True)   # velas de 20:00 a 23:45
     ts, high, low = candles(10, 4)                          # NY-AM aún abierta: 10:00 a 10:45
     [live] = compute(ts, high, low, [zone("10:00", "12:00")], AHEAD, 15, days=1)
-    assert not live.complete and live.levels == ()
+    assert not live.complete and live.levels == () and (live.high, live.low) == (100, 99)   # la caja ya crece
 
 
 def test_con_h1_la_zona_1330_recoge_las_velas_que_se_solapan():

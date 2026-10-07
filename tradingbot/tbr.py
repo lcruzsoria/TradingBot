@@ -1,9 +1,9 @@
 """TBR (Time-Based Ranges): zonas horarias del día en hora de Nueva York y sus niveles.
 
 Cada zona (Asia, London, Pre-NY, NY-AM, NY-PM...) es una franja horaria fija en hora de Nueva York. Para cada día y
-zona se calcula el máximo (High), el mínimo (Low) y el punto medio (50 %) de las velas de esa franja. Cuando la franja
-termina, cada nivel se extiende hacia la derecha hasta que una vela posterior lo "toma" (lo toca o lo atraviesa);
-si ninguna lo ha tomado aún, llega hasta la última vela.
+zona se calcula el máximo (High), el mínimo (Low) y el punto medio (50 %) de las velas de esa franja: la zona se dibuja
+como una caja del Low al High. Cuando la franja termina, cada nivel sale del borde derecho de la caja y se extiende
+hasta que una vela posterior lo "toma" (lo toca o lo atraviesa); si ninguna lo ha tomado aún, llega al borde derecho.
 
 Las velas llegan con la hora del servidor del broker. `server_minus_ny` es cuánto va el servidor por delante de Nueva
 York (en los brokers con cierre en Nueva York, como Vantage, siempre 7 h, también al cambiar de horario).
@@ -24,7 +24,7 @@ EXTEND_BARS = 8          # un nivel aún no tomado se prolonga hasta este margen
 # Valores por defecto (se cambian en tradingbot.env, bloque TBR)
 DEFAULT_SHOW = False
 DEFAULT_DAYS = 10
-DEFAULT_OPACITY = 15     # % de opacidad del relleno de las zonas
+DEFAULT_OPACITY = 25     # % de opacidad del relleno de las zonas
 DEFAULT_MAX_TF_MINUTES = 60
 DEFAULT_ZONES = (        # clave, nombre, horario NY, color
     ("ASIA", "Asia", "20:00-00:00", "#FFD60A"),
@@ -60,7 +60,7 @@ class Zone:
 class Level:
     kind: str            # "high", "low" o "mid" (50 %)
     price: float
-    x0: float            # desde el inicio de la zona (índice de vela)...
+    x0: float            # desde el final de la zona (índice de vela)...
     x1: float            # ...hasta la vela que lo toma, o el borde derecho si sigue intacto
     taken: bool
 
@@ -72,6 +72,8 @@ class Session:
     x0: float            # bordes de la zona en el eje del gráfico (índice de vela +- 0,5)
     x1: float
     complete: bool       # False mientras la franja sigue en curso (aún sin niveles)
+    high: float          # caja de la zona: del Low al High de sus velas (en curso: lo que va de franja)
+    low: float
     levels: tuple[Level, ...] = ()
 
 
@@ -140,17 +142,18 @@ def compute(ts, high, low, zones: list[Zone], server_ahead: int, tf_minutes: int
                 continue                                            # sin velas (fin de semana, festivo...)
             complete = i1 < n or int(ny[-1]) + tf >= end
             x0, x1 = i0 - 0.5, i1 - 0.5
+            hi, lo = float(high[i0:i1].max()), float(low[i0:i1].min())
             levels: tuple[Level, ...] = ()
             if complete:
-                hi, lo = float(high[i0:i1].max()), float(low[i0:i1].min())
                 mid = (hi + lo) / 2
                 after_h, after_l = high[i1:], low[i1:]
-                levels = tuple(_level(kind, price, hit, x0, i1, n) for kind, price, hit in (
+                levels = tuple(_level(kind, price, hit, x1, i1, n) for kind, price, hit in (
                     ("high", hi, after_h >= hi),
                     ("low", lo, after_l <= lo),
                     ("mid", mid, (after_l <= mid) & (after_h >= mid)),
                 ))
-            out.append(Session(zone, date.fromordinal(date(1970, 1, 1).toordinal() + day), x0, x1, complete, levels))
+            out.append(Session(zone, date.fromordinal(date(1970, 1, 1).toordinal() + day), x0, x1, complete, hi, lo,
+                               levels))
     return out
 
 

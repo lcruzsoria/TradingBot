@@ -7,6 +7,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
+from PySide6.QtWidgets import QGraphicsRectItem
 
 from ..bias.rules import fmt_price
 from . import theme
@@ -137,7 +138,7 @@ class ChartView(pg.PlotWidget):
         self._n = 0
         self._tbr_items: list = []
         self._tbr_sessions: list = []
-        self._tbr_opacity = 0.15
+        self._tbr_opacity = 0.25
         self._tbr_visible = False
 
     def _style_axes(self) -> None:
@@ -228,19 +229,16 @@ class ChartView(pg.PlotWidget):
         if not self._tbr_visible or not self._tbr_sessions:
             return
         lines: dict[tuple[str, str], tuple[list, list]] = {}
-        order = {z: i for i, z in enumerate(dict.fromkeys(s.zone.key for s in self._tbr_sessions))}
         for s in self._tbr_sessions:
             fill = QColor(s.zone.color)
             fill.setAlphaF(self._tbr_opacity)
-            region = pg.LinearRegionItem(values=(s.x0, s.x1), movable=False, brush=fill, pen=pg.mkPen(None))
-            region.setZValue(-10)                       # detrás de las velas
-            for edge in region.lines:
-                edge.setHoverPen(pg.mkPen(None))
-            # etiquetas escalonadas: dos zonas seguidas (Pre-NY y NY-AM) no se pisan
-            pg.InfLineLabel(region.lines[0], text=s.zone.name, position=0.98 - 0.06 * (order[s.zone.key] % 2),
-                            anchor=(0, 0), color=s.zone.color)
-            pi.addItem(region, ignoreBounds=True)
-            self._tbr_items.append(region)
+            # caja de la zona: de su inicio a su final y de su Low a su High
+            box = QGraphicsRectItem(QRectF(s.x0, s.low, s.x1 - s.x0, max(s.high - s.low, 1e-9)))
+            box.setBrush(fill)
+            box.setPen(QPen(Qt.PenStyle.NoPen))
+            box.setZValue(-10)                          # detrás de las velas
+            pi.addItem(box, ignoreBounds=True)
+            self._tbr_items.append(box)
             for level in s.levels:
                 xs, ys = lines.setdefault((s.zone.color, level.kind), ([], []))
                 xs += [level.x0, level.x1]
@@ -248,7 +246,7 @@ class ChartView(pg.PlotWidget):
         for (color, kind), (xs, ys) in lines.items():
             pen_color = QColor(color)
             pen_color.setAlphaF(0.85)
-            style = Qt.PenStyle.DashLine if kind == "mid" else Qt.PenStyle.SolidLine
+            style = Qt.PenStyle.DotLine if kind == "mid" else Qt.PenStyle.SolidLine   # 50 %: punteada
             curve = pg.PlotCurveItem(x=np.array(xs), y=np.array(ys), connect="pairs",
                                      pen=pg.mkPen(pen_color, width=1, style=style))
             curve.setZValue(-5)

@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
         zones = ", ".join(f"{z.name} {z.hours}" for z in p["zones"])
         if p["available"]:
             tip = (f"Zonas TBR en hora de Nueva York: {zones}.\n"
-                   "Niveles High, Low y 50 % (discontinuo) hasta que una vela los toma.")
+                   "Cajas del Low al High; sus niveles High, Low y 50 % (punteado) siguen hasta que una vela los toma.")
             if p["estimated"]:
                 tip += "\nDesfase del servidor aún sin medir: se asume servidor = Nueva York + 7 h."
         else:

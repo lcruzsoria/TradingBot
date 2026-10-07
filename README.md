@@ -34,8 +34,9 @@ añádelo primero con **Editar**. Si quitas el mercado que estás viendo, el gr�
   medianoche de cada día (hora del servidor): 00-07, 07-14, 14-21 y 21-24, esta última más corta (3 horas).
 - Con velas semanales (1W) el sesgo no se recalcula, porque "el día" no existe en ese timeframe: se conserva el último.
 
-**TBR** (botón junto al título del gráfico): marca en el gráfico las zonas horarias del día, todas en hora de Nueva York,
-con su color muy transparente para que se sigan viendo las velas:
+**TBR** (botón junto al título del gráfico): marca en el gráfico las zonas horarias del día, todas en hora de Nueva York.
+Cada zona es una caja que va de su inicio a su final y de su Low a su High, con su color muy transparente para que se
+sigan viendo las velas:
 
 | Zona | Horario (NY) | Color |
 |---|---|---|
@@ -45,10 +46,10 @@ con su color muy transparente para que se sigan viendo las velas:
 | NY-AM | 10:00 - 12:00 | verde |
 | NY-PM | 13:30 - 16:30 | morado |
 
-Para cada zona ya terminada dibuja tres niveles con su color: **High** y **Low** (línea continua) y **50 %** (discontinua).
-Cada nivel empieza en la zona y se prolonga hacia la derecha hasta la primera vela posterior que lo toca o lo atraviesa;
-si ninguna lo ha tomado todavía, llega hasta el borde derecho del gráfico. Una zona en curso se pinta, pero sus niveles
-aparecen al terminar.
+Para cada zona ya terminada dibuja tres niveles con su color: **High** y **Low** (línea continua) y **50 %** (punteada).
+Cada nivel sale del borde derecho de la caja y se prolonga hasta la primera vela posterior que lo toca o lo atraviesa;
+si ninguna lo ha tomado todavía, llega hasta el borde derecho del gráfico. Una zona en curso se pinta con el rango que
+lleva hasta el momento; sus niveles aparecen al terminar.
 - Horarios, colores, nombres, opacidad y días hacia atrás se cambian en el bloque **TBR** de `tradingbot.env`, donde
   también se pueden añadir zonas nuevas.
 - Las velas llegan en hora del servidor del broker; las zonas se colocan con el desfase que mide Quotes (hasta medirlo
@@ -106,7 +107,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **TBR** — zonas horarias del botón TBR | | |
 | `TBR_SHOW` | `false` | Botón TBR activado al arrancar. |
 | `TBR_DAYS` | `10` | Días naturales hacia atrás que se dibujan. |
-| `TBR_OPACITY` | `15` | Opacidad del relleno de las zonas, en % (0-100). |
+| `TBR_OPACITY` | `25` | Opacidad del relleno de las zonas, en % (0-100). |
 | `TBR_MAX_TF_MINUTES` | `60` | Timeframe máximo (en minutos) con el que se dibujan. |
 | `TBR_ZONES` | `ASIA, LONDON, PRE_NY, NY_AM, NY_PM` | Zonas activas y su orden. |
 | `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |
