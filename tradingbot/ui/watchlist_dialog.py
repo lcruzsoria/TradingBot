@@ -33,7 +33,7 @@ def filter_symbols(names: list[str], query: str) -> list[str]:
 class WatchlistDialog(QDialog):
     def __init__(self, parent, broker_symbols: list[str], current: list[str]) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Mercados")
+        self.setWindowTitle("Quotes: mercados")
         self.setMinimumSize(640, 460)
         self.broker_symbols = list(broker_symbols)
 

@@ -19,7 +19,7 @@ Pasa el ratón sobre la caja para ver la hora del servidor y el desfase detectad
 fíjalo a mano con `QUOTES_SERVER_UTC_OFFSET` en `tradingbot.env`. El eje de tiempo del gráfico también va en hora de
 Nueva York (hasta medir el desfase, estimada; lo indica la línea bajo el gráfico).
 
-Panel **Mercados**: cotizaciones de solo lectura (se refrescan cada segundo; se cambia con `QUOTES_INTERVAL`). Con el botón **Editar** del panel eliges
+Panel **Quotes** (antes *Mercados*): cotizaciones de solo lectura (se refrescan cada segundo; se cambia con `QUOTES_INTERVAL`). Con el botón **Editar** del panel eliges
 qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
 *oro*, *petróleo*, *bitcoin*...), añade, quita y reordena. Se aplica al instante y se guarda en `settings.local.json`
 (no se sube a git), que tiene prioridad sobre la `watchlist` de `config.toml`. Borrar ese fichero devuelve la lista de `config.toml`.
@@ -122,7 +122,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `FEED_TIMEFRAME` | `M15` | Timeframe al arrancar: `M1` `M3` `M5` `M15` `H1` `H3` `H4` `H7` `H12` `1D` `1W` (también vale `15m`, `1h`...). |
 | `FEED_MAX_BARS` | `2000000` | Tope de seguridad de velas a cargar por mercado y timeframe. |
 | **QUOTES** — cotizaciones y cuenta | | |
-| `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Mercados y de las cifras de la cuenta (admite decimales). |
+| `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Quotes y de las cifras de la cuenta (admite decimales). |
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
 | **BIAS** — sesgo del día | | |
 | `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |

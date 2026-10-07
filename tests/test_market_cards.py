@@ -54,7 +54,7 @@ def test_el_mercado_inicial_es_el_de_config_si_esta_en_el_panel(make_window):
 def test_mercado_inicial_fuera_del_panel_se_sustituye_por_el_primero(make_window):
     win, _ = make_window(["DJ30", "EURUSD"], symbol="GER40")
     assert win.current_symbol == "DJ30"
-    assert "GER40" in win.log_view.toPlainText() and "no está en el panel Mercados" in win.log_view.toPlainText()
+    assert "GER40" in win.log_view.toPlainText() and "no está en el panel Quotes" in win.log_view.toPlainText()
 
 
 def test_pinchar_una_tarjeta_carga_ese_mercado_con_el_timeframe_elegido(make_window):

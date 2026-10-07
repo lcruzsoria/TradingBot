@@ -4,7 +4,7 @@
 # cotizaciones, desfase horario, reglas del Bias, perfil de MT5, modo demo) están en tradingbot.env.
 
 [app]
-# Panel "Mercados": cotizaciones de solo lectura. Se edita desde la app (botón "Editar" del panel);
+# Panel "Quotes": cotizaciones de solo lectura. Se edita desde la app (botón "Editar" del panel);
 # lo que guardes allí queda en settings.local.json y tiene prioridad sobre esta lista. Usa los nombres EXACTOS de tu broker
 # (en MT5: Ver > Símbolos). Los que no existan se muestran como "No disponible".
 # Ojo con los sufijos del broker (por ejemplo NAS100FT.r): el bot los respeta tal cual y

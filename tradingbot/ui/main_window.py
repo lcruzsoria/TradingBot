@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
         self.log("TradingBot listo.")
         wanted = app_cfg["app"]["symbol"]
         if self.watchlist and self._match_symbol(wanted) is None:
-            self.log(f"'{wanted}' no está en el panel Mercados: se usa {self.current_symbol}.")
+            self.log(f"'{wanted}' no está en el panel Quotes: se usa {self.current_symbol}.")
 
     # -- construcción de la interfaz ---------------------------------------------------------
     def _build_header(self, subtitle: str, demo: bool) -> QFrame:
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout()
         left.setSpacing(10)
 
-        self.markets_panel = Panel("Mercados", "Pulsa una tarjeta para ver su gráfico")
+        self.markets_panel = Panel("Quotes", "Pulsa una tarjeta para ver su gráfico")   # como su skill en el hexágono
         self.edit_markets_btn = QPushButton("Editar")
         self.edit_markets_btn.setToolTip("Elegir qué mercados se muestran")
         self.markets_panel.add_header_widget(self.edit_markets_btn)
@@ -293,7 +293,7 @@ class MainWindow(QMainWindow):
 
     # -- utilidades -----------------------------------------------------------------------------
     def _sync_top_heights(self) -> None:
-        """Mercados, con la altura justa para sus tarjetas: el resto va al gráfico."""
+        """Quotes, con la altura justa para sus tarjetas: el resto va al gráfico."""
         self.markets_panel.setFixedHeight(self.markets_panel.sizeHint().height())
 
     def log(self, message: str) -> None:
@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
             return
         symbol = self.current_symbol
         if not symbol:
-            self.log("No hay mercados en el panel Mercados: añade alguno con el botón Editar.")
+            self.log("No hay mercados en el panel Quotes: añade alguno con el botón Editar.")
             return
         tf = self.current_tf()
         self._set_busy(True, "Conectando…" if not self.connected else f"Cargando {symbol} {display_label(tf)}…")
