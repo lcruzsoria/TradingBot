@@ -218,8 +218,9 @@ class BiasCard(QFrame):
         text = QVBoxLayout()
         text.setSpacing(0)
 
-        self.caption = QLabel("Sesgo de la sesión")
-        self.caption.setObjectName("BiasCaption")
+        self.caption = QLabel("Bias")                   # como su skill en el hexágono
+        self.caption.setObjectName("CardTitle")         # misma tipografía que el título del panel Skills
+        self.caption.setToolTip("Sesgo de la sesión del día en curso")
         self.value = QLabel("Sin calcular")
         self.value.setObjectName("BiasValue")
         self.detail = QLabel("Carga velas para calcular el sesgo")
