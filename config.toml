@@ -1,13 +1,9 @@
-# Ajustes de TradingBot (sin secretos: las cuentas van en el .env)
+# Ajustes de TradingBot que aún no están en tradingbot.env (sin secretos: las cuentas van en el .env)
+
+# Los ajustes de arranque y de cada skill (mercado y timeframe iniciales, tope de velas, refresco de
+# cotizaciones, desfase horario, reglas del Bias, perfil de MT5, modo demo) están en tradingbot.env.
 
 [app]
-symbol = "EURUSD"          # símbolo inicial (se puede cambiar en la interfaz)
-timeframe = "15m"          # 1m 3m 5m 15m 1h 3h 4h 7h 12h 1d 1w
-max_bars = 2000000         # tope de seguridad al cargar historial
-# Hora de Nueva York en la cabecera: el bot mide el desfase de tu servidor con los ticks en vivo.
-# Solo si no lo detecta bien (por ejemplo con el PC desincronizado), fíjalo a mano en horas respecto a UTC
-# (broker en verano: 3; en invierno: 2). Si lo fijas, hay que cambiarlo en cada cambio de horario.
-# server_utc_offset_hours = 3
 # Panel "Mercados": cotizaciones de solo lectura. Se edita desde la app (botón "Editar" del panel);
 # lo que guardes allí queda en settings.local.json y tiene prioridad sobre esta lista. Usa los nombres EXACTOS de tu broker
 # (en MT5: Ver > Símbolos). Los que no existan se muestran como "No disponible".
@@ -26,27 +22,6 @@ watchlist = ["NAS100", "SP500", "DJ30", "EURUSD", "XAUUSD", "USOIL", "BTCUSD", "
 # text = "#6cb2ff"     # texto principal (azul)
 # bull = "#19d98b"     # verde: alcista / positivo
 # bear = "#ff4757"     # rojo: bajista / negativo
-
-# ---------------------------------------------------------------------------
-# Bias: sesgo de la sesión del día en curso
-#   Bullish  -> solo se permiten operaciones alcistas (Long)
-#   Bearish  -> solo se permiten operaciones bajistas (Short)
-#   No Bias  -> se permiten ambas direcciones
-# Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión).
-# ---------------------------------------------------------------------------
-[bias]
-min_votes = 1        # votos mínimos en una dirección para que haya sesgo
-require_all = false  # true: TODAS las reglas activas deben votar lo mismo
-
-# Reglas de EJEMPLO para ver el sistema funcionando. Sustitúyelas por tus criterios.
-[[bias.rules]]
-type = "prev_day_break"
-enabled = true
-
-[[bias.rules]]
-type = "above_below_open"
-enabled = true
-tolerance_pct = 0.0
 
 # ---------------------------------------------------------------------------
 # Skills: cada una es un hexágono del panel "Skills" y se comunica con las demás

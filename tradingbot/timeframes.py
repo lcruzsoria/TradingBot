@@ -43,6 +43,16 @@ def display_label(label: str) -> str:
     return "1D" if m == 1440 else "1W"
 
 
+def parse_timeframe(text: str) -> str:
+    """Acepta la clave interna (15m, 1h) o el nombre en pantalla (M15, H1, 1D), sin distinguir mayúsculas."""
+    wanted = text.strip().lower()
+    for label in TIMEFRAMES:
+        if wanted in (label, display_label(label).lower()):
+            return label
+    raise ValueError(f"Timeframe no soportado: {text!r}. Opciones: "
+                     f"{', '.join(display_label(t) for t in TIMEFRAMES)} (o {', '.join(TIMEFRAMES)})")
+
+
 def base_timeframe(label: str) -> str:
     """Timeframe que hay que pedir realmente a MT5 (el mismo, salvo en los derivados)."""
     minutes(label)

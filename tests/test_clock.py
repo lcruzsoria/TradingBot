@@ -88,10 +88,10 @@ class LiveSource:
         return None
 
 
-def run_quotes(app_cfg, wait=0.8):
+def run_quotes(app_cfg, wait=0.8, env=None):
     bus, events = EventBus(), []
     bus.subscribe("t", "quotes.updated", events.append)
-    manager = SkillManager(bus, Services(LiveSource(), None, app_cfg), [{"type": "quotes", "slot": 5, "interval": 0.05}])
+    manager = SkillManager(bus, Services(LiveSource(), None, app_cfg, env), [{"type": "quotes", "slot": 5, "interval": 0.05}])
     manager.start()
     bus.publish("feed.connected", {}, source="ui")
     time.sleep(wait)
@@ -107,7 +107,9 @@ def test_la_skill_quotes_detecta_y_publica_el_desfase():
 
 
 def test_el_desfase_configurado_manda_sobre_la_deteccion():
-    last = run_quotes({"app": {"watchlist": ["EURUSD"], "server_utc_offset_hours": 2}}, wait=0.3)[-1].payload
+    from tradingbot.envconfig import EnvConfig
+    env = EnvConfig({"QUOTES_SERVER_UTC_OFFSET": "2"})               # en tradingbot.env
+    last = run_quotes({"app": {"watchlist": ["EURUSD"]}}, wait=0.3, env=env)[-1].payload
     assert last["server_offset"] == 7200 and last["offset_source"] == "configurado"
 
 

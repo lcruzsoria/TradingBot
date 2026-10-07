@@ -43,7 +43,7 @@ def main() -> int:
     from tradingbot.ui.main_window import MainWindow
 
     app = QApplication(sys.argv[:1])
-    cfg = load_app_config()                         # usa la watchlist de config.toml, no tus ajustes guardados
+    cfg = load_app_config()                         # watchlist de config.toml y valores por defecto del código, no tus ajustes
     cfg["app"]["symbol"], cfg["app"]["timeframe"] = args.symbol, args.timeframe
     args.out.mkdir(parents=True, exist_ok=True)
 

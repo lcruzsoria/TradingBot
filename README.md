@@ -16,9 +16,9 @@ Cabecera: estado de la conexión, cuenta, saldo/equity, P&L abierto, mercados co
 servidor comparando los ticks en vivo con el reloj de tu PC (unos segundos tras conectar) y convierte a Nueva York
 respetando el cambio de horario de EE. UU. Hasta que lo mide, la hora se marca como *(estimada)* y asume servidor = Nueva York + 7 h.
 Pasa el ratón sobre la caja para ver la hora del servidor y el desfase detectado. Si no lo detecta bien (PC desincronizado),
-fíjalo a mano con `server_utc_offset_hours` en `config.toml`. Las horas del eje del gráfico siguen siendo las del servidor.
+fíjalo a mano con `QUOTES_SERVER_UTC_OFFSET` en `tradingbot.env`. Las horas del eje del gráfico siguen siendo las del servidor.
 
-Panel **Mercados**: cotizaciones de solo lectura (se refrescan cada segundo). Con el botón **Editar** del panel eliges
+Panel **Mercados**: cotizaciones de solo lectura (se refrescan cada segundo; se cambia con `QUOTES_INTERVAL`). Con el botón **Editar** del panel eliges
 qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
 *oro*, *petróleo*, *bitcoin*...), añade, quita y reordena. Se aplica al instante y se guarda en `settings.local.json`
 (no se sube a git), que tiene prioridad sobre la `watchlist` de `config.toml`. Borrar ese fichero devuelve la lista de `config.toml`.
@@ -50,7 +50,8 @@ cd C:\Users\claude\DEV\TradingBot
 .\scripts\run.ps1 --profile real
 ```
 
-Opciones: `--profile`, `--env RUTA`, `--symbol EURUSD`, `--timeframe 5m`, `--theme blanco`, `--demo`.
+Opciones: `--profile`, `--env RUTA`, `--symbol EURUSD`, `--timeframe 5m`, `--theme blanco`, `--demo` / `--no-demo`.
+Mandan sobre `tradingbot.env` solo para esa vez (por ejemplo, `--no-demo` conecta con MT5 aunque `APP_DEMO=true`).
 
 `run.ps1` hace, por este orden:
 1. Lee `tradingbot.env` (ver abajo) y pasa sus valores a la app.
@@ -62,17 +63,45 @@ Opciones: `--profile`, `--env RUTA`, `--symbol EURUSD`, `--timeframe 5m`, `--the
 `tradingbot.env`, en la raíz del proyecto, gobierna el arranque y las skills. Es texto `CLAVE=valor`, organizado
 en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el nombre de su bloque:
 
-| Bloque | Claves | Para qué |
+| Clave | Por defecto | Para qué |
 |---|---|---|
-| APP | `APP_AUTO_UPDATE` | Actualizar el código desde GitHub al arrancar (`true`/`false`) |
-| UI | `UI_THEME` | Paleta de arranque: `matrix` (por defecto), `negro`, `pizarra` o `blanco` |
+| **APP** — arranque | | |
+| `APP_AUTO_UPDATE` | `false` | Traer el código nuevo de GitHub (`git pull`) antes de arrancar (`true`/`false`). Lo lee `run.ps1`. |
+| `APP_PROFILE` | vacío | Perfil de MT5 con el que conectar: el `<NOMBRE>` de `MT5_<NOMBRE>_LOGIN` del `.env` de cuentas. Vacío: el de `MT5_DEFAULT`. |
+| `APP_DEMO` | `false` | `true`: datos sintéticos, sin conectar con MT5 (como `--demo`). |
+| **FEED** — conexión y velas | | |
+| `FEED_SYMBOL` | `EURUSD` | Mercado que se carga al arrancar. Nombre exacto del broker, con mayúsculas y sufijos (`NAS100FT.r`). |
+| `FEED_TIMEFRAME` | `M15` | Timeframe al arrancar: `M1` `M3` `M5` `M15` `H1` `H3` `H4` `H7` `H12` `1D` `1W` (también vale `15m`, `1h`...). |
+| `FEED_MAX_BARS` | `2000000` | Tope de seguridad de velas a cargar por mercado y timeframe. |
+| **QUOTES** — cotizaciones y cuenta | | |
+| `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Mercados y de las cifras de la cuenta (admite decimales). |
+| `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
+| **BIAS** — sesgo del día | | |
+| `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |
+| `BIAS_MIN_VOTES` | `1` | Votos mínimos en una dirección para que haya sesgo. |
+| `BIAS_REQUIRE_ALL` | `false` | `true`: solo hay sesgo si todas las reglas activas votan lo mismo. |
+| `BIAS_<REGLA>_<PARÁMETRO>` | — | Parámetros de cada regla, p. ej. `BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0.1`. |
+| **UI** — interfaz | | |
+| `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
 
+Cada clave lleva en `tradingbot.env` un comentario que la explica, con su valor por defecto entre paréntesis.
+Una clave vacía, comentada o borrada usa el valor por defecto, que vive en el código (`tradingbot/config.py` y cada skill).
 Las opciones no usadas se dejan comentadas con `#`, así cambiar de paleta es mover el `#` de línea.
-Una variable de entorno con el mismo nombre tiene prioridad sobre el fichero, y `--theme` sobre ambas.
+Los decimales admiten punto o coma (`0.5` o `0,5`). Un valor no válido (por ejemplo `FEED_TIMEFRAME=H2`)
+para el arranque con un mensaje que dice qué clave corregir.
+
+Prioridad: opción de la línea de comandos (`--theme`, `--demo`, `--profile`, `--symbol`, `--timeframe`) >
+variable de entorno con el mismo nombre > `tradingbot.env` > valor por defecto del código.
+
+`config.toml` conserva solo la watchlist inicial, los colores sueltos (`[theme]`) y la disposición de las skills
+(`[[skills]]`). Si todavía tiene alguno de los ajustes antiguos (`symbol`, `timeframe`, `max_bars`,
+`server_utc_offset_hours` o la sección `[bias]`), la app no arranca y te dice a qué clave de `tradingbot.env` moverlo.
 No pongas contraseñas en este fichero: las cuentas de MT5 siguen en `C:\Users\claude\mt5\.env`.
 
-Para desarrolladores: cada skill lee su bloque con `self.settings` (por ejemplo, con `BIAS_MIN_VOTES=2`,
-la skill `bias` lee `self.settings.get_int("MIN_VOTES")`). Hay lectores para texto, enteros, decimales, sí/no y listas.
+Para desarrolladores: cada skill lee su bloque con `self.settings` (por ejemplo, con `QUOTES_INTERVAL=0.5`,
+la skill `quotes` lee `self.settings.get_float("INTERVAL", 1.0)`). Hay lectores para texto, enteros, decimales, sí/no y listas;
+el segundo argumento es el valor por defecto. Una skill nueva solo tiene que añadir su bloque (`RISK_...`) a `tradingbot.env`,
+con un comentario por clave, y documentarlo en la tabla de arriba.
 
 ### Cuentas (.env)
 
@@ -86,26 +115,24 @@ Protecciones al conectar:
 
 ### Cuántas velas se cargan
 
-Se piden a MT5 en bloques de 50.000 hasta que no entrega más (tope `max_bars` en `config.toml`).
+Se piden a MT5 en bloques de 50.000 hasta que no entrega más (tope `FEED_MAX_BARS` en `tradingbot.env`).
 MT5 limita lo que entrega con *Herramientas > Opciones > Gráficos > Máx. de barras en el gráfico*:
 ponlo en **Ilimitado** y reinicia el terminal. El historial disponible depende también del broker.
 
 ## Cómo funciona el Bias
 
-Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión). En `config.toml`:
+Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión). Se configura en el bloque BIAS de `tradingbot.env`:
 
-```toml
-[bias]
-min_votes = 1        # votos mínimos en una dirección
-require_all = false  # true: todas las reglas activas deben coincidir
-
-[[bias.rules]]
-type = "prev_day_break"
-enabled = true
+```ini
+BIAS_RULES=prev_day_break, above_below_open   # reglas activas
+BIAS_MIN_VOTES=1                              # votos mínimos en una dirección
+BIAS_REQUIRE_ALL=false                        # true: todas las reglas activas deben coincidir
+BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0         # parámetro tolerance_pct de above_below_open
 ```
 
-- `require_all = false`: hay sesgo si hay al menos `min_votes` votos en una dirección y ninguno en la contraria. Señales opuestas dan **No Bias**.
-- `require_all = true`: solo hay sesgo si todas las reglas votan lo mismo.
+- `BIAS_REQUIRE_ALL=false`: hay sesgo si hay al menos `BIAS_MIN_VOTES` votos en una dirección y ninguno en la contraria. Señales opuestas dan **No Bias**.
+- `BIAS_REQUIRE_ALL=true`: solo hay sesgo si todas las reglas votan lo mismo.
+- Para desactivar una regla, quítala de `BIAS_RULES`.
 
 Las dos reglas incluidas (`prev_day_break`, `above_below_open`) son **solo ejemplos** para ver el sistema funcionando. Sustitúyelas por tus criterios.
 
@@ -127,7 +154,9 @@ class MiRegla(BiasRule):
         return self.vote(1, "motivo legible")   # +1 alcista, -1 bajista, 0 sin opinión
 ```
 
-2. Actívala en `config.toml` con `[[bias.rules]]` y `type = "mi_regla"`. Cualquier clave adicional llega a la regla en `self.params`.
+2. Actívala añadiendo `mi_regla` a `BIAS_RULES` en `tradingbot.env`. Sus parámetros van en `BIAS_MI_REGLA_<PARÁMETRO>`
+   (por ejemplo `BIAS_MI_REGLA_PERIODO=20` llega como `self.params["periodo"] == 20`; los números se convierten solos).
+   Documenta cada clave nueva con un comentario en `tradingbot.env` y en la tabla de configuración de este README.
 3. Añade un test en `tests/test_bias.py`.
 
 ## Colores y tema
@@ -193,7 +222,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `cortex` | centro | Coordinador. Guarda el Bias vigente y responde a `trade.request` con `trade.verdict` (el filtro de operativa). |
 | `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
-| `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada segundo (`quotes.updated`). |
+| `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
 Los huecos del anillo (2, 3 y 4) aparecen como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
@@ -221,7 +250,7 @@ se registra solo; los que empiezan por `_` se ignoran.
 ```
 tradingbot/
   __main__.py        punto de entrada
-  config.py          .env (perfiles) y config.toml
+  config.py          .env (perfiles), config.toml y valores por defecto de tradingbot.env
   mt5_client.py      conexión y carga de velas (solo lectura)
   demo_data.py       datos sintéticos (--demo)
   core/              bus de eventos y base de las skills
@@ -229,8 +258,8 @@ tradingbot/
   envconfig.py       lectura de tradingbot.env (bloques por skill)
   bias/              modelos, contexto, reglas, motor y filtro de operativa
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
-tradingbot.env       configuración de arranque (paleta, actualización automática... y, en adelante, las skills)
-config.toml          ajustes y reglas del Bias
+tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, UI)
+config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
 tests/               pruebas del Bias
 ```

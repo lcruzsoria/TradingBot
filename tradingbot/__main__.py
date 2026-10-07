@@ -1,4 +1,7 @@
-"""Punto de entrada: python -m tradingbot [--demo] [--profile demo] [--symbol EURUSD] [--timeframe 15m]"""
+"""Punto de entrada: python -m tradingbot [--demo] [--profile demo] [--symbol EURUSD] [--timeframe 15m]
+
+Las opciones de la línea de comandos mandan sobre tradingbot.env (APP_PROFILE, APP_DEMO, FEED_SYMBOL, FEED_TIMEFRAME).
+"""
 from __future__ import annotations
 
 import argparse
@@ -15,10 +18,11 @@ from .timeframes import TIMEFRAMES
 
 def parse_args(argv):
     p = argparse.ArgumentParser(prog="tradingbot", description="TradingBot: MT5 + sesgo de sesión")
-    p.add_argument("--profile", help="perfil del .env (por defecto MT5_DEFAULT)")
+    p.add_argument("--profile", help="perfil del .env (por defecto APP_PROFILE o MT5_DEFAULT)")
     p.add_argument("--env", type=Path, default=DEFAULT_ENV_FILE, help=f"fichero de cuentas (por defecto {DEFAULT_ENV_FILE})")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_FILE, help="config.toml")
-    p.add_argument("--demo", action="store_true", help="usar datos sintéticos (no requiere MT5)")
+    p.add_argument("--demo", action=argparse.BooleanOptionalAction, default=None,
+                   help="usar datos sintéticos, sin MT5 (--no-demo: conectar aunque APP_DEMO=true)")
     p.add_argument("--symbol", help="símbolo inicial")
     p.add_argument("--timeframe", choices=list(TIMEFRAMES), help="timeframe inicial")
     p.add_argument("--theme", help="paleta de arranque (sustituye a UI_THEME de tradingbot.env)")
@@ -39,8 +43,8 @@ def main(argv=None) -> int:
     app = QApplication(sys.argv[:1])
 
     try:
-        cfg = load_app_config(args.config)
         env = envconfig.load()
+        cfg = load_app_config(args.config, env)
         theme_name, palette = theme.resolve(cfg["theme"], startup=args.theme or env.get("UI_THEME"))
         theme.apply(palette)
         app.setStyleSheet(theme.stylesheet())
@@ -52,17 +56,18 @@ def main(argv=None) -> int:
         cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"])
         engine = BiasEngine.from_config(cfg["bias"])
 
-        if args.demo:
+        demo = cfg["app"]["demo"] if args.demo is None else args.demo
+        if demo:
             from .demo_data import DemoSource
             source, subtitle = DemoSource(), "Modo demo sin conexión a MT5"
         else:
             from .mt5_client import Mt5Source
             profiles, default = load_profiles(args.env)
-            profile = select_profile(profiles, default, args.profile)
+            profile = select_profile(profiles, default, args.profile or cfg["app"]["profile"])
             source = Mt5Source(profile, int(cfg["app"]["max_bars"]))
             subtitle = f"Perfil {profile.label}"
     except (ConfigError, ValueError) as exc:
-        QMessageBox.critical(None, "TradingBot", f"{exc}\n\nPuedes probar la interfaz sin MT5 con:  --demo")
+        QMessageBox.critical(None, "TradingBot", f"{exc}\n\nPuedes probar la interfaz sin MT5 con  --demo  (o APP_DEMO=true en tradingbot.env)")
         return 2
 
     try:
@@ -74,7 +79,7 @@ def main(argv=None) -> int:
         return 2
 
     app.aboutToQuit.connect(manager.stop)   # cierra el hilo de cada skill y la conexión con MT5
-    window = MainWindow(bus, manager, cfg, subtitle, demo=args.demo, theme_name=theme_name)
+    window = MainWindow(bus, manager, cfg, subtitle, demo=demo, theme_name=theme_name)
     window.show()
     if args.screenshot:
         def shoot():

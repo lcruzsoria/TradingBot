@@ -5,7 +5,7 @@ y devuelve un RuleVote (+1 alcista, -1 bajista, 0 sin opinión).
 
 Para añadir un criterio nuevo:
   1. Crea aquí una clase nueva (copia una de las de ejemplo).
-  2. Añádela a config.toml dentro de [[bias.rules]] con su "type".
+  2. Actívala en tradingbot.env añadiendo su clave a BIAS_RULES (sus parámetros: BIAS_<REGLA>_<PARÁMETRO>).
 """
 from __future__ import annotations
 

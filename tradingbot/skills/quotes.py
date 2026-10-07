@@ -18,9 +18,13 @@ class QuotesSkill(Skill):
 
     def on_start(self) -> None:
         self.active = False
-        self.interval = float(self.params.get("interval", 1.0))
-        cfg_offset = self.services.app_cfg["app"].get("server_utc_offset_hours")
-        self.fixed_offset = None if cfg_offset is None else int(round(float(cfg_offset) * 3600))
+        # tradingbot.env: QUOTES_INTERVAL (segundos) y QUOTES_SERVER_UTC_OFFSET (horas; vacío = detectarlo)
+        interval = self.settings.get_float("INTERVAL", float(self.params.get("interval", 1.0)))
+        if interval <= 0:
+            raise ValueError(f"QUOTES_INTERVAL={interval} debe ser mayor que 0.")
+        self.interval = interval
+        offset_hours = self.settings.get_float("SERVER_UTC_OFFSET")
+        self.fixed_offset = None if offset_hours is None else int(round(offset_hours * 3600))
         self.detector = OffsetDetector()
         self.watchlist = [s.strip() for s in self.services.app_cfg["app"].get("watchlist", [])]
 
