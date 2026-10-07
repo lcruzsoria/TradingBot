@@ -34,6 +34,28 @@ añádelo primero con **Editar**. Si quitas el mercado que estás viendo, el gr�
   medianoche de cada día (hora del servidor): 00-07, 07-14, 14-21 y 21-24, esta última más corta (3 horas).
 - Con velas semanales (1W) el sesgo no se recalcula, porque "el día" no existe en ese timeframe: se conserva el último.
 
+**TBR** (botón junto al título del gráfico): marca en el gráfico las zonas horarias del día, todas en hora de Nueva York,
+con su color muy transparente para que se sigan viendo las velas:
+
+| Zona | Horario (NY) | Color |
+|---|---|---|
+| Asia | 20:00 - 00:00 | amarillo |
+| London | 02:00 - 05:00 | rojo |
+| Pre-NY | 09:00 - 10:00 | gris |
+| NY-AM | 10:00 - 12:00 | verde |
+| NY-PM | 13:30 - 16:30 | morado |
+
+Para cada zona ya terminada dibuja tres niveles con su color: **High** y **Low** (línea continua) y **50 %** (discontinua).
+Cada nivel empieza en la zona y se prolonga hacia la derecha hasta la primera vela posterior que lo toca o lo atraviesa;
+si ninguna lo ha tomado todavía, llega hasta el borde derecho del gráfico. Una zona en curso se pinta, pero sus niveles
+aparecen al terminar.
+- Horarios, colores, nombres, opacidad y días hacia atrás se cambian en el bloque **TBR** de `tradingbot.env`, donde
+  también se pueden añadir zonas nuevas.
+- Las velas llegan en hora del servidor del broker; las zonas se colocan con el desfase que mide Quotes (hasta medirlo
+  se asume servidor = Nueva York + 7 h, lo habitual en Vantage).
+- Solo se dibujan hasta H1 (`TBR_MAX_TF_MINUTES`): con velas más grandes las franjas no caben y el botón se desactiva.
+  Con H1, la zona 13:30-16:30 incluye las velas que se solapan con ella (de 13:00 a 16:00).
+
 Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long), con **Bearish** solo bajistas (Short), y con **No Bias** ambas. La futura capa de ejecución debe consultar `TradeFilter.check(direction)` antes de abrir cualquier trade.
 
 ## Requisitos
@@ -81,6 +103,13 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `BIAS_MIN_VOTES` | `1` | Votos mínimos en una dirección para que haya sesgo. |
 | `BIAS_REQUIRE_ALL` | `false` | `true`: solo hay sesgo si todas las reglas activas votan lo mismo. |
 | `BIAS_<REGLA>_<PARÁMETRO>` | — | Parámetros de cada regla, p. ej. `BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0.1`. |
+| **TBR** — zonas horarias del botón TBR | | |
+| `TBR_SHOW` | `false` | Botón TBR activado al arrancar. |
+| `TBR_DAYS` | `10` | Días naturales hacia atrás que se dibujan. |
+| `TBR_OPACITY` | `15` | Opacidad del relleno de las zonas, en % (0-100). |
+| `TBR_MAX_TF_MINUTES` | `60` | Timeframe máximo (en minutos) con el que se dibujan. |
+| `TBR_ZONES` | `ASIA, LONDON, PRE_NY, NY_AM, NY_PM` | Zonas activas y su orden. |
+| `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
 
@@ -222,12 +251,14 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `cortex` | centro | Coordinador. Guarda el Bias vigente y responde a `trade.request` con `trade.verdict` (el filtro de operativa). |
 | `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
+| `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
-Los huecos del anillo (2, 3 y 4) aparecen como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
+Los huecos del anillo (3 y 4) aparecen como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
-Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + cortex -> bias.updated -> cortex`.
+Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + cortex -> bias.updated -> cortex`.
+Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` recoloca las zonas.
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
 
 ### Añadir una skill nueva
@@ -254,11 +285,12 @@ tradingbot/
   mt5_client.py      conexión y carga de velas (solo lectura)
   demo_data.py       datos sintéticos (--demo)
   core/              bus de eventos y base de las skills
-  skills/            feed, quotes, bias, cortex y la plantilla para nuevas skills
+  skills/            feed, quotes, bias, tbr, cortex y la plantilla para nuevas skills
   envconfig.py       lectura de tradingbot.env (bloques por skill)
   bias/              modelos, contexto, reglas, motor y filtro de operativa
+  tbr.py             zonas horarias TBR y sus niveles High / Low / 50 %
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
-tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, UI)
+tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
 tests/               pruebas del Bias

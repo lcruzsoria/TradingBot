@@ -102,11 +102,15 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
     lines = envconfig.ENV_FILE.read_text(encoding="utf-8").splitlines()
     keys = [m.group(1) for line in lines if (m := re.match(r"#?([A-Z][A-Z0-9_]+)=", line))]
     for key in ("APP_PROFILE", "APP_DEMO", "FEED_SYMBOL", "FEED_TIMEFRAME", "FEED_MAX_BARS", "QUOTES_INTERVAL",
-                "QUOTES_SERVER_UTC_OFFSET", "BIAS_RULES", "BIAS_MIN_VOTES", "BIAS_REQUIRE_ALL"):
+                "QUOTES_SERVER_UTC_OFFSET", "BIAS_RULES", "BIAS_MIN_VOTES", "BIAS_REQUIRE_ALL", "TBR_SHOW",
+                "TBR_DAYS", "TBR_OPACITY", "TBR_MAX_TF_MINUTES", "TBR_ZONES", "TBR_ASIA_HOURS", "TBR_NY_PM_COLOR"):
         assert key in keys, f"falta {key} en tradingbot.env"
-    for i, line in enumerate(lines):                       # cada clave activa, con su comentario encima
+    for i, line in enumerate(lines):                       # cada grupo de claves, con su comentario encima
         if re.match(r"[A-Z]", line):
-            assert lines[i - 1].startswith("#"), f"{line} no tiene comentario"
+            j = i - 1
+            while re.match(r"[A-Z]", lines[j]):
+                j -= 1
+            assert lines[j].startswith("#"), f"{line} no tiene comentario"
     # tal como se sube al repositorio, el fichero equivale a los valores por defecto del código
     from tradingbot.config import DEFAULT_CONFIG_FILE
     project, defaults = load_app_config(DEFAULT_CONFIG_FILE, envconfig.load(environ={})), load_app_config(DEFAULT_CONFIG_FILE)
@@ -121,3 +125,8 @@ def test_las_opciones_de_la_linea_de_comandos_mandan(monkeypatch):
     from tradingbot.__main__ import parse_args
     assert parse_args([]).demo is None                      # sin opción: decide APP_DEMO
     assert parse_args(["--demo"]).demo is True and parse_args(["--no-demo"]).demo is False
+
+
+def test_las_zonas_tbr_del_proyecto_son_las_del_codigo():
+    from tradingbot.tbr import zones_from_settings
+    assert zones_from_settings(envconfig.load(environ={}).section("TBR")) == zones_from_settings(EnvConfig())

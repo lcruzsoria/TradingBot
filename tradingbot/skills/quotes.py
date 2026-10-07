@@ -12,7 +12,7 @@ class QuotesSkill(Skill):
     title = "Quotes"
     description = "Lee cada segundo las cotizaciones de la watchlist y el saldo, equity y P&L de la cuenta."
     subscribes = ("feed.connected", "watchlist.changed")
-    publishes = ("quotes.updated",)
+    publishes = ("quotes.updated", "clock.offset")
     slot = 5
     interval = 1.0
 
@@ -26,6 +26,7 @@ class QuotesSkill(Skill):
         offset_hours = self.settings.get_float("SERVER_UTC_OFFSET")
         self.fixed_offset = None if offset_hours is None else int(round(offset_hours * 3600))
         self.detector = OffsetDetector()
+        self._announced: tuple | None = None
         self.watchlist = [s.strip() for s in self.services.app_cfg["app"].get("watchlist", [])]
 
     def handle(self, event: Event) -> None:
@@ -47,5 +48,8 @@ class QuotesSkill(Skill):
                           else (self.detector.offset, "detectado" if self.detector.offset is not None else None))
         self.publish("quotes.updated", {"quotes": quotes, "account": source.account(),
                                         "server_offset": offset, "offset_source": origin})
+        if (offset, origin) != self._announced and origin is not None:
+            self._announced = (offset, origin)       # solo cuando cambia: lo usan las skills que trabajan en hora de NY
+            self.publish("clock.offset", {"server_offset": offset, "offset_source": origin})
         live = sum(1 for q in quotes.values() if q)
         self.set_caption(f"{live}/{len(watchlist)} símbolos")

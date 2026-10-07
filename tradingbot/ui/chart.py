@@ -135,6 +135,10 @@ class ChartView(pg.PlotWidget):
         self._last_value: float | None = None
         self._levels: dict[str, float] = {}
         self._n = 0
+        self._tbr_items: list = []
+        self._tbr_sessions: list = []
+        self._tbr_opacity = 0.15
+        self._tbr_visible = False
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
@@ -165,6 +169,7 @@ class ChartView(pg.PlotWidget):
         self.item.set_data(o, h, l, c)
         self.clear_levels()
         self._levels = {}
+        self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
         self.set_last_price(float(c[-1]))
         vb = self.getPlotItem().getViewBox()
         vb.setLimits(xMin=-5, xMax=self._n + 60)
@@ -202,3 +207,54 @@ class ChartView(pg.PlotWidget):
         for line in self._lines:
             self.getPlotItem().removeItem(line)
         self._lines.clear()
+
+    # -- TBR: zonas horarias y sus niveles ---------------------------------------------------------
+    def set_tbr(self, sessions: list, opacity: float | None = None) -> None:
+        """Zonas TBR calculadas (tradingbot.tbr.Session); solo se ven con show_tbr(True)."""
+        self._tbr_sessions = list(sessions)
+        if opacity is not None:
+            self._tbr_opacity = opacity
+        self._draw_tbr()
+
+    def show_tbr(self, visible: bool) -> None:
+        self._tbr_visible = visible
+        self._draw_tbr()
+
+    def _draw_tbr(self) -> None:
+        pi = self.getPlotItem()
+        for item in self._tbr_items:
+            pi.removeItem(item)
+        self._tbr_items.clear()
+        if not self._tbr_visible or not self._tbr_sessions:
+            return
+        lines: dict[tuple[str, str], tuple[list, list]] = {}
+        order = {z: i for i, z in enumerate(dict.fromkeys(s.zone.key for s in self._tbr_sessions))}
+        for s in self._tbr_sessions:
+            fill = QColor(s.zone.color)
+            fill.setAlphaF(self._tbr_opacity)
+            region = pg.LinearRegionItem(values=(s.x0, s.x1), movable=False, brush=fill, pen=pg.mkPen(None))
+            region.setZValue(-10)                       # detrás de las velas
+            for edge in region.lines:
+                edge.setHoverPen(pg.mkPen(None))
+            # etiquetas escalonadas: dos zonas seguidas (Pre-NY y NY-AM) no se pisan
+            pg.InfLineLabel(region.lines[0], text=s.zone.name, position=0.98 - 0.06 * (order[s.zone.key] % 2),
+                            anchor=(0, 0), color=s.zone.color)
+            pi.addItem(region, ignoreBounds=True)
+            self._tbr_items.append(region)
+            for level in s.levels:
+                xs, ys = lines.setdefault((s.zone.color, level.kind), ([], []))
+                xs += [level.x0, level.x1]
+                ys += [level.price, level.price]
+        for (color, kind), (xs, ys) in lines.items():
+            pen_color = QColor(color)
+            pen_color.setAlphaF(0.85)
+            style = Qt.PenStyle.DashLine if kind == "mid" else Qt.PenStyle.SolidLine
+            curve = pg.PlotCurveItem(x=np.array(xs), y=np.array(ys), connect="pairs",
+                                     pen=pg.mkPen(pen_color, width=1, style=style))
+            curve.setZValue(-5)
+            pi.addItem(curve, ignoreBounds=True)        # no cambian la escala del precio
+            self._tbr_items.append(curve)
+
+    @property
+    def tbr_item_count(self) -> int:
+        return len(self._tbr_items)

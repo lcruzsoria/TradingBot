@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
 
         self.tf_group.buttonClicked.connect(lambda _b: self.load_candles())
+        self.tbr_btn.toggled.connect(self.chart.show_tbr)
         self.recalc_btn.clicked.connect(lambda: self.bus.publish("bias.recalc", {}, source="ui"))
         self.colors_btn.clicked.connect(self.open_theme_editor)
         self.edit_markets_btn.clicked.connect(self.edit_watchlist)
@@ -83,7 +84,7 @@ class MainWindow(QMainWindow):
         self._handlers = {
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
-            "quotes.updated": self._on_quotes, "bias.updated": self._on_bias,
+            "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
         }
@@ -166,8 +167,18 @@ class MainWindow(QMainWindow):
         self.markets_panel.body.addWidget(self.markets)
         left.addWidget(self.markets_panel)
 
-        chart_panel = Panel("Gráfico", "Precio bid - hora del servidor del broker")
+        chart_panel = Panel("Gráfico")
         self.chart_panel = chart_panel
+        chart_panel.title.setToolTip("Precio bid. El eje de tiempo va en hora del servidor del broker.")
+        # TBR: zonas horarias de NY y sus niveles (skill tbr; horarios y colores en tradingbot.env, bloque TBR)
+        self.tbr_btn = QPushButton("TBR")
+        self.tbr_btn.setProperty("chip", "true")
+        self.tbr_btn.setCheckable(True)
+        self.tbr_btn.setToolTip("Mostrar las zonas horarias (hora de NY) y sus niveles High, Low y 50 %")
+        tbr_skill = self.manager.skills.get("tbr")
+        self.tbr_btn.setVisible(tbr_skill is not None)
+        self.tbr_btn.setChecked(tbr_skill is not None and tbr_skill.settings.get_bool("SHOW", False))
+        chart_panel.add_header_widget(self.tbr_btn)
         tools = QHBoxLayout()
         tools.setSpacing(6)
         self.tf_group = QButtonGroup(self)
@@ -198,6 +209,7 @@ class MainWindow(QMainWindow):
         self.error_banner.hide()
         chart_panel.body.addWidget(self.error_banner)
         self.chart = ChartView()
+        self.chart.show_tbr(self.tbr_btn.isChecked())
         chart_panel.body.addWidget(self.chart, 1)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
@@ -435,6 +447,23 @@ class MainWindow(QMainWindow):
         self.rules_list.set_result(result)
         self.chart.set_levels(result.levels)
         self.log(f"bias: {result.bias.value} - {result.summary}")
+
+    def _on_tbr(self, p: dict) -> None:
+        if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
+            return                                      # llega tarde: ya se está viendo otro gráfico
+        self.chart.set_tbr(p["sessions"], p["opacity"])
+        zones = ", ".join(f"{z.name} {z.hours}" for z in p["zones"])
+        if p["available"]:
+            tip = (f"Zonas TBR en hora de Nueva York: {zones}.\n"
+                   "Niveles High, Low y 50 % (discontinuo) hasta que una vela los toma.")
+            if p["estimated"]:
+                tip += "\nDesfase del servidor aún sin medir: se asume servidor = Nueva York + 7 h."
+        else:
+            top = max((t for t in TIMEFRAMES if TIMEFRAMES[t] <= p["max_tf"]), key=TIMEFRAMES.get, default=None)
+            tip = (f"Las zonas TBR solo se dibujan hasta {display_label(top) if top else '—'} "
+                   f"(TBR_MAX_TF_MINUTES): con velas más grandes no caben.")
+        self.tbr_btn.setEnabled(p["available"])
+        self.tbr_btn.setToolTip(tip)
 
     def _on_verdict(self, p: dict) -> None:
         if str(p.get("request_id", "")).startswith("ui-"):

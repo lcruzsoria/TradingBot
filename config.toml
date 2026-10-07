@@ -41,5 +41,9 @@ type = "bias"
 slot = 1
 
 [[skills]]
+type = "tbr"
+slot = 2
+
+[[skills]]
 type = "quotes"
 slot = 5
