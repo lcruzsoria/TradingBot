@@ -144,6 +144,10 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre centrado. |
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
+| **SETUP** — la estrategia (tomas de liquidez de las zonas TBR) | | |
+| `SETUP_CONFIRM_BARS` | `3` | Velas de confirmación tras la toma del nivel, contando la que lo toma. |
+| `SETUP_ZONES` | vacío | Claves de las zonas TBR que se vigilan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `SETUP_TYPES` | `reversal, continuation` | Tipos de setup que interesan. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
@@ -289,12 +293,14 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
+| `setup` | 4 | La estrategia: continuaciones o reversiones tras tomar la liquidez del High o el Low de una zona TBR (`candles.loaded` + `tbr.updated` -> `setup.updated`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
-El hueco del anillo 4 aparece como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
+El anillo está completo; quedan libres los tres satélites pequeños (`aux1`, `aux2`, `aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
-Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + cortex -> bias.updated -> cortex`.
+Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + setup + cortex -> bias.updated -> cortex`;
+`tbr -> tbr.updated -> setup -> setup.updated` (los setups nuevos se anotan en el Registro).
 Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` y `levels` recolocan lo que depende de la hora de NY.
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
 
@@ -336,9 +342,10 @@ tradingbot/
     cortex/          coordinador y filtro de operativa: skill.py
     tbr/             zonas horarias TBR: skill.py, zones.py
     levels/          TDO, Midnight, PDH / PDL y separadores de día: skill.py, daylevels.py
+    setup/           la estrategia (tomas de liquidez de las zonas TBR): skill.py, setups.py
     _plantilla/      carpeta a copiar para crear una skill nueva
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
-tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, UI)
+tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, SETUP, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
 tests/               pruebas (uv run pytest)

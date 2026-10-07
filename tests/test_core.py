@@ -135,7 +135,7 @@ def test_cada_skill_tiene_su_carpeta():
     from pathlib import Path
     from tradingbot.core.skill import SKILL_REGISTRY
     root = Path(tradingbot.skills.__file__).parent
-    assert {"feed", "quotes", "bias", "cortex", "tbr", "levels"} <= set(SKILL_REGISTRY)
+    assert {"feed", "quotes", "bias", "cortex", "tbr", "levels", "setup"} <= set(SKILL_REGISTRY)
     for key, cls in SKILL_REGISTRY.items():
         if not cls.__module__.startswith("tradingbot."):
             continue                                    # skills de prueba definidas dentro de los tests

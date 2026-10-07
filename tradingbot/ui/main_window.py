@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels,
+            "levels.updated": self._on_day_levels, "setup.updated": self._on_setup,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
         }
@@ -534,6 +534,14 @@ class MainWindow(QMainWindow):
             btn.setEnabled(p["available"])
             btn.setToolTip(btn.property("tip") if p["available"] else
                            "Los niveles del día no se dibujan con velas diarias o semanales (LEVELS_MAX_TF_MINUTES).")
+
+    def _on_setup(self, p: dict) -> None:
+        last = p["last"]
+        key = (p["symbol"], last.sweep_x, last.side) if last else None
+        if last and key != getattr(self, "_last_setup", None):   # solo cuando aparece uno nuevo
+            self.log(f"setup: {last.label} ({p['symbol']} {display_label(p['timeframe'])}, "
+                     f"nivel {last.level:g}, día {last.day:%d/%m})")
+        self._last_setup = key
 
     def _on_verdict(self, p: dict) -> None:
         if str(p.get("request_id", "")).startswith("ui-"):

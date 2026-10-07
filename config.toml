@@ -49,5 +49,9 @@ type = "levels"
 slot = 3
 
 [[skills]]
+type = "setup"
+slot = 4
+
+[[skills]]
 type = "quotes"
 slot = 5

@@ -21,7 +21,7 @@ DEFAULT_WATCHLIST = ("NAS100", "SP500", "DJ30", "EURUSD", "XAUUSD", "USOIL", "BT
 
 
 DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type": "tbr"}, {"type": "levels"},
-                  {"type": "quotes"})
+                  {"type": "setup"}, {"type": "quotes"})
 
 # Valores por defecto de tradingbot.env
 DEFAULT_SYMBOL = "EURUSD"                                     # FEED_SYMBOL
