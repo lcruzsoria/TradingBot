@@ -64,21 +64,23 @@ lleva hasta el momento; sus niveles aparecen al terminar.
 - Solo se dibujan hasta H1 (`TBR_MAX_TF_MINUTES`): con velas más grandes las franjas no caben y el botón se desactiva.
   Con H1, la zona 13:30-16:30 incluye las velas que se solapan con ella (de 13:00 a 16:00).
 
-**Niveles del día** (botones **TDO**, **Midnight** y **PDH/PDL**, junto a TBR). El día es el día de trading del broker,
-el mismo que usa el Bias (en Vantage empieza a las 17:00 de Nueva York, y su primera vela, a las 18:00, es la apertura):
+**Niveles del día** (botones **TDO**, **Midnight** y **PDH/PDL**, junto a TBR). El día de trading empieza a una hora de
+Nueva York que depende del activo: a las **18:00 en los índices americanos** (NAS100, SP500, DJ30...) y a las **17:00 en
+el resto** (forex, metales, cripto...). Lleva el nombre del día en que termina: el que empieza el martes a las 17:00 es
+el MIÉRCOLES. Las horas y la lista de índices se cambian en el bloque LEVELS de `tradingbot.env`:
 
 | Botón | Nivel | Línea |
 |---|---|---|
-| TDO | Apertura del mercado: precio de apertura de la primera vela del día | gris, discontinua |
+| TDO | True Day Open: precio de apertura de la primera vela del día de trading (18:00 / 17:00 NY) | gris, discontinua |
 | Midnight | Precio de apertura de la vela de las 00:00 de Nueva York | naranja, punteada |
 | PDH/PDL | Máximo y mínimo del día de trading anterior (Previous Day High / Low) | azul, discontinua |
 
 Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al final de la línea; los del día en curso
-pasan un poco de la última vela. Además, una **línea vertical punteada** separa los días, con el nombre del día abajo
-(LUNES, MARTES...). Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
+pasan un poco de la última vela. Además, una **línea vertical punteada** marca el inicio de cada día de trading, y el
+nombre del día (LUNES, MARTES...) va abajo, centrado entre su separador y el siguiente. Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
 colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
 Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *Apertura* que antes pintaba el Bias
-(el Bias sigue usando esos mismos valores en sus reglas).
+(el Bias sigue usando el día del servidor del broker en sus reglas).
 
 Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long), con **Bearish** solo bajistas (Short), y con **No Bias** ambas. La futura capa de ejecución debe consultar `TradeFilter.check(direction)` antes de abrir cualquier trade.
 
@@ -136,7 +138,9 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |
 | **LEVELS** — niveles del día y separadores | | |
 | `LEVELS_SHOW_TDO` / `_SHOW_MIDNIGHT` / `_SHOW_PDHL` | `false` | Botones TDO, Midnight y PDH/PDL activados al arrancar. |
-| `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre. |
+| `LEVELS_INDEX_DAY_START` / `LEVELS_DAY_START` | `18:00` / `17:00` | Inicio del día de trading (separador y TDO), en hora de NY: índices americanos / resto de activos. |
+| `LEVELS_US_INDICES` | `NAS100, SP500, DJ30, US30, US100, US500, USTEC, US2000, SPX500, NDX100` | Inicios de nombre que cuentan como índice americano (sin distinguir mayúsculas; `NAS100` vale para `NAS100.r`). |
+| `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre centrado. |
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |

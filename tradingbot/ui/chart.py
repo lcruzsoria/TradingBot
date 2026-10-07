@@ -23,17 +23,23 @@ LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
 
 
 class DaySeparators(pg.GraphicsObject):
-    """Líneas verticales punteadas al empezar cada día, con su nombre abajo. Solo pinta las visibles."""
+    """Líneas verticales punteadas al empezar cada día y su nombre abajo, centrado entre su separador y el siguiente.
+
+    Solo pinta lo visible, así sirve para todo el histórico.
+    """
 
     def __init__(self) -> None:
         super().__init__()
-        self._x = np.empty(0)
+        self._x = np.empty(0)                           # separadores (inicio de cada día salvo el primero cargado)
+        self._centers = np.empty(0)                     # centro de cada día, donde va su nombre
         self._labels: list[str] = []
         self._color = QColor("#787B86")
 
-    def set_data(self, separators: list, color: str) -> None:
-        self._x = np.array([s.x for s in separators], dtype=float)
-        self._labels = [s.label for s in separators]
+    def set_data(self, days: list, color: str) -> None:
+        """days: tradingbot.skills.levels.daylevels.Day (bordes x0 / x1 y nombre)."""
+        self._x = np.array([d.x0 for d in days[1:]], dtype=float)
+        self._centers = np.array([d.center for d in days], dtype=float)
+        self._labels = [d.label for d in days]
         self._color = QColor(color)
         self.update()
 
@@ -43,11 +49,12 @@ class DaySeparators(pg.GraphicsObject):
 
     def paint(self, p, *args) -> None:
         vb = self.getViewBox()
-        if vb is None or not len(self._x):
+        if vb is None or not len(self._centers):
             return
         (x0, x1), (y0, y1) = vb.viewRange()
         i0, i1 = np.searchsorted(self._x, [x0, x1])
-        if i1 - i0 > 400:                               # muy alejado: los separadores no aportan nada
+        c0, c1 = np.searchsorted(self._centers, [x0, x1])
+        if c1 - c0 > 400:                               # muy alejado: los separadores no aportan nada
             return
         pen = QPen(self._color)
         pen.setCosmetic(True)
@@ -57,9 +64,10 @@ class DaySeparators(pg.GraphicsObject):
             p.drawLine(QPointF(x, y0), QPointF(x, y1))
         transform = p.transform()                       # el texto, en píxeles (sin estirarse con el zoom)
         p.resetTransform()
-        for x, label in zip(self._x[i0:i1], self._labels[i0:i1]):
-            pt = transform.map(QPointF(x, y0))
-            p.drawText(QPointF(pt.x() + 5, pt.y() - 6), label)
+        metrics = p.fontMetrics()
+        for cx, label in zip(self._centers[c0:c1], self._labels[c0:c1]):
+            pt = transform.map(QPointF(cx, y0))
+            p.drawText(QPointF(pt.x() - metrics.horizontalAdvance(label) / 2, pt.y() - 6), label)
 
 
 class ScaleAxis(pg.AxisItem):
@@ -411,9 +419,9 @@ class ChartView(pg.PlotWidget):
         return len(self._tbr_items)
 
     # -- niveles del día (TDO, Midnight, PDH / PDL) y separadores de día ------------------------------
-    def set_day_levels(self, lines: list, separators: list, colors: dict[str, str]) -> None:
+    def set_day_levels(self, lines: list, days: list, colors: dict[str, str]) -> None:
         self._day_lines, self._day_colors = list(lines), dict(colors)
-        self.separators.set_data(separators, colors.get("separator", "#787B86"))
+        self.separators.set_data(days, colors.get("separator", "#787B86"))
         self._draw_day_levels()
 
     def show_level(self, group: str, visible: bool) -> None:

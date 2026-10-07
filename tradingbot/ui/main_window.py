@@ -517,7 +517,7 @@ class MainWindow(QMainWindow):
     def _on_day_levels(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return
-        self.chart.set_day_levels(p["lines"], p["separators"], p["colors"])
+        self.chart.set_day_levels(p["lines"], p["days"], p["colors"])
         for btn in self.level_btns.values():
             btn.setEnabled(p["available"])
             btn.setToolTip(btn.property("tip") if p["available"] else

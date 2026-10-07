@@ -1,15 +1,18 @@
 """Niveles del día: TDO, Midnight, PDH / PDL y separadores de día.
 
-El "día de trading" es el día del servidor del broker, el mismo que usa el Bias (en Vantage, servidor = NY + 7 h:
-el día empieza a las 17:00 de NY y su primera vela, a las 18:00, es la apertura del mercado).
+El "día de trading" empieza a una hora fija de Nueva York que depende del activo (tradingbot.env, bloque LEVELS):
+las 18:00 para los índices americanos (NAS100, SP500, DJ30...) y las 17:00 para el resto. Lleva el nombre del día en
+que termina: el que empieza el martes a las 17:00 es el MIÉRCOLES.
 
-- TDO: apertura de la primera vela del día de trading (apertura del mercado).
+- TDO (True Day Open): apertura de la primera vela del día de trading.
 - Midnight: apertura de la primera vela desde las 00:00 de Nueva York de ese día.
 - PDH / PDL: máximo y mínimo del día de trading anterior.
 Cada nivel se dibuja desde su vela hasta el final de su día; los del día en curso, un poco más allá de la última vela.
+Un separador vertical marca el inicio de cada día, y el nombre del día va centrado entre su separador y el siguiente.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 
@@ -23,6 +26,11 @@ WEEKDAYS = ("LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DO
 DEFAULT_DAYS = 10
 DEFAULT_MAX_TF_MINUTES = 720          # hasta H12: con velas diarias "el día" es una sola vela
 DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86"}
+DEFAULT_DAY_START = "17:00"           # inicio del día (y TDO) en hora de NY: forex, metales, cripto...
+DEFAULT_INDEX_DAY_START = "18:00"     # ...y en los índices americanos
+DEFAULT_US_INDICES = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")
+
+TIME = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*$")
 
 
 @dataclass(frozen=True)
@@ -34,44 +42,68 @@ class Line:
 
 
 @dataclass(frozen=True)
-class Separator:
-    x: float             # entre la última vela de un día y la primera del siguiente
-    label: str           # día de la semana del día que empieza
+class Day:
+    """Un día de trading en el eje del gráfico (índices de vela +- 0,5)."""
+    x0: float            # borde izquierdo: aquí va su separador (salvo en el primer día cargado)
+    x1: float            # borde derecho: el separador del día siguiente, o la última vela
+    label: str           # nombre del día (LUNES, MARTES...)
+
+    @property
+    def center(self) -> float:
+        return (self.x0 + self.x1) / 2
 
 
-def day_index(ts) -> np.ndarray:
-    """Día de trading (día del servidor) de cada vela, como número de días desde 1970."""
-    return np.asarray(ts, dtype=np.int64) // DAY
+def parse_time(text: str, key: str) -> int:
+    """'17:00' -> minutos desde medianoche."""
+    match = TIME.match(text or "")
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        raise ValueError(f"{key}={text!r}: usa el formato HH:MM (por ejemplo 17:00).")
+    return int(match.group(1)) * 60 + int(match.group(2))
 
 
-def separators(ts) -> list[Separator]:
-    """Un separador al empezar cada día de trading (todo el histórico; se pintan solo los visibles)."""
-    days = day_index(ts)
-    if len(days) < 2:
-        return []
-    starts = np.flatnonzero(np.diff(days)) + 1
-    return [Separator(float(i) - 0.5, WEEKDAYS[_date(int(days[i])).weekday()]) for i in starts]
+def is_us_index(symbol: str, prefixes) -> bool:
+    """NAS100.r, nas100ft.r, SP500... (sin distinguir mayúsculas y con cualquier sufijo del broker)."""
+    name = symbol.strip().lower()
+    return any(name.startswith(p.strip().lower()) for p in prefixes if p.strip())
 
 
-def compute(ts, open_, high, low, server_ahead: int, days: int = DEFAULT_DAYS) -> list[Line]:
-    """Líneas de los últimos `days` días de trading con velas."""
+def trading_day(ts, server_ahead: int, start_minutes: int) -> np.ndarray:
+    """Día de trading de cada vela (días desde 1970, con la fecha del día en que termina)."""
+    ny = np.asarray(ts, dtype=np.int64) - int(server_ahead)
+    return (ny - start_minutes * 60) // DAY + 1
+
+
+def days(ts, server_ahead: int, start_minutes: int) -> list[Day]:
+    """Los días de trading del histórico, con sus bordes en el eje y su nombre."""
     n = len(ts)
-    if n == 0 or days <= 0:
+    if n == 0:
+        return []
+    day_of = trading_day(ts, server_ahead, start_minutes)
+    starts = np.r_[0, np.flatnonzero(np.diff(day_of)) + 1]
+    ends = np.r_[starts[1:], n]
+    return [Day(float(i0) - 0.5, float(i1) - 0.5, WEEKDAYS[_date(int(day_of[i0])).weekday()])
+            for i0, i1 in zip(starts, ends)]
+
+
+def compute(ts, open_, high, low, server_ahead: int, start_minutes: int,
+            days_back: int = DEFAULT_DAYS) -> list[Line]:
+    """Líneas de los últimos `days_back` días de trading con velas."""
+    n = len(ts)
+    if n == 0 or days_back <= 0:
         return []
     ts = np.asarray(ts, dtype=np.int64)
     open_, high, low = (np.asarray(a, dtype=float) for a in (open_, high, low))
-    day_of = ts // DAY
+    day_of = trading_day(ts, server_ahead, start_minutes)
     starts = np.r_[0, np.flatnonzero(np.diff(day_of)) + 1]
     ends = np.r_[starts[1:], n]
     out: list[Line] = []
-    first = max(0, len(starts) - days)
-    for k in range(first, len(starts)):
+    for k in range(max(0, len(starts) - days_back), len(starts)):
         i0, i1 = int(starts[k]), int(ends[k])
         x0 = i0 - 0.5
         x1 = float(n - 1 + EXTEND_BARS) if k == len(starts) - 1 else i1 - 0.5
         out.append(Line("tdo", float(open_[i0]), x0, x1))
-        # medianoche de Nueva York dentro de este día del servidor
-        midnight = int(day_of[i0]) * DAY + server_ahead % DAY
+        # 00:00 de Nueva York del día en que termina este día de trading, en hora del servidor
+        midnight = int(day_of[i0]) * DAY + int(server_ahead)
         j = i0 + int(np.searchsorted(ts[i0:i1], midnight, "left"))
         if j < i1:
             out.append(Line("midnight", float(open_[j]), j - 0.5, x1))
