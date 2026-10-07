@@ -286,7 +286,7 @@ QFrame#MarketCard {{ background: {PANEL}; border: 1px solid {BORDER}; border-rad
 QFrame#MarketCard:hover {{ border-color: {mix(BORDER, ACCENT, 0.5)}; }}
 QFrame#MarketCard[selected="true"] {{ border: 1px solid {SELECT}; }}
 QLabel#MkSymbol {{ font-weight: 700; font-size: 12px; background: transparent; }}
-QLabel#MkPrice {{ font-size: 19px; font-weight: 700; background: transparent; }}
+QLabel#MkPrice {{ font-size: 16px; font-weight: 700; background: transparent; }}
 QLabel#MkSub {{ color: {MUTED}; font-size: 10px; background: transparent; }}
 QLabel#MkBadge {{ background: {PANEL_ALT}; color: {MUTED}; border: 1px solid {BORDER}; border-radius: 3px; padding: 0px 5px; font-size: 10px; }}
 QFrame#MarketCard[stale="true"] QLabel#MkPrice {{ color: {MUTED}; }}
@@ -298,12 +298,12 @@ QFrame#BiasCard[state="bull"] {{ background: {mix(PANEL, BULL, 0.18)}; border: 1
 QFrame#BiasCard[state="bear"] {{ background: {mix(PANEL, BEAR, 0.18)}; border: 1px solid {BEAR}; }}
 QFrame#BiasCard[state="none"] {{ background: {PANEL_ALT}; border: 1px solid {MUTED}; }}
 QLabel#BiasCaption {{ color: {MUTED}; font-size: 12px; background: transparent; }}
-QLabel#BiasValue {{ font-size: 38px; font-weight: 800; background: transparent; color: {NEUTRAL}; }}
+QLabel#BiasValue {{ font-size: 28px; font-weight: 800; background: transparent; color: {NEUTRAL}; }}
 QFrame#BiasCard[state="bull"] QLabel#BiasValue {{ color: {BULL}; }}
 QFrame#BiasCard[state="bear"] QLabel#BiasValue {{ color: {BEAR}; }}
 QLabel#BiasDetail {{ color: {MUTED}; background: transparent; }}
 
-QLabel#Chip {{ border-radius: 4px; padding: 6px 10px; font-weight: 600; background: {mix(PANEL, TEXT, 0.06)}; color: {MUTED}; }}
+QLabel#Chip {{ border-radius: 4px; padding: 4px 10px; font-weight: 600; background: {mix(PANEL, TEXT, 0.06)}; color: {MUTED}; }}
 QLabel#Chip[allowed="true"] {{ background: {mix(PANEL, BULL, 0.20)}; color: {BULL}; }}
 QLabel#Chip[allowed="false"] {{ background: {mix(PANEL, BEAR, 0.18)}; color: {mix(BEAR, TEXT, 0.15)}; }}
 

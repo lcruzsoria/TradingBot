@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         self._set_status("Sin conectar", "busy")
         self.recalc_btn.setEnabled(False)
         self.markets.set_selected(self.current_symbol)
+        self._sync_top_heights()
         first = "cortex" if "cortex" in manager.skills else next(iter(manager.skills), None)
         if first:
             self.ring.selected = first
@@ -275,6 +276,12 @@ class MainWindow(QMainWindow):
         return side
 
     # -- utilidades -----------------------------------------------------------------------------
+    def _sync_top_heights(self) -> None:
+        """Mercados y Sesgo, con la altura justa y la misma: el resto va al gráfico y al panel Skills."""
+        h = max(self.markets_panel.sizeHint().height(), self.bias_card.sizeHint().height())
+        self.markets_panel.setFixedHeight(h)
+        self.bias_card.setFixedHeight(h)
+
     def log(self, message: str) -> None:
         self.log_view.appendPlainText(f"[{datetime.now():%H:%M:%S}] {message}")
 
@@ -352,6 +359,7 @@ class MainWindow(QMainWindow):
         symbols = settings.clean_symbols(symbols)
         self.watchlist = symbols
         self.markets.set_symbols(symbols)
+        self._sync_top_heights()
         kept = self._match_symbol(self.current_symbol)
         self.current_symbol = kept or (symbols[0] if symbols else "")
         self.markets.set_selected(self.current_symbol)

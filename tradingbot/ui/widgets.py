@@ -89,32 +89,32 @@ class MarketCard(QFrame):
         self.setProperty("selected", "false")
         self.setProperty("stale", "false")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Compacta (dos líneas): símbolo y antigüedad del tick arriba, precio abajo; bid / ask en la ayuda emergente.
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(11, 8, 11, 8)
-        lay.setSpacing(1)
+        lay.setContentsMargins(9, 5, 9, 5)
+        lay.setSpacing(0)
 
         top = QHBoxLayout()
+        top.setSpacing(4)
         self.name = QLabel(symbol)
         self.name.setObjectName("MkSymbol")
-        self.badge = QLabel("Mercado cerrado")
+        self.badge = QLabel("Cerrado")
         self.badge.setObjectName("MkBadge")
+        self.badge.setToolTip("Mercado cerrado: su último tick va más de 5 minutos por detrás del más reciente")
         self.badge.hide()
+        self.age = QLabel("")
+        self.age.setObjectName("MkSub")
         top.addWidget(self.name)
         top.addStretch(1)
         top.addWidget(self.badge)
+        top.addWidget(self.age)
         self.price = QLabel("-")
         self.price.setObjectName("MkPrice")
-        bottom = QHBoxLayout()
-        self.spread = QLabel("")
+        self.spread = QLabel("")            # bid / ask: no se muestra en la tarjeta, va en su ayuda emergente
         self.spread.setObjectName("MkSub")
-        self.age = QLabel("")
-        self.age.setObjectName("MkSub")
-        bottom.addWidget(self.spread)
-        bottom.addStretch(1)
-        bottom.addWidget(self.age)
+        self.spread.hide()
         lay.addLayout(top)
         lay.addWidget(self.price)
-        lay.addLayout(bottom)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -130,7 +130,8 @@ class MarketCard(QFrame):
             self.price.setStyleSheet("")
             self.price.setText("-")
             self.spread.setText("No disponible en este broker")
-            self.age.setText("")
+            self.age.setText("N/D")
+            self.setToolTip(f"{self.symbol}: no disponible en este broker")
             self._set_stale(True, badge=False)
             return
         stale = age > STALE_AFTER_SECONDS
@@ -143,6 +144,8 @@ class MarketCard(QFrame):
         self.price.setText(fmt_price(quote.bid))
         self.spread.setText(f"{fmt_price(quote.bid)} / {fmt_price(quote.ask)}")
         self.age.setText(hace(age))
+        self.setToolTip(f"{self.symbol}  -  bid / ask: {self.spread.text()}\nÚltimo tick {hace(age)}. "
+                        "Pulsa para ver su gráfico.")
         self._set_stale(stale, badge=stale)
 
     def _set_stale(self, stale: bool, badge: bool) -> None:
@@ -158,7 +161,7 @@ class MarketsGrid(QWidget):
 
     symbol_selected = Signal(str)
 
-    def __init__(self, symbols: list[str], columns: int = 4) -> None:
+    def __init__(self, symbols: list[str], columns: int = 8) -> None:
         super().__init__()
         self.cards: dict[str, MarketCard] = {}
         self._columns = columns
@@ -208,9 +211,12 @@ class BiasCard(QFrame):
         super().__init__()
         self.setObjectName("BiasCard")
         self.setProperty("state", "idle")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 14, 18, 16)
-        lay.setSpacing(2)
+        # Compacto, a la altura del panel Mercados: sesgo a la izquierda y chips Long / Short a la derecha.
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 8, 12, 8)
+        lay.setSpacing(12)
+        text = QVBoxLayout()
+        text.setSpacing(0)
 
         self.caption = QLabel("Sesgo de la sesión")
         self.caption.setObjectName("BiasCaption")
@@ -221,7 +227,7 @@ class BiasCard(QFrame):
         self.detail.setWordWrap(True)
 
         chips = QVBoxLayout()
-        chips.setSpacing(5)
+        chips.setSpacing(4)
         self.long_chip = ClickableLabel("Long")
         self.short_chip = ClickableLabel("Short")
         for chip, direction in ((self.long_chip, Direction.LONG), (self.short_chip, Direction.SHORT)):
@@ -232,10 +238,12 @@ class BiasCard(QFrame):
             chip.clicked.connect(lambda d=direction: self.probe.emit(d))
             chips.addWidget(chip)
 
-        lay.addWidget(self.caption)
-        lay.addWidget(self.value)
-        lay.addWidget(self.detail)
-        lay.addSpacing(8)
+        self.detail.setWordWrap(False)
+        text.addWidget(self.caption)
+        text.addWidget(self.value)
+        text.addWidget(self.detail)
+        text.addStretch(1)
+        lay.addLayout(text, 1)
         lay.addLayout(chips)
 
     def set_loading(self) -> None:
@@ -254,8 +262,9 @@ class BiasCard(QFrame):
             state = {Bias.BULLISH: "bull", Bias.BEARISH: "bear", Bias.NO_BIAS: "none"}[result.bias]
             self.setProperty("state", state)
             self.value.setText(result.bias.value)
-            day = f"{fecha_larga(result.day)}. " if result.day else ""
-            self.detail.setText(f"{day}{result.summary}")
+            # la fecha en la tarjeta; el resumen de votos, en la ayuda emergente (no cabe en la versión compacta)
+            self.detail.setText(fecha_larga(result.day) if result.day else result.summary)
+            self.setToolTip(f"{fecha_larga(result.day)}. {result.summary}" if result.day else result.summary)
             for chip, direction, arrow in ((self.long_chip, Direction.LONG, "▲"), (self.short_chip, Direction.SHORT, "▼")):
                 ok = result.allows(direction)
                 chip.setProperty("allowed", "true" if ok else "false")

@@ -31,7 +31,7 @@ def test_mercados_marca_cerrado_y_no_disponible(qapp):
                      "RARO": None})
     assert grid.cards["EURUSD"].property("stale") == "false"
     assert grid.cards["GER40"].property("stale") == "true" and not grid.cards["GER40"].badge.isHidden()
-    assert "No disponible" in grid.cards["RARO"].spread.text()
+    assert "No disponible" in grid.cards["RARO"].spread.text() and "no disponible" in grid.cards["RARO"].toolTip()
     grid.set_selected("eurusd")
     assert grid.cards["EURUSD"].property("selected") == "true"
     assert grid.cards["GER40"].property("selected") == "false"
