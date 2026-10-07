@@ -57,6 +57,22 @@ lleva hasta el momento; sus niveles aparecen al terminar.
 - Solo se dibujan hasta H1 (`TBR_MAX_TF_MINUTES`): con velas más grandes las franjas no caben y el botón se desactiva.
   Con H1, la zona 13:30-16:30 incluye las velas que se solapan con ella (de 13:00 a 16:00).
 
+**Niveles del día** (botones **TDO**, **Midnight** y **PDH/PDL**, junto a TBR). El día es el día de trading del broker,
+el mismo que usa el Bias (en Vantage empieza a las 17:00 de Nueva York, y su primera vela, a las 18:00, es la apertura):
+
+| Botón | Nivel | Línea |
+|---|---|---|
+| TDO | Apertura del mercado: precio de apertura de la primera vela del día | gris, discontinua |
+| Midnight | Precio de apertura de la vela de las 00:00 de Nueva York | naranja, punteada |
+| PDH/PDL | Máximo y mínimo del día de trading anterior (Previous Day High / Low) | azul, discontinua |
+
+Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al final de la línea; los del día en curso
+pasan un poco de la última vela. Además, una **línea vertical punteada** separa los días, con el nombre del día abajo
+(LUNES, MARTES...). Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
+colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
+Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *Apertura* que antes pintaba el Bias
+(el Bias sigue usando esos mismos valores en sus reglas).
+
 Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long), con **Bearish** solo bajistas (Short), y con **No Bias** ambas. La futura capa de ejecución debe consultar `TradeFilter.check(direction)` antes de abrir cualquier trade.
 
 ## Requisitos
@@ -111,6 +127,12 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `TBR_MAX_TF_MINUTES` | `60` | Timeframe máximo (en minutos) con el que se dibujan. |
 | `TBR_ZONES` | `ASIA, LONDON, PRE_NY, NY_AM, NY_PM` | Zonas activas y su orden. |
 | `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |
+| **LEVELS** — niveles del día y separadores | | |
+| `LEVELS_SHOW_TDO` / `_SHOW_MIDNIGHT` / `_SHOW_PDHL` | `false` | Botones TDO, Midnight y PDH/PDL activados al arrancar. |
+| `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre. |
+| `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
+| `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
+| `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
 
@@ -200,7 +222,8 @@ El formato de las velas también forma parte de la paleta: `candle_up_fill`, `ca
 rojo de la paleta; si se rellenan, se pueden hacer velas huecas como en el preset blanco. El editor de colores
 los incluye, en la pestaña **Gráfico**, junto con el resto de colores del gráfico: fondo, números del eje (`chart_text`),
 rejilla (`chart_grid`), líneas de nivel (`level_high`, `level_low`, `level_open`) y el texto de sus etiquetas
-(`level_label`). Todos esos campos son opcionales: vacíos, el gráfico se ve como siempre (números del eje en el
+(`level_label`); estos cuatro eran de las líneas fijas del Bias y ya no se usan en el gráfico (los colores de TDO,
+Midnight y PDH/PDL van en el bloque LEVELS de `tradingbot.env`). Todos esos campos son opcionales: vacíos, el gráfico se ve como siempre (números del eje en el
 texto secundario, rejilla horizontal muy tenue y niveles en rojo, verde y color de acento). Con `chart_grid` definido, la
 rejilla se pinta con ese color exacto y también en vertical.
 
@@ -253,13 +276,14 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
+| `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
-Los huecos del anillo (3 y 4) aparecen como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
+El hueco del anillo 4 aparece como *Libre*. También hay tres satélites pequeños (`aux1`, `aux2`, `aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
-Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + cortex -> bias.updated -> cortex`.
-Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` recoloca las zonas.
+Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + cortex -> bias.updated -> cortex`.
+Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` y `levels` recolocan lo que depende de la hora de NY.
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
 
 ### Añadir una skill nueva
@@ -286,12 +310,13 @@ tradingbot/
   mt5_client.py      conexión y carga de velas (solo lectura)
   demo_data.py       datos sintéticos (--demo)
   core/              bus de eventos y base de las skills
-  skills/            feed, quotes, bias, tbr, cortex y la plantilla para nuevas skills
+  skills/            feed, quotes, bias, tbr, levels, cortex y la plantilla para nuevas skills
   envconfig.py       lectura de tradingbot.env (bloques por skill)
   bias/              modelos, contexto, reglas, motor y filtro de operativa
   tbr.py             zonas horarias TBR y sus niveles High / Low / 50 %
+  levels.py          niveles del día (TDO, Midnight, PDH / PDL) y separadores de día
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
-tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, UI)
+tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
 tests/               pruebas del Bias

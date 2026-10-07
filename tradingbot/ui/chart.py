@@ -14,6 +14,50 @@ from . import theme
 from .fmt import fecha_hora
 
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
+LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
+LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
+LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
+               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine}
+
+
+class DaySeparators(pg.GraphicsObject):
+    """Líneas verticales punteadas al empezar cada día, con su nombre abajo. Solo pinta las visibles."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._x = np.empty(0)
+        self._labels: list[str] = []
+        self._color = QColor("#787B86")
+
+    def set_data(self, separators: list, color: str) -> None:
+        self._x = np.array([s.x for s in separators], dtype=float)
+        self._labels = [s.label for s in separators]
+        self._color = QColor(color)
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        vb = self.getViewBox()
+        return vb.viewRect() if vb is not None else QRectF()
+
+    def paint(self, p, *args) -> None:
+        vb = self.getViewBox()
+        if vb is None or not len(self._x):
+            return
+        (x0, x1), (y0, y1) = vb.viewRange()
+        i0, i1 = np.searchsorted(self._x, [x0, x1])
+        if i1 - i0 > 400:                               # muy alejado: los separadores no aportan nada
+            return
+        pen = QPen(self._color)
+        pen.setCosmetic(True)
+        pen.setStyle(Qt.PenStyle.DotLine)
+        p.setPen(pen)
+        for x in self._x[i0:i1]:
+            p.drawLine(QPointF(x, y0), QPointF(x, y1))
+        transform = p.transform()                       # el texto, en píxeles (sin estirarse con el zoom)
+        p.resetTransform()
+        for x, label in zip(self._x[i0:i1], self._labels[i0:i1]):
+            pt = transform.map(QPointF(x, y0))
+            p.drawText(QPointF(pt.x() + 5, pt.y() - 6), label)
 
 
 class TimeAxis(pg.AxisItem):
@@ -140,6 +184,14 @@ class ChartView(pg.PlotWidget):
         self._tbr_sessions: list = []
         self._tbr_opacity = 0.25
         self._tbr_visible = False
+        self._day_items: list = []
+        self._day_lines: list = []
+        self._day_colors: dict[str, str] = {}
+        self._level_groups: set[str] = set()
+        self.separators = DaySeparators()
+        self.separators.setZValue(-20)
+        pi.addItem(self.separators, ignoreBounds=True)
+        vb.sigRangeChanged.connect(lambda *_: (self.separators.prepareGeometryChange(), self.separators.update()))
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
@@ -171,6 +223,7 @@ class ChartView(pg.PlotWidget):
         self.clear_levels()
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
+        self.set_day_levels([], [], self._day_colors)
         self.set_last_price(float(c[-1]))
         vb = self.getPlotItem().getViewBox()
         vb.setLimits(xMin=-5, xMax=self._n + 60)
@@ -256,3 +309,46 @@ class ChartView(pg.PlotWidget):
     @property
     def tbr_item_count(self) -> int:
         return len(self._tbr_items)
+
+    # -- niveles del día (TDO, Midnight, PDH / PDL) y separadores de día ------------------------------
+    def set_day_levels(self, lines: list, separators: list, colors: dict[str, str]) -> None:
+        self._day_lines, self._day_colors = list(lines), dict(colors)
+        self.separators.set_data(separators, colors.get("separator", "#787B86"))
+        self._draw_day_levels()
+
+    def show_level(self, group: str, visible: bool) -> None:
+        """group: "tdo", "midnight" o "pdhl" (un botón cada uno)."""
+        if visible:
+            self._level_groups.add(group)
+        else:
+            self._level_groups.discard(group)
+        self._draw_day_levels()
+
+    def _draw_day_levels(self) -> None:
+        pi = self.getPlotItem()
+        for item in self._day_items:
+            pi.removeItem(item)
+        self._day_items.clear()
+        segments: dict[str, tuple[list, list]] = {}
+        for line in self._day_lines:
+            if LEVEL_GROUP[line.kind] not in self._level_groups:
+                continue
+            xs, ys = segments.setdefault(line.kind, ([], []))
+            xs += [line.x0, line.x1]
+            ys += [line.price, line.price]
+            color = self._day_colors.get(LEVEL_GROUP[line.kind], theme.MUTED)
+            label = pg.TextItem(LEVEL_LABELS[line.kind], color=color, anchor=(0, 0.5))
+            label.setPos(line.x1, line.price)
+            pi.addItem(label, ignoreBounds=True)
+            self._day_items.append(label)
+        for kind, (xs, ys) in segments.items():
+            color = self._day_colors.get(LEVEL_GROUP[kind], theme.MUTED)
+            curve = pg.PlotCurveItem(x=np.array(xs), y=np.array(ys), connect="pairs",
+                                     pen=pg.mkPen(color, width=1, style=LEVEL_STYLE[kind]))
+            curve.setZValue(-4)
+            pi.addItem(curve, ignoreBounds=True)
+            self._day_items.append(curve)
+
+    @property
+    def day_item_count(self) -> int:
+        return len(self._day_items)

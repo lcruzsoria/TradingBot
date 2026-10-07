@@ -20,7 +20,8 @@ DEFAULT_CONFIG_FILE = PROJECT_ROOT / "config.toml"
 DEFAULT_WATCHLIST = ("NAS100", "SP500", "DJ30", "EURUSD", "XAUUSD", "USOIL", "BTCUSD", "ETHUSD")
 
 
-DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type": "tbr"}, {"type": "quotes"})
+DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type": "tbr"}, {"type": "levels"},
+                  {"type": "quotes"})
 
 # Valores por defecto de tradingbot.env
 DEFAULT_SYMBOL = "EURUSD"                                     # FEED_SYMBOL

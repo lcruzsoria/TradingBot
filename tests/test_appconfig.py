@@ -103,7 +103,9 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
     keys = [m.group(1) for line in lines if (m := re.match(r"#?([A-Z][A-Z0-9_]+)=", line))]
     for key in ("APP_PROFILE", "APP_DEMO", "FEED_SYMBOL", "FEED_TIMEFRAME", "FEED_MAX_BARS", "QUOTES_INTERVAL",
                 "QUOTES_SERVER_UTC_OFFSET", "BIAS_RULES", "BIAS_MIN_VOTES", "BIAS_REQUIRE_ALL", "TBR_SHOW",
-                "TBR_DAYS", "TBR_OPACITY", "TBR_MAX_TF_MINUTES", "TBR_ZONES", "TBR_ASIA_HOURS", "TBR_NY_PM_COLOR"):
+                "TBR_DAYS", "TBR_OPACITY", "TBR_MAX_TF_MINUTES", "TBR_ZONES", "TBR_ASIA_HOURS", "TBR_NY_PM_COLOR",
+                "LEVELS_SHOW_TDO", "LEVELS_SHOW_MIDNIGHT", "LEVELS_SHOW_PDHL", "LEVELS_SEPARATORS",
+                "LEVELS_DAYS", "LEVELS_MAX_TF_MINUTES", "LEVELS_TDO_COLOR", "LEVELS_SEPARATOR_COLOR"):
         assert key in keys, f"falta {key} en tradingbot.env"
     for i, line in enumerate(lines):                       # cada grupo de claves, con su comentario encima
         if re.match(r"[A-Z]", line):

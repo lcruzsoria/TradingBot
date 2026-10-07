@@ -22,6 +22,7 @@ Temas que ya existen (payload entre llaves):
   quotes.updated {quotes, account}   cada segundo                 (quotes)
   clock.offset {server_offset, offset_source}  desfase del servidor, al cambiar (quotes)
   tbr.updated {symbol, timeframe, sessions, available, ...}  zonas TBR y niveles (tbr)
+  levels.updated {symbol, timeframe, lines, separators, ...}  TDO, Midnight, PDH/PDL y días (levels)
   bias.recalc {}                     pide recalcular el sesgo     (ui -> bias)
   bias.updated {result, symbol, timeframe}                        (bias)
   trade.request {request_id, direction}   "¿puedo operar?"        (cualquiera -> cortex)

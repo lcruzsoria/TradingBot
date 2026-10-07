@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
+            "levels.updated": self._on_day_levels,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
         }
@@ -178,6 +179,22 @@ class MainWindow(QMainWindow):
         tbr_skill = self.manager.skills.get("tbr")
         self.tbr_btn.setVisible(tbr_skill is not None)
         self.tbr_btn.setChecked(tbr_skill is not None and tbr_skill.settings.get_bool("SHOW", False))
+        # Niveles del día (skill levels; colores en tradingbot.env, bloque LEVELS): un botón por grupo
+        levels_skill = self.manager.skills.get("levels")
+        self.level_btns: dict[str, QPushButton] = {}
+        for group, text, tip, key in (
+                ("tdo", "TDO", "Apertura del mercado: precio de apertura de la primera vela del día", "SHOW_TDO"),
+                ("midnight", "Midnight", "Precio de apertura a las 00:00 de Nueva York", "SHOW_MIDNIGHT"),
+                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL")):
+            btn = QPushButton(text)
+            btn.setProperty("chip", "true")
+            btn.setCheckable(True)
+            btn.setToolTip(tip)
+            btn.setProperty("tip", tip)
+            btn.setVisible(levels_skill is not None)
+            btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool(key, False))
+            chart_panel.add_header_widget(btn)
+            self.level_btns[group] = btn
         chart_panel.add_header_widget(self.tbr_btn)
         tools = QHBoxLayout()
         tools.setSpacing(6)
@@ -210,6 +227,9 @@ class MainWindow(QMainWindow):
         chart_panel.body.addWidget(self.error_banner)
         self.chart = ChartView()
         self.chart.show_tbr(self.tbr_btn.isChecked())
+        for group, btn in self.level_btns.items():
+            self.chart.show_level(group, btn.isChecked())
+            btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
         chart_panel.body.addWidget(self.chart, 1)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
@@ -445,7 +465,7 @@ class MainWindow(QMainWindow):
         result: BiasResult = p["result"]
         self.bias_card.set_result(result)
         self.rules_list.set_result(result)
-        self.chart.set_levels(result.levels)
+        # Los niveles del día (apertura, máximo y mínimo previos) los pinta ahora la skill levels con sus botones.
         self.log(f"bias: {result.bias.value} - {result.summary}")
 
     def _on_tbr(self, p: dict) -> None:
@@ -464,6 +484,15 @@ class MainWindow(QMainWindow):
                    f"(TBR_MAX_TF_MINUTES): con velas más grandes no caben.")
         self.tbr_btn.setEnabled(p["available"])
         self.tbr_btn.setToolTip(tip)
+
+    def _on_day_levels(self, p: dict) -> None:
+        if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
+            return
+        self.chart.set_day_levels(p["lines"], p["separators"], p["colors"])
+        for btn in self.level_btns.values():
+            btn.setEnabled(p["available"])
+            btn.setToolTip(btn.property("tip") if p["available"] else
+                           "Los niveles del día no se dibujan con velas diarias o semanales (LEVELS_MAX_TF_MINUTES).")
 
     def _on_verdict(self, p: dict) -> None:
         if str(p.get("request_id", "")).startswith("ui-"):
