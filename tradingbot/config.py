@@ -27,14 +27,14 @@ DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type
 DEFAULT_SYMBOL = "EURUSD"                                     # FEED_SYMBOL
 DEFAULT_MAX_BARS = 2_000_000                                  # FEED_MAX_BARS
 DEFAULT_BIAS_RULES = ("prev_day_break", "above_below_open")   # BIAS_RULES
-DEFAULT_MIN_VOTES = 1                                         # BIAS_MIN_VOTES
+DEFAULT_MIN_SCORE = 2                                         # BIAS_MIN_SCORE
 DEFAULT_REQUIRE_ALL = False                                   # BIAS_REQUIRE_ALL
 
 # Ajustes que estaban en config.toml y ahora van en tradingbot.env: (sección, clave) -> clave nueva
 MOVED_TO_ENV = {
     ("app", "symbol"): "FEED_SYMBOL", ("app", "timeframe"): "FEED_TIMEFRAME", ("app", "max_bars"): "FEED_MAX_BARS",
     ("app", "server_utc_offset_hours"): "QUOTES_SERVER_UTC_OFFSET",
-    ("bias", "min_votes"): "BIAS_MIN_VOTES", ("bias", "require_all"): "BIAS_REQUIRE_ALL",
+    ("bias", "min_votes"): "BIAS_MIN_SCORE", ("bias", "require_all"): "BIAS_REQUIRE_ALL",
     ("bias", "rules"): "BIAS_RULES",
 }
 
@@ -161,10 +161,17 @@ def bias_settings(bias) -> dict:
         head = name.upper() + "_"
         params = {k[len(head):].lower(): _scalar(v) for k, v in bias.values.items() if k.startswith(head) and v != ""}
         rules.append({"type": name, **params})
-    min_votes = bias.get_int("MIN_VOTES", DEFAULT_MIN_VOTES)
-    if min_votes < 1:
-        raise ConfigError(f"BIAS_MIN_VOTES={min_votes} debe ser 1 o más.")
-    return {"rules": rules, "min_votes": min_votes, "require_all": bias.get_bool("REQUIRE_ALL", DEFAULT_REQUIRE_ALL)}
+    if bias.get("MIN_VOTES") is not None and bias.get("MIN_SCORE") is None:
+        raise ConfigError("BIAS_MIN_VOTES ahora se llama BIAS_MIN_SCORE (puntuación mínima: suma de voto x peso). "
+                          "Renómbrala en tradingbot.env.")
+    min_score = bias.get_float("MIN_SCORE", DEFAULT_MIN_SCORE)
+    if min_score <= 0:
+        raise ConfigError(f"BIAS_MIN_SCORE={min_score:g} debe ser mayor que 0.")
+    for rule in rules:
+        weight = rule.get("weight", 1)
+        if not isinstance(weight, (int, float)) or weight < 0:
+            raise ConfigError(f"BIAS_{rule['type'].upper()}_WEIGHT={weight}: el peso debe ser un número de 0 o más.")
+    return {"rules": rules, "min_score": min_score, "require_all": bias.get_bool("REQUIRE_ALL", DEFAULT_REQUIRE_ALL)}
 
 
 def _scalar(text: str):

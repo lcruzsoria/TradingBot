@@ -35,8 +35,11 @@ def fmt_price(value: float) -> str:
 class BiasRule(ABC):
     key: ClassVar[str] = ""
     title: ClassVar[str] = ""
+    weight: float = 1.0            # peso por defecto en la puntuación del sesgo (BIAS_<REGLA>_WEIGHT lo cambia)
 
-    def __init__(self, **params):
+    def __init__(self, weight: float | None = None, **params):
+        if weight is not None:
+            self.weight = float(weight)
         self.params = params
 
     @abstractmethod
@@ -44,7 +47,7 @@ class BiasRule(ABC):
         ...
 
     def vote(self, vote: int, detail: str) -> RuleVote:
-        return RuleVote(self.title or self.key, vote, detail)
+        return RuleVote(self.title or self.key, vote, detail, self.weight)
 
 
 @register_rule("prev_day_break")
@@ -54,6 +57,7 @@ class PrevDayBreak(BiasRule):
     Por encima del máximo previo -> alcista; por debajo del mínimo previo -> bajista.
     """
     title = "Ruptura del día anterior"
+    weight = 2.0      # estructura: cerrar fuera del rango previo pesa más que el contexto intradía
 
     def evaluate(self, ctx: BiasContext) -> RuleVote:
         price, high, low = ctx.last_price, ctx.prev_high, ctx.prev_low

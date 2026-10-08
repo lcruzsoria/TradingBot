@@ -19,10 +19,16 @@ class Direction(str, Enum):
 
 @dataclass(frozen=True)
 class RuleVote:
-    """Resultado de una regla: +1 alcista, -1 bajista, 0 sin opinión."""
+    """Resultado de una regla: +1 alcista, -1 bajista, 0 sin opinión, con el peso de la regla."""
     rule: str
     vote: int
     detail: str
+    weight: float = 1.0
+
+    @property
+    def points(self) -> float:
+        """Aportación a la puntuación del sesgo: voto x peso."""
+        return self.vote * self.weight
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,8 @@ class BiasResult:
     votes: tuple[RuleVote, ...] = ()
     levels: dict[str, float] = field(default_factory=dict)
     summary: str = ""
+    score: float = 0.0          # suma de voto x peso de todas las reglas
+    min_score: float = 1.0      # puntuación mínima (en valor absoluto) para que haya sesgo
 
     def allows(self, direction: Direction) -> bool:
         """Filtro de operativa: Bullish solo Long, Bearish solo Short, No Bias ambas."""

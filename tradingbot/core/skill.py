@@ -103,7 +103,7 @@ class Skill:
     def settings(self):
         """Bloque de tradingbot.env de esta skill (claves <SKILL>_..., sin el prefijo).
 
-        Ejemplo: con BIAS_MIN_VOTES=2 en tradingbot.env, la skill «bias» lee self.settings.get_int("MIN_VOTES").
+        Ejemplo: con BIAS_MIN_SCORE=2 en tradingbot.env, la skill «bias» lee self.settings.get_float("MIN_SCORE").
         """
         from ..envconfig import EnvConfig
         env = self.services.env

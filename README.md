@@ -126,7 +126,8 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
 | **BIAS** — sesgo del día | | |
 | `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |
-| `BIAS_MIN_VOTES` | `1` | Votos mínimos en una dirección para que haya sesgo. |
+| `BIAS_MIN_SCORE` | `2` | Puntuación mínima (suma de voto x peso) para que haya sesgo. |
+| `BIAS_<REGLA>_WEIGHT` | `2` ruptura / `1` apertura | Peso de cada regla en la puntuación. |
 | `BIAS_REQUIRE_ALL` | `false` | `true`: solo hay sesgo si todas las reglas activas votan lo mismo. |
 | `BIAS_<REGLA>_<PARÁMETRO>` | — | Parámetros de cada regla, p. ej. `BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0.1`. |
 | **TBR** — zonas horarias del botón TBR | | |
@@ -193,12 +194,13 @@ Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión). Se configura en e
 
 ```ini
 BIAS_RULES=prev_day_break, above_below_open   # reglas activas
-BIAS_MIN_VOTES=1                              # votos mínimos en una dirección
+BIAS_MIN_SCORE=2                              # puntuación mínima (voto x peso)
+BIAS_PREV_DAY_BREAK_WEIGHT=2                  # peso de cada regla
 BIAS_REQUIRE_ALL=false                        # true: todas las reglas activas deben coincidir
 BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0         # parámetro tolerance_pct de above_below_open
 ```
 
-- `BIAS_REQUIRE_ALL=false`: hay sesgo si hay al menos `BIAS_MIN_VOTES` votos en una dirección y ninguno en la contraria. Señales opuestas dan **No Bias**.
+- `BIAS_REQUIRE_ALL=false`: cada regla suma voto x peso; hay sesgo si la puntuación llega a `+BIAS_MIN_SCORE` (Bullish) o `-BIAS_MIN_SCORE` (Bearish). Si no, **No Bias**.
 - `BIAS_REQUIRE_ALL=true`: solo hay sesgo si todas las reglas votan lo mismo.
 - Para desactivar una regla, quítala de `BIAS_RULES`.
 
