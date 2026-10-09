@@ -372,8 +372,19 @@ tradingbot/
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
 tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, SETUP, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
-scripts/             run.ps1 (arrancar) y sync.ps1 (sincronizar con git)
+scripts/             run.ps1 (arrancar), sync.ps1 (sincronizar con git) y analisis_setups.py (Excel de análisis histórico)
 tests/               pruebas (uv run pytest)
+```
+
+## Análisis histórico de los setups
+
+`scripts/analisis_setups.py` lee las velas M15 de MT5 (solo lectura) y genera `analisis/analisis_setups.xlsx` con todas las
+operaciones de la continuación (la de la skill Setup) y de una reversión propuesta, con win rate, R medio, profit factor,
+máximo drawdown, resultados por TBR, mercado, sesgo, hora y rango, el embudo (tomas, retests, continuaciones y reversiones),
+los setups que no entraron y una tabla de sensibilidad de stop y objetivo. Sirve para refinar la estrategia con datos:
+
+```bash
+uv run --with openpyxl python scripts/analisis_setups.py
 ```
 
 ## Pruebas

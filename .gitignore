@@ -17,3 +17,6 @@ settings.local.json
 # Datos locales y capturas
 data/
 *.log
+
+# Excel del análisis histórico (se regenera con scripts/analisis_setups.py)
+analisis/
