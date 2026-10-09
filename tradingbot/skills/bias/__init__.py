@@ -6,6 +6,8 @@
 - context.py  velas del día y del día anterior que reciben las reglas
 - models.py   tipos: Bias, BiasResult, Direction, RuleVote
 - filter.py   filtro de operativa (qué dirección se permite)
+- execution.py  Bias Execution: GO / NO GO de cada setup y su motivo
+- schedule.py   recálculo programado (3 h en índices USA, 4 h en el resto)
 """
 from .engine import BiasEngine
 from .filter import TradeFilter

@@ -286,7 +286,10 @@ class ChartView(pg.PlotWidget):
             self.set_levels(dict(self._levels))
         self.update()
 
-    def set_candles(self, df, view_bars: int | None = None) -> None:
+    def set_candles(self, df, view_bars: int | None = None, keep_view: bool = False) -> None:
+        """keep_view: recarga de las mismas velas; la vista se queda donde estaba (y sigue a las velas nuevas)."""
+        vb = self.getPlotItem().getViewBox()
+        old_n, (old_x0, old_x1) = self._n, vb.viewRange()[0]
         o, h = df["open"].to_numpy(), df["high"].to_numpy()
         l, c = df["low"].to_numpy(), df["close"].to_numpy()
         self._n = len(df)
@@ -297,8 +300,11 @@ class ChartView(pg.PlotWidget):
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
         self.set_day_levels([], [], self._day_colors)
         self.set_last_price(float(c[-1]))
-        vb = self.getPlotItem().getViewBox()
         vb.setLimits(xMin=-5, xMax=self._n + 60)
+        if keep_view and old_n:
+            shift = self._n - old_n
+            vb.setXRange(old_x0 + shift, old_x1 + shift, padding=0)
+            return
         vb.setXRange(max(0, self._n - (view_bars or self.VIEW_BARS)), self._n + 8, padding=0)
         self.reset_price_scale()
 

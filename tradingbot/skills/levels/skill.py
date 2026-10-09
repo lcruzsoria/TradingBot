@@ -81,5 +81,6 @@ class LevelsSkill(Skill):
             day_list = days(ts, ahead, start) if self.separators else []
         self.set_caption(f"día {start // 60:02d}:{start % 60:02d}" if available else f"no en {display_label(tf)}")
         self.publish("levels.updated", {"symbol": symbol, "timeframe": tf, "lines": lines, "days": day_list,
-                                        "day_start": start, "available": available, "estimated": estimated,
+                                        "day_start": start, "us_index": is_us_index(symbol, self.us_indices),
+                                        "available": available, "estimated": estimated,
                                         "colors": self.colors, "max_tf": self.max_tf})

@@ -127,6 +127,10 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **BIAS** — sesgo del día | | |
 | `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |
 | `BIAS_MIN_SCORE` | `2` | Puntuación mínima (suma de voto x peso) para que haya sesgo. |
+| `BIAS_RECALC_INDEX_HOURS` / `BIAS_RECALC_HOURS` | `3` / `4` | Cada cuántas horas se recalcula el sesgo solo, alineado con el inicio del día de trading: índices USA / resto. `0`: desactivado. |
+| `BIAS_EXEC_MAX_AGE_BARS` | `2` | Velas que pueden pasar desde la confirmación de un setup para que siga siendo ejecutable (Bias Execution). |
+| `BIAS_EXEC_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO a los setups. |
+| `BIAS_EXEC_PREMIUM_DISCOUNT` | `true` | Las reversiones solo compran bajo la apertura del día y venden sobre ella. |
 | `BIAS_<REGLA>_WEIGHT` | `2` ruptura / `1` apertura | Peso de cada regla en la puntuación. |
 | `BIAS_REQUIRE_ALL` | `false` | `true`: solo hay sesgo si todas las reglas activas votan lo mismo. |
 | `BIAS_<REGLA>_<PARÁMETRO>` | — | Parámetros de cada regla, p. ej. `BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0.1`. |
@@ -304,6 +308,12 @@ Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con err
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + setup + cortex -> bias.updated -> cortex`;
 `tbr -> tbr.updated -> setup -> setup.updated` (los setups nuevos se anotan en el Registro).
 Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` y `levels` recolocan lo que depende de la hora de NY.
+**Registro** (panel inferior): anota los eventos relevantes de todas las skills, con la hora del PC: carga y recarga de velas,
+cada recálculo del Bias (con el motivo: carga, recálculo programado o botón), cambios de TBR y de niveles del día, desfase del
+servidor, setups detectados y el **GO / NO GO** de Bias Execution con su motivo (p. ej. «Short contra el sesgo Bullish»), en
+verde o rojo. Las trazas largas llevan un enlace **+ detalle** que abre la información completa (votos y pesos de las reglas,
+controles del GO / NO GO, niveles y zonas TBR...). Una traza que no cambia no se repite.
+
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
 
 ### Añadir una skill nueva

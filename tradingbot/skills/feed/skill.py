@@ -10,8 +10,9 @@ from ...timeframes import display_label
 @register_skill("feed")
 class FeedSkill(Skill):
     title = "Feed"
-    description = "Conecta con MT5 y carga todas las velas disponibles del símbolo y timeframe pedidos."
-    subscribes = ("feed.load",)
+    description = ("Conecta con MT5 y carga todas las velas disponibles del símbolo y timeframe pedidos. "
+                   "También las recarga cuando otra skill lo pide (feed.refresh), p. ej. el recálculo del Bias.")
+    subscribes = ("feed.load", "feed.refresh")
     publishes = ("feed.connected", "feed.progress", "candles.loaded", "feed.failed")
     slot = 0
 
@@ -47,7 +48,9 @@ class FeedSkill(Skill):
                                          "error": f"{type(exc).__name__}: {exc}"})
             raise
         self.publish("candles.loaded", {"symbol": symbol, "timeframe": tf, "df": df,
-                                        "seconds": time.perf_counter() - started})
+                                        "seconds": time.perf_counter() - started,
+                                        "refresh": event.topic == "feed.refresh",   # recarga: la vista no se mueve
+                                        "reason": event.payload.get("reason")})
 
     def on_stop(self) -> None:
         try:

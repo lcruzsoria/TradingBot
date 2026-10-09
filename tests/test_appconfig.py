@@ -109,7 +109,8 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
                 "LEVELS_SHOW_TDO", "LEVELS_SHOW_MIDNIGHT", "LEVELS_SHOW_PDHL", "LEVELS_SEPARATORS",
                 "LEVELS_DAYS", "LEVELS_MAX_TF_MINUTES", "LEVELS_TDO_COLOR", "LEVELS_SEPARATOR_COLOR",
                 "LEVELS_DAY_START", "LEVELS_INDEX_DAY_START", "LEVELS_US_INDICES",
-                "SETUP_CONFIRM_BARS", "SETUP_ZONES", "SETUP_TYPES"):
+                "SETUP_CONFIRM_BARS", "SETUP_ZONES", "SETUP_TYPES", "BIAS_RECALC_INDEX_HOURS", "BIAS_RECALC_HOURS",
+                "BIAS_EXEC_MAX_AGE_BARS", "BIAS_EXEC_ALLOW_NO_BIAS", "BIAS_EXEC_PREMIUM_DISCOUNT"):
         assert key in keys, f"falta {key} en tradingbot.env"
     for i, line in enumerate(lines):                       # cada grupo de claves, con su comentario encima
         if re.match(r"[A-Z]", line):

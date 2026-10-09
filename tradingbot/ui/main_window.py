@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-                               QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget)
+                               QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..skills.bias import BiasResult
+from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
@@ -21,6 +22,7 @@ from .bridge import UiBridge
 from .chart import ChartView
 from .errors import explain_error
 from .fmt import fecha_corta, fecha_hora, miles
+from .logview import LogView
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
@@ -87,6 +89,8 @@ class MainWindow(QMainWindow):
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
             "levels.updated": self._on_day_levels, "setup.updated": self._on_setup,
+            "bias.schedule": self._on_bias_schedule, "bias.execution": self._on_execution,
+            "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
         }
@@ -257,10 +261,10 @@ class MainWindow(QMainWindow):
         left.addWidget(chart_panel, 1)
 
         log = Panel("Registro")
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setMaximumBlockCount(500)
-        self.log_view.setFixedHeight(96)
+        log.note.setText("Eventos de las skills  -  «+ detalle» amplía la información")
+        self.log_view = LogView()
+        self.log_view.setFixedHeight(110)
+        self._logged: dict[str, object] = {}       # última traza de cada tipo: no se repite si no cambia
         log.body.addWidget(self.log_view)
         left.addWidget(log)
         return left
@@ -296,8 +300,22 @@ class MainWindow(QMainWindow):
         """Quotes, con la altura justa para sus tarjetas: el resto va al gráfico."""
         self.markets_panel.setFixedHeight(self.markets_panel.sizeHint().height())
 
-    def log(self, message: str) -> None:
-        self.log_view.appendPlainText(f"[{datetime.now():%H:%M:%S}] {message}")
+    def log(self, message: str, detail: str | None = None, tone: str | None = None) -> None:
+        self.log_view.add(message, detail, tone)
+
+    def log_once(self, kind: str, key, message: str, detail: str | None = None, tone: str | None = None) -> None:
+        """Anota el evento solo si cambia respecto al último de su tipo (las skills recalculan a menudo)."""
+        if self._logged.get(kind) == key:
+            return
+        self._logged[kind] = key
+        self.log(message, detail, tone)
+
+    def _bar_time(self, x) -> str:
+        """Hora de Nueva York de la vela `x` del gráfico actual."""
+        df = self.candles
+        if x is None or df is None or not 0 <= int(x) < len(df):
+            return "-"
+        return f"{self._ny(df['ts'].iloc[int(x)]):%d/%m %H:%M} NY"
 
     def current_tf(self) -> str:
         btn = self.tf_group.checkedButton()
@@ -440,14 +458,19 @@ class MainWindow(QMainWindow):
         self.error_banner.hide()
         if self.connected:
             self._set_status("Conectado", "ok")
+        refresh = bool(p.get("refresh")) and self.candles is not None
         self.candles = df
-        self.chart.set_candles(df)
+        self.chart.set_candles(df, keep_view=refresh)
         self.chart.set_ny_shift(self.ny_shift)
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self._update_chart_stats()
         first, last = self._ny(df["ts"].iloc[0]), self._ny(df["ts"].iloc[-1])
-        self.log(f"feed: {miles(len(df))} velas de {symbol} {display_label(tf)} "
-                 f"({first:%Y-%m-%d} a {last:%Y-%m-%d %H:%M} NY) en {p['seconds']:.1f}s")
+        if refresh:
+            self.log(f"feed: velas de {symbol} {display_label(tf)} actualizadas (última {last:%d/%m %H:%M} NY) "
+                     f"en {p['seconds']:.1f}s")
+        else:
+            self.log(f"feed: {miles(len(df))} velas de {symbol} {display_label(tf)} "
+                     f"({first:%Y-%m-%d} a {last:%Y-%m-%d %H:%M} NY) en {p['seconds']:.1f}s")
         self._set_busy(False)
         if not self._first_done:
             self._first_done = True
@@ -507,7 +530,19 @@ class MainWindow(QMainWindow):
         self.bias_card.set_result(result)
         self.rules_list.set_result(result)
         # Los niveles del día (apertura, máximo y mínimo previos) los pinta ahora la skill levels con sus botones.
-        self.log(f"bias: {result.bias.value} - {result.summary}")
+        tone = "go" if result.bias.value == "Bullish" else "nogo" if result.bias.value == "Bearish" else None
+        reason = p.get("reason") or "carga de velas"
+        lines = [f"Sesgo: {result.bias.value}   ({p.get('symbol', '')}, día {result.day})",
+                 f"Motivo del cálculo: {reason}",
+                 f"Puntuación: {result.score:+g}  (Bullish con +{result.min_score:g} o más, "
+                 f"Bearish con -{result.min_score:g} o menos)", "", "Reglas (voto x peso = puntos):"]
+        marks = {1: "▲ alcista", -1: "▼ bajista", 0: "– sin voto"}
+        for v in result.votes:
+            lines.append(f"  {marks[v.vote]:<11} x{v.weight:g} = {v.points:+g}   {v.rule}: {v.detail}")
+        if result.levels:
+            lines += ["", "Niveles: " + ", ".join(f"{k} {fmt_price(val)}" for k, val in result.levels.items())]
+        self.log(f"bias: {result.bias.value} ({p.get('symbol', '')}, puntuación {result.score:+g}) - {reason}",
+                 "\n".join(lines), tone)
 
     def _on_tbr(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
@@ -525,6 +560,28 @@ class MainWindow(QMainWindow):
                    f"(TBR_MAX_TF_MINUTES): con velas más grandes no caben.")
         self.tbr_btn.setEnabled(p["available"])
         self.tbr_btn.setToolTip(tip)
+        self._log_tbr(p)
+
+    def _log_tbr(self, p: dict) -> None:
+        sessions = [s for s in p["sessions"] if s.complete]
+        intact = [(s, lv) for s in sessions for lv in s.levels if lv.kind in ("high", "low") and not lv.taken]
+        key = (p["symbol"], p["timeframe"], p["available"], len(p["sessions"]), len(intact))
+        if not p["available"]:
+            self.log_once("tbr", key, f"tbr: sin zonas en {display_label(p['timeframe'])} (solo hasta "
+                                      f"TBR_MAX_TF_MINUTES={p['max_tf']} min)")
+            return
+        lines = [f"Zonas TBR de {p['symbol']} {display_label(p['timeframe'])} (hora de NY):", ""]
+        for s in p["sessions"][-10:]:
+            state = "en curso" if not s.complete else ", ".join(
+                f"{lv.kind.upper()} {fmt_price(lv.price)} {'tomado ' + self._bar_time(lv.x1) if lv.taken else 'intacto'}"
+                for lv in s.levels if lv.kind in ("high", "low"))
+            lines.append(f"  {s.day:%d/%m} {s.zone.name:<7} {s.zone.hours}  H {fmt_price(s.high)}  "
+                         f"L {fmt_price(s.low)}  -  {state}")
+        lines += ["", "Liquidez aún sin tomar (posibles objetivos o zonas de setup):"]
+        lines += [f"  {lv.kind.upper()} de {s.zone.name} {s.day:%d/%m}: {fmt_price(lv.price)}" for s, lv in intact[-12:]]
+        self.log_once("tbr", key, f"tbr: {len(p['sessions'])} zonas en {p['symbol']} "
+                                  f"{display_label(p['timeframe'])}, {len(intact)} niveles High/Low aún sin tomar",
+                      "\n".join(lines))
 
     def _on_day_levels(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
@@ -534,14 +591,74 @@ class MainWindow(QMainWindow):
             btn.setEnabled(p["available"])
             btn.setToolTip(btn.property("tip") if p["available"] else
                            "Los niveles del día no se dibujan con velas diarias o semanales (LEVELS_MAX_TF_MINUTES).")
+        if not p["available"]:
+            return
+        today: dict[str, float] = {}
+        for line in sorted(p["lines"], key=lambda ln: ln.x0):       # el último de cada tipo es el del día en curso
+            today[line.kind] = line.price
+        start = p["day_start"]
+        kind = "índice USA" if p.get("us_index") else "resto de mercados"
+        names = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
+        levels = ", ".join(f"{names[k]} {fmt_price(v)}" for k, v in today.items() if k in names)
+        self.log_once("levels", (p["symbol"], p["timeframe"], start, tuple(sorted(today.items()))),
+                      f"levels: día de trading desde las {start // 60:02d}:{start % 60:02d} NY ({kind}) - "
+                      f"{levels or 'sin niveles'}")
 
     def _on_setup(self, p: dict) -> None:
-        last = p["last"]
-        key = (p["symbol"], last.sweep_x, last.side) if last else None
-        if last and key != getattr(self, "_last_setup", None):   # solo cuando aparece uno nuevo
-            self.log(f"setup: {last.label} ({p['symbol']} {display_label(p['timeframe'])}, "
-                     f"nivel {last.level:g}, día {last.day:%d/%m})")
-        self._last_setup = key
+        if not p["setups"]:
+            self.log_once("setup", (p["symbol"], None), f"setup: ninguna toma de liquidez de las TBR en {p['symbol']}")
+            return
+        s = p["setups"][-1]                              # el más reciente, también si aún está pendiente
+        tf = display_label(p["timeframe"])
+        detail = "\n".join([
+            f"{s.label}", "",
+            f"Mercado:        {p['symbol']} {tf}",
+            f"Zona TBR:       {s.zone} del {s.day:%d/%m}",
+            f"Liquidez:       {'High' if s.side == 'high' else 'Low'} de la zona en {fmt_price(s.level)}",
+            f"Toma:           vela de las {self._bar_time(s.sweep_x)}",
+            f"Confirmación:   {p['confirm_bars']} vela(s), cierre de las {self._bar_time(s.confirm_x)}"
+            if s.confirm_x is not None else f"Confirmación:   pendiente ({p['confirm_bars']} vela(s) desde la toma)",
+            f"Entrada ref.:   {fmt_price(s.entry)} (cierre de la vela de confirmación)" if s.entry is not None else "",
+            "", "Regla: cierre más allá del nivel = continuación; cierre de vuelta dentro de la zona = reversión.",
+        ])
+        tone = None if s.direction is None else "info"
+        self.log_once("setup", (p["symbol"], s.sweep_x, s.side, s.kind),
+                      f"setup: {s.label} ({p['symbol']} {tf}, {self._bar_time(s.sweep_x)})", detail, tone)
+
+    def _on_execution(self, p: dict) -> None:
+        s, d = p["setup"], p["decision"]
+        if s.direction is None:
+            return                                       # pendiente: lo anuncia Setup; el Bias decide al confirmarse
+        lines = [f"{d.verdict}: {s.label}", f"Mercado: {p['symbol']} {display_label(p['timeframe'])}   "
+                 f"Sesgo del día: {p['bias'].value if p['bias'] else 'sin calcular'}", "", "Controles:"]
+        lines += [f"  {'✓' if c.passed else '✗'} {c.name:<20} {c.detail}" for c in d.checks]
+        lines += ["", "El bot no envía órdenes: el GO / NO GO solo informa."]
+        side = s.direction.capitalize()
+        self.log_once("execution", (p["symbol"], s.sweep_x, s.side, d.allowed, d.reason),
+                      f"bias execution: {d.verdict} {side} ({s.zone}) - "
+                      + ("todas las condiciones se cumplen" if d.allowed else d.reason),
+                      "\n".join(lines), "go" if d.allowed else "nogo")
+
+    def _on_bias_schedule(self, p: dict) -> None:
+        start = p["day_start"]
+        kind = "índice USA" if p["us_index"] else "resto de mercados"
+        if p["next"] is None:
+            self.log_once("schedule", (p["symbol"], None), f"bias: recálculo programado desactivado para {p['symbol']}")
+            return
+        self.log_once("schedule", (p["symbol"], p["next"]),
+                      f"bias: próximo recálculo de {p['symbol']} a las {p['next']:%H:%M} NY (cada {p['hours']:g} h, "
+                      f"{kind}; día desde las {start // 60:02d}:{start % 60:02d})")
+
+    def _on_refresh_request(self, p: dict) -> None:
+        if p.get("reason") == "bias":
+            self.log(f"bias: hora del recálculo programado - recargando velas de {p['symbol']}", tone="info")
+
+    def _on_clock_offset(self, p: dict) -> None:
+        offset = p.get("server_offset")
+        if offset is None:
+            return
+        self.log_once("offset", offset, f"quotes: desfase del servidor {format_offset(offset)} "
+                                        f"({p.get('offset_source', 'detectado')}); la hora de NY ya no es estimada")
 
     def _on_verdict(self, p: dict) -> None:
         if str(p.get("request_id", "")).startswith("ui-"):
@@ -553,7 +670,7 @@ class MainWindow(QMainWindow):
             self._show_skill(p["key"])
 
     def _on_skill_error(self, p: dict) -> None:
-        self.log(f"skill {p['key']}: {p['error']}")
+        self.log(f"skill {p['key']}: error - {p['error']}", tone="warn")
 
     # -- detalle de la skill seleccionada ---------------------------------------------------------
     def _show_skill(self, key: str) -> None:

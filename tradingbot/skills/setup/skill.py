@@ -64,4 +64,5 @@ class SetupSkill(Skill):
         else:
             self.set_caption(f"{last.kind[:3].title()}. {last.direction.capitalize()} {last.zone}")
         self.publish("setup.updated", {"symbol": c["symbol"], "timeframe": c["timeframe"], "setups": setups,
-                                       "last": last, "confirm_bars": self.confirm_bars})
+                                       "last": last, "confirm_bars": self.confirm_bars,
+                                       "bars": len(c["df"])})

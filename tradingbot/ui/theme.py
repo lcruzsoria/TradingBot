@@ -334,7 +334,7 @@ QListWidget::item:selected {{ background: {ACTIVE_BG}; color: {TEXT}; }}
 QProgressBar {{ background: transparent; border: none; max-height: 3px; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 1px; }}
 
-QPlainTextEdit {{ background: {mix(BG, PANEL, 0.5)}; border: 1px solid {BORDER}; border-radius: 4px; padding: 6px;
+QPlainTextEdit, QTextBrowser#LogView {{ background: {mix(BG, PANEL, 0.5)}; border: 1px solid {BORDER}; border-radius: 4px; padding: 6px;
     font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; color: {MUTED}; }}
 QScrollBar:vertical {{ background: transparent; width: 8px; }}
 QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 24px; }}

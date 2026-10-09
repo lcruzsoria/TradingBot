@@ -40,6 +40,7 @@ class Setup:
     kind: str            # "reversal", "continuation" o "pending"
     direction: str | None   # "long", "short" o None mientras está pendiente
     confirm_x: int | None   # vela que confirma (cierre de la última vela de confirmación)
+    entry: float | None = None   # cierre de la vela de confirmación: precio de entrada de referencia
 
     @property
     def label(self) -> str:
@@ -79,12 +80,13 @@ def detect(sessions, close, confirm_bars: int = DEFAULT_CONFIRM_BARS, zones: lis
                 continue
             j = i + confirm_bars - 1
             if j >= n:
-                kind, direction, confirm_x = "pending", None, None
+                kind, direction, confirm_x, entry = "pending", None, None, None
             else:
                 kind, direction = classify(level.kind, level.price, float(close[j]))
-                confirm_x = j
+                confirm_x, entry = j, float(close[j])
                 if kind not in kinds:
                     continue
-            out.append(Setup(s.zone.name, s.zone.key, s.day, level.kind, level.price, i, kind, direction, confirm_x))
+            out.append(Setup(s.zone.name, s.zone.key, s.day, level.kind, level.price, i, kind, direction, confirm_x,
+                             entry))
     out.sort(key=lambda st: (st.sweep_x, st.side))
     return out
