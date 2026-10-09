@@ -7,9 +7,13 @@ Solo LEE velas de MT5 (el bot no envía órdenes). Para cada mercado y cada TBR 
   cierra bajo el mínimo del retest sin haber vuelto a romper el High: orden límite en ese mínimo, stop en el High
   tomado y objetivo en el nivel -1 por el lado contrario.
 
+Cada iteración de la estrategia es una VERSIÓN (v1, v2...; ver VARIANTES): se calculan todas con los mismos datos y se
+escribe un Excel por versión (analisis/analisis_setups_vN.xlsx) con su hoja 'Cambios' y una 'Comparativa' con las
+anteriores. El detalle de cada cambio está en docs/analisis_setups/CAMBIOS.md.
+
 Uso (desde la raíz del proyecto):
     uv run --with openpyxl python scripts/analisis_setups.py
-    uv run --with openpyxl python scripts/analisis_setups.py --simbolos NAS100.r EURUSD --salida analisis/prueba.xlsx
+    uv run --with openpyxl python scripts/analisis_setups.py --versiones v1 v2 --simbolos NAS100.r EURUSD
 
 Supuestos: sin spread ni comisiones; si en una vela caben stop y objetivo, cuenta el stop; el sesgo se reconstruye con las
 dos reglas y pesos por defecto del bot (ruptura del día previo x2, precio vs apertura x1; sesgo con |puntuación| >= 2).
@@ -18,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from collections import defaultdict
 from pathlib import Path
 
@@ -37,6 +42,51 @@ AHEAD = 7 * 3600                      # servidor del broker = NY + 7 h (Vantage)
 WINDOW = 96                           # velas M15 (24 h) de validez, como SETUP_WINDOW_HOURS=24
 SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "EURUSD", "GBPUSD", "XAUUSD")
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+STOPS = ("retest", "mitad", "extremo")        # stop: mínimo del retest / 50 % de la TBR / extremo opuesto de la TBR
+TPS = (0.5, 1.0, 1.5, 2.0)                    # objetivos, en rangos de la TBR más allá del nivel roto (1 = nivel -1)
+
+
+def tp_label(mult: float) -> str:
+    return str(mult).replace(".", ",").removesuffix(",0")
+
+
+@dataclass(frozen=True)
+class Variante:
+    clave: str            # "v1"
+    nombre: str
+    cambio: str           # qué se cambia respecto a la versión anterior
+    hipotesis: str        # por qué se prueba
+    entrada: str = "limite"      # "limite": orden límite en el nivel roto; "mercado": apertura de la vela siguiente a la 2ª ruptura
+    stop: str = "retest"         # ver STOPS
+    objetivo: float = 1.0        # rangos más allá del nivel roto
+    min_rango: float = 0.0       # filtro: rango de la TBR >= esta fracción de la mediana de sus últimas 20 sesiones (0 = sin filtro)
+
+
+VARIANTES = (
+    Variante("v1", "Base: orden límite y stop bajo el mínimo del retest",
+             "Ninguno: es la estrategia tal como está implementada en la skill Setup (commit 4d0d94e).",
+             "Línea base para comparar.", "limite", "retest", 1.0),
+    Variante("v2", "Entrada a mercado en la 2ª ruptura",
+             "La entrada pasa de orden límite en el nivel roto a mercado, en la apertura de la vela siguiente a la 2ª ruptura. "
+             "Stop y objetivo no cambian.",
+             "La orden límite sufre selección adversa: se llena sobre todo en los trades que fallan (retestan enseguida) y "
+             "no se llena en los que despegan.", "mercado", "retest", 1.0),
+    Variante("v3", "Entrada a mercado y stop en el extremo opuesto de la TBR",
+             "Sobre v2, el stop pasa de bajo el mínimo del retest al Low de la TBR (al High en cortos).",
+             "El stop del retest es estrecho (0,5-0,65 del rango) y lo barre el ruido; con el stop más lejos debería "
+             "sobrevivir más operaciones.", "mercado", "extremo", 1.0),
+    Variante("v4", "Entrada a mercado, stop en el extremo y filtro de rango mínimo",
+             "Sobre v3, solo se opera si el rango de la TBR es al menos el 80 % de la mediana de sus últimas 20 sesiones "
+             "(la misma TBR del mismo mercado). Se calcula con datos anteriores: no mira al futuro.",
+             "En v1-v3 el cuartil de rangos más estrechos es el peor; con rangos pequeños el spread y el ruido pesan más "
+             "que el movimiento.", "mercado", "extremo", 1.0, 0.8),
+    Variante("v5", "Entrada a mercado, stop en el 50 %, objetivo a 1,5 rangos y filtro de rango",
+             "Sobre v4, el stop pasa del extremo opuesto de la TBR al 50 % de la TBR y el objetivo del nivel -1 (1 rango) a 1,5 rangos "
+             "más allá del nivel roto. Elegidos con la 1ª mitad del histórico (hoja 'Sensibilidad 1ª vs 2ª mitad' de v4: mejor "
+             "celda, +0,062R) y comprobados en la 2ª mitad (+0,092R).",
+             "Si el precio vuelve al 50 % tras la 2ª ruptura, la continuación ha fallado: es el stop natural. Con él, el objetivo "
+             "más lejano compensa los stops más frecuentes.", "mercado", "mitad", 1.5, 0.8),
+)
 
 
 # -- sesgo reconstruido -------------------------------------------------------------------------------
@@ -89,13 +139,45 @@ def sim_from_fill(h, l, c, m, entry, stop, tp, d, horizon):
     return status, m + last, r, mae, mfe
 
 
-def market_entry_r(h, l, c, st, d, rng):
-    """R de entrar a mercado en el cierre de la vela de la 2ª ruptura (mismo stop y objetivo en rangos); NaN si no se resuelve."""
-    k, entry = st.rebreak_x, c[st.rebreak_x]
-    if (entry - st.stop) * d <= 0:
-        return np.nan
-    status, _, r, _, _ = sim_from_fill(h, l, c, k, entry, st.stop, entry + d * rng, d, 2 * WINDOW)
-    return round(r, 2) if status != "abierta" else np.nan
+def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_range=float('nan')):
+    """Operación de la continuación según la versión `var`, o None si no hay operación (no se llena, sin recorrido...)."""
+    k = st.rebreak_x
+    if var.min_rango and not rel_range >= var.min_rango:      # NaN (sin historial suficiente) también se descarta
+        return None
+    if var.entrada == "limite":
+        if st.status not in ("target", "stop", "filled"):
+            return None
+        m, entry = st.fill_x, st.entry
+    else:
+        m = k + 1 if k is not None else None
+        if m is None or m >= len(h):
+            return None
+        entry = o[m]
+    level = st.high if d > 0 else st.low                       # nivel roto: la entrada límite y la base del objetivo
+    stops = {"retest": st.stop, "mitad": st.mid, "extremo": st.low if d > 0 else st.high}
+    stop = stops[var.stop]
+    risk = (entry - stop) * d
+    target = level + d * var.objetivo * rng
+    if risk <= 0 or (target - entry) * d <= 0:
+        return None
+    status, end_x, r, mae, mfe = sim_from_fill(h, l, c, m, entry, stop, target, d, 2 * WINDOW)
+    row = {**base, "fecha_entrada": ny(m), "hora entrada (NY)": ny(m).hour, "día semana": DAYS[ny(m).weekday()],
+           "hora salida (NY)": ny(end_x), "entrada": entry, "stop": stop, "objetivo": target, "riesgo": risk,
+           "riesgo / rango": risk / rng, "R potencial": abs(target - entry) / risk,
+           "velas hasta llenar": m - k, "velas en operación": end_x - m,
+           "resultado": status, "R": r if status != "abierta" else np.nan,
+           "R abierta (a mercado)": r if status == "abierta" else np.nan,
+           "MAE (R)": mae / risk, "MFE (R)": mfe / risk, "MAE (rangos)": mae / rng, "MFE (rangos)": mfe / rng,
+           "puntuación sesgo": int(score[k]), "sesgo": alignment(score[k], d),
+           "entrada vs apertura": "premium" if entry > d_open[m] else "descuento",
+           "rango vs mediana 20 sesiones": rel_range}
+    for stop_key in STOPS:                                      # rejilla de sensibilidad: R para cada stop y objetivo
+        for mult in TPS:
+            stop2, tgt2 = stops[stop_key], level + d * mult * rng
+            ok = (entry - stop2) * d > 0 and (tgt2 - entry) * d > 0
+            res = sim_from_fill(h, l, c, m, entry, stop2, tgt2, d, 2 * WINDOW) if ok else None
+            row[f"R[{stop_key}|{tp_label(mult)}]"] = round(res[2], 2) if res and res[0] != "abierta" else np.nan
+    return row
 
 
 # -- reversión C (propuesta) ------------------------------------------------------------------------------
@@ -183,14 +265,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--simbolos", nargs="+", default=list(SYMBOLS))
     ap.add_argument("--velas", type=int, default=100_000, help="velas M15 a pedir por mercado (el broker limita)")
-    ap.add_argument("--salida", default="analisis/analisis_setups.xlsx")
+    ap.add_argument("--versiones", nargs="+", default=[v.clave for v in VARIANTES], help="versiones a calcular")
+    ap.add_argument("--salida", default="analisis", help="carpeta de los Excel (analisis_setups_vN.xlsx)")
     args = ap.parse_args()
+    versiones = [v for v in VARIANTES if v.clave in args.versiones]
 
     profiles, default = load_profiles()
     source = Mt5Source(select_profile(profiles, default, None), 2_000_000)
     print("conectado:", source.connect())
     zones = zones_from_settings(EnvConfig().section("TBR"))
-    trades, missed, events, meta = [], [], [], []
+    trades = {v.clave: [] for v in versiones}
+    missed = {v.clave: [] for v in versiones}
+    c_trades, events, meta = [], [], []
     for want in args.simbolos:
         sym = source.resolve_symbol(want)
         if not sym:
@@ -207,44 +293,23 @@ def main() -> None:
                      "TBR cerradas": sum(s.complete for s in sessions), "día de trading desde (NY)": "18:00" if index else "17:00"})
         print(f"  {sym}: {len(df)} velas, {len(sessions)} TBR")
 
-        # ---- continuación: el setup real de la skill ----
-        by_session = {(s.zone.key, s.day): s for s in sessions}
+        # ---- continuación: el setup real de la skill, con cada versión de la estrategia ----
+        past, rel = defaultdict(list), {}                    # rango de cada TBR frente a la mediana de sus 20 sesiones previas
+        for s in sorted((s for s in sessions if s.complete and s.high > s.low), key=lambda s: s.x1):
+            hist = past[s.zone.key][-20:]
+            rel[(s.zone.key, s.day)] = (s.high - s.low) / float(np.median(hist)) if len(hist) >= 5 else float("nan")
+            past[s.zone.key].append(s.high - s.low)
         for st in detect(sessions, h, l, WINDOW):
-            s = by_session[(st.zone_key, st.day)]
             d = 1 if st.direction == "long" else -1
             rng = st.high - st.low
             base = {"mercado": sym, "tipo": "Continuación", "TBR": st.zone, "día TBR": pd.Timestamp(st.day),
-                    "dirección": st.direction, "estado": st.status, "motivo": st.note,
+                    "dirección": st.direction, "estado setup": st.status, "motivo": st.note,
                     "High": st.high, "50 %": st.mid, "Low": st.low, "rango": rng, "rango % precio": 100 * rng / st.high,
                     "hora toma (NY)": ny(st.sweep_x), "hora retest (NY)": ny(st.retest_x) if st.retest_x is not None else None,
                     "hora 2ª ruptura (NY)": ny(st.rebreak_x) if st.rebreak_x is not None else None}
-            if st.status not in ("target", "stop", "filled"):
-                row = dict(base)
-                if st.rebreak_x is not None and st.status in ("armed", "expired"):   # alternativa: entrar a mercado
-                    row["R si entrada a mercado"] = market_entry_r(h, l, c, st, d, rng)
-                missed.append(row)
-                continue
-            risk = abs(st.entry - st.stop)
-            status, end_x, r, mae, mfe = sim_from_fill(h, l, c, st.fill_x, st.entry, st.stop, st.target, d, 2 * WINDOW)
-            row = {**base, "fecha_entrada": ny(st.fill_x), "hora entrada (NY)": ny(st.fill_x).hour,
-                   "día semana": DAYS[ny(st.fill_x).weekday()], "hora salida (NY)": ny(end_x),
-                   "entrada": st.entry, "stop": st.stop, "objetivo": st.target, "riesgo": risk,
-                   "riesgo / rango": risk / rng, "R potencial": abs(st.target - st.entry) / risk,
-                   "velas hasta llenar": st.fill_x - st.rebreak_x, "velas en operación": end_x - st.fill_x,
-                   "resultado": status, "R": r if status != "abierta" else np.nan,
-                   "R abierta (a mercado)": r if status == "abierta" else np.nan,
-                   "MAE (R)": mae / risk, "MFE (R)": mfe / risk, "MAE (rangos)": mae / rng, "MFE (rangos)": mfe / rng,
-                   "puntuación sesgo": int(score[st.rebreak_x]), "sesgo": alignment(score[st.rebreak_x], d),
-                   "entrada vs apertura": "premium" if st.entry > d_open[st.fill_x] else "descuento"}
-            row["R si entrada a mercado"] = market_entry_r(h, l, c, st, d, rng)
-            for name, stop2 in (("stop en 50 %", st.mid), ("stop en el Low de la TBR", st.low if d > 0 else st.high)):
-                if (st.entry - stop2) * d > 0:
-                    row[f"R con {name}"] = round(sim_from_fill(h, l, c, st.fill_x, st.entry, stop2, st.entry + d * rng,
-                                                              d, 2 * WINDOW)[2], 2)
-            for mult in (0.5, 1.5, 2.0):
-                row[f"R con objetivo {str(mult).replace('.', ',').removesuffix(',0')} rangos"] = round(sim_from_fill(h, l, c, st.fill_x, st.entry, st.stop,
-                                                                          st.entry + d * mult * rng, d, 2 * WINDOW)[2], 2)
-            trades.append(row)
+            for var in versiones:
+                row = continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel.get((st.zone_key, st.day), float('nan')))
+                (trades if row is not None else missed)[var.clave].append(row if row is not None else dict(base))
 
         # ---- eventos tras el retest y reversión C ----
         for s in sessions:
@@ -257,9 +322,9 @@ def main() -> None:
                 if "r" not in ev:
                     continue
                 d = -direction
-                trades.append({
+                c_trades.append({
                     "mercado": sym, "tipo": "Reversión C", "TBR": s.zone.name, "día TBR": pd.Timestamp(s.day),
-                    "dirección": "long" if d > 0 else "short", "estado": ev["status"] if ev["status"] != "abierta" else "filled",
+                    "dirección": "long" if d > 0 else "short", "estado setup": ev["status"] if ev["status"] != "abierta" else "filled",
                     "High": s.high, "50 %": (s.high + s.low) / 2, "Low": s.low, "rango": ev["rng"],
                     "rango % precio": 100 * ev["rng"] / s.high, "hora toma (NY)": ny(ev["i"]), "hora retest (NY)": ny(ev["j"]),
                     "hora 2ª ruptura (NY)": ny(ev["f"]), "fecha_entrada": ny(ev["m"]), "hora entrada (NY)": ny(ev["m"]).hour,
@@ -275,17 +340,49 @@ def main() -> None:
                     "R con objetivo en el Low/High opuesto": round(ev["r_low"], 2)})
     source.close()
 
-    T = pd.DataFrame(trades).sort_values("fecha_entrada").reset_index(drop=True)
-    T.insert(0, "id", np.arange(1, len(T) + 1))
-    M = pd.DataFrame(missed)
-    E = pd.DataFrame(events)
-    done = T[T["resultado"].isin(["target", "stop"])]
-    write_excel(args.salida, T, done, M, E, pd.DataFrame(meta))
-    print("Excel:", args.salida, f"({len(T)} operaciones, {len(M)} setups no entrados)")
+    meta_df, E = pd.DataFrame(meta), pd.DataFrame(events)
+    C = pd.DataFrame(c_trades)
+    results = {}
+    for var in versiones:
+        T = pd.concat([pd.DataFrame(trades[var.clave]), C], ignore_index=True).sort_values("fecha_entrada").reset_index(drop=True)
+        T.insert(0, "id", np.arange(1, len(T) + 1))
+        results[var.clave] = (T, T[T["resultado"].isin(["target", "stop"])], pd.DataFrame(missed[var.clave]))
+
+    # comparativa entre versiones (la reversión C no cambia entre versiones)
+    comp_rows, comp_tbr, comp_bias = [], [], []
+    for var in versiones:
+        _, done, _ = results[var.clave]
+        cont = done[done["tipo"] == "Continuación"].sort_values("fecha_entrada")
+        comp_rows.append({"versión": var.clave, "estrategia": var.nombre, **stats(cont["R"])})
+        for key, g in cont.groupby("TBR"):
+            comp_tbr.append({"versión": var.clave, "TBR": key, **{k: v for k, v in stats(g["R"]).items()
+                                                                  if k in ("operaciones", "win rate %", "R medio", "R total")}})
+        for key, g in cont.groupby("sesgo"):
+            comp_bias.append({"versión": var.clave, "sesgo": key, **{k: v for k, v in stats(g["R"]).items()
+                                                                     if k in ("operaciones", "win rate %", "R medio", "R total")}})
+    comp = pd.DataFrame(comp_rows)
+    comp.insert(3, "dif. R medio vs anterior", comp["R medio"].diff().round(3))
+    comp_tbr = pd.DataFrame(comp_tbr).pivot_table(index="TBR", columns="versión", values="R medio").round(3).reset_index()
+    comp_bias = pd.DataFrame(comp_bias).pivot_table(index="sesgo", columns="versión", values="R medio").round(3).reset_index()
+    cambios = pd.DataFrame([{"versión": v.clave, "estrategia": v.nombre, "qué cambia": v.cambio, "por qué": v.hipotesis,
+                             "entrada": "orden límite en el nivel roto" if v.entrada == "limite" else "a mercado, apertura tras la 2ª ruptura",
+                             "stop": {"retest": "bajo el mínimo del retest", "mitad": "en el 50 % de la TBR",
+                                      "extremo": "en el extremo opuesto de la TBR"}[v.stop],
+                             "objetivo": f"{tp_label(v.objetivo)} rango(s) más allá del nivel roto",
+                             "filtro": f"rango >= {v.min_rango:g} x mediana de 20 sesiones" if v.min_rango else "ninguno"}
+                            for v in versiones])
+    out = Path(args.salida)
+    for var in versiones:
+        T, done, M = results[var.clave]
+        path = out / f"analisis_setups_{var.clave}.xlsx"
+        write_excel(path, T, done, M, E, meta_df, var, comp, comp_tbr, comp_bias, cambios)
+        print("Excel:", path, f"({len(T)} operaciones, {len(M)} setups sin entrar)")
+    print()
+    print(comp.drop(columns=["ganadoras", "perdedoras", "R medio ganadora", "R medio perdedora", "mejor R", "peor R"]).to_string(index=False))
 
 
 # -- Excel --------------------------------------------------------------------------------------------
-def write_excel(path, T, done, M, E, meta) -> None:
+def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambios) -> None:
     from openpyxl.chart import LineChart, Reference
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -331,7 +428,7 @@ def write_excel(path, T, done, M, E, meta) -> None:
 
     miss = pd.DataFrame()
     if len(M):
-        miss = (M.groupby(["TBR", "estado", "motivo"]).size().rename("setups").reset_index()
+        miss = (M.groupby(["TBR", "estado setup", "motivo"]).size().rename("setups").reset_index()
                  .sort_values(["TBR", "setups"], ascending=[True, False]))
 
     # curva de equity
@@ -340,28 +437,33 @@ def write_excel(path, T, done, M, E, meta) -> None:
         curve[k] = curve["R"].where(curve["tipo"] == k, 0).cumsum()
     curve = curve[["fecha_entrada", *kinds]]
 
-    # sensibilidad: R medio de la continuación según objetivo y stop
+    # sensibilidad: R medio de la continuación para cada stop y objetivo (con la entrada de esta versión)
     cont = done[done["tipo"] == "Continuación"]
-    sens = pd.DataFrame({
-        "stop \\ objetivo": ["bajo el mínimo del retest (actual)", "en el 50 %", "en el Low de la TBR"],
-        "0,5 rangos": [cont["R con objetivo 0,5 rangos"].mean(), np.nan, np.nan],
-        "1 rango (actual)": [cont["R"].mean(), cont["R con stop en 50 %"].mean(), cont["R con stop en el Low de la TBR"].mean()],
-        "1,5 rangos": [cont["R con objetivo 1,5 rangos"].mean(), np.nan, np.nan],
-        "2 rangos": [cont["R con objetivo 2 rangos"].mean(), np.nan, np.nan]}).round(3)
-    # entrar a mercado en la 2ª ruptura: sobre TODAS las que llegan a ese punto (llenadas o no), sin sesgo de selección
-    mk = pd.concat([T.loc[T["tipo"] == "Continuación", ["R si entrada a mercado"]],
-                    M[["R si entrada a mercado"]] if "R si entrada a mercado" in M else pd.DataFrame()])["R si entrada a mercado"].dropna()
-    late = cont[cont["velas hasta llenar"] > 2]["R"]
-    sens.loc[len(sens)] = ["entrada a mercado en la 2ª ruptura (todas, n=%d)" % len(mk), np.nan, round(mk.mean(), 3), np.nan, np.nan]
-    sens.loc[len(sens)] = ["orden límite activada 3+ velas tras la 2ª ruptura (n=%d)" % len(late), np.nan,
-                           round(late.mean(), 3) if len(late) else np.nan, np.nan, np.nan]
-    sens_note = ("R medio por operación de la continuación. La fila 'bajo el mínimo del retest' varía el objetivo; las otras "
-                 "dos filas varían el stop con el objetivo actual (1 rango). Filtra la hoja 'Operaciones' para cruzar más.")
+    stop_names = {"retest": "bajo el mínimo del retest", "mitad": "en el 50 % de la TBR", "extremo": "en el extremo opuesto de la TBR"}
+    sens = pd.DataFrame([{"stop \\ objetivo (rangos)": stop_names[k] + (" (actual)" if k == var.stop else ""),
+                          **{tp_label(m) + (" (actual)" if m == var.objetivo else ""): cont[f"R[{k}|{tp_label(m)}]"].mean()
+                             for m in TPS}} for k in STOPS]).round(3)
+    sens_note = ("R medio por operación de la continuación en esta versión, para cada stop (filas) y objetivo (columnas, en rangos "
+                 "de la TBR más allá del nivel roto; 1 = nivel -1). Cada celda es una estrategia distinta: filtra 'Operaciones' "
+                 "(columnas R[stop|objetivo]) para cruzar con TBR, sesgo, hora...")
+    # misma rejilla en la 1ª y la 2ª mitad del histórico: lo que solo funciona en una mitad es azar o sobreajuste
+    cut = cont["fecha_entrada"].median()
+    halves = []
+    for label, part in ((f"1ª mitad (hasta {cut:%Y-%m-%d})", cont[cont["fecha_entrada"] <= cut]),
+                        (f"2ª mitad (desde {cut:%Y-%m-%d})", cont[cont["fecha_entrada"] > cut])):
+        for k in STOPS:
+            halves.append({"periodo": label, "stop": stop_names[k], "operaciones": len(part),
+                           **{tp_label(m): part[f"R[{k}|{tp_label(m)}]"].mean() for m in TPS}})
+    halves = pd.DataFrame(halves).round(3)
+    late = cont[cont["velas hasta llenar"] > 2]["R"] if var.entrada == "limite" else pd.Series(dtype=float)
+    if len(late):
+        sens_note += f" Con orden límite, las llenadas 3+ velas después de la 2ª ruptura: R medio {late.mean():.3f} (n={len(late)})."
     notes = [
         ["Qué es", "Análisis histórico de los setups sobre las TBR (continuación real de la skill Setup y reversión C propuesta)."],
         ["Datos", "Velas M15 de MT5 (Vantage demo) de los mercados de la hoja 'Mercados'. Hora de NY (servidor = NY + 7 h)."],
-        ["Continuación", "Toma del High/Low de la TBR, retest del 50 %, 2ª ruptura; orden límite en el nivel roto, stop bajo el "
-                         "mínimo del retest, objetivo en el nivel -1 (1 rango)."],
+        ["Versión", f"{var.clave}: {var.nombre}. {var.cambio}"],
+        ["Continuación", "Toma del High/Low de la TBR, retest del 50 %, 2ª ruptura. Entrada y stop según la versión (hoja 'Cambios'); "
+                         "objetivo en el nivel -1 (1 rango más allá del nivel roto)."],
         ["Reversión C", "Tras la toma y el retest del 50 %, cierre bajo el mínimo del retest sin 2ª ruptura; orden límite en ese "
                         "mínimo, stop en el High tomado, objetivo en el nivel -1 por el lado contrario. Es una propuesta: aún no está en la skill."],
         ["Supuestos", "Sin spread ni comisiones. Si en una vela caben stop y objetivo, cuenta el stop (pesimista). Ventana de "
@@ -371,17 +473,18 @@ def write_excel(path, T, done, M, E, meta) -> None:
         ["Lectura", "R = múltiplo del riesgo inicial. 'estadístico t' > 2 indica que el R medio difiere de cero con cierta fiabilidad; "
                     "con muchas pruebas cruzadas (hoja por hoja) hay que ser prudente: pueden salir ventajas por azar."],
         ["Cuidado: sesgo de selección", "Los setups que caducan 'porque el precio llegó al objetivo sin llenar la orden' son ganadores por "
-                                        "construcción: su R a mercado NO es una expectativa. Para comparar la entrada a mercado se usan todas las 2ª rupturas "
-                                        "(hoja 'Sensibilidad')."],
+                                        "construcción: su R a mercado NO es una expectativa. Para comparar entradas se usan TODAS las 2ª rupturas "
+                                        "(versiones v2 y v3: entrada a mercado en la apertura de la vela siguiente)."],
         ["Reversión B (descartada)", "Otra reversión probada (barrido que cierra de vuelta dentro, venta/compra límite en el nivel) dio "
                                      "R medio de -0,24 con 15.086 operaciones: no se incluye."]]
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
-        sheets = [("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
+        sheets = [("Cambios", cambios), ("Comparativa", comp), ("Comparativa por TBR", comp_tbr),
+                  ("Comparativa por sesgo", comp_bias), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
                   ("Por mercado", by_sym), ("Por dirección", by_dir), ("Por sesgo", by_bias), ("Por hora entrada NY", by_hour),
                   ("Por día de la semana", by_dow), ("Por rango", by_range), ("Por riesgo-rango", by_risk),
                   ("Premium-Discount", by_pd), ("Embudo por TBR", funnel), ("Continuación vs reversión", probs),
-                  ("Sensibilidad", sens), ("Setups no entrados", miss), ("Curva R", curve),
+                  ("Sensibilidad", sens), ("Sensibilidad 1ª vs 2ª mitad", halves), ("Setups no entrados", miss), ("Curva R", curve),
                   ("Operaciones", T), ("Setups sin entrar (detalle)", M), ("Mercados", meta), ("Notas", pd.DataFrame(notes, columns=["tema", "detalle"]))]
         for name, frame in sheets:
             if name == "Resumen":
