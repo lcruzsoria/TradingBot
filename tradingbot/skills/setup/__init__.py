@@ -1,6 +1,6 @@
-"""Skill Setup: la estrategia de trading. Continuaciones o reversiones donde el precio toma la liquidez del High o del
-Low de una zona TBR.
+"""Skill Setup: la estrategia de trading. Continuación sobre cada TBR: toma de liquidez, retest del 50 %, segunda
+ruptura y entrada con orden límite en el nivel roto (stop bajo el retest, objetivo en el nivel -1).
 
 - skill.py   la skill (hexágono 4)
-- setups.py  detección de las tomas de liquidez y su clasificación (continuación / reversión)
+- setups.py  detección de los tres pasos, entrada, stop, objetivo y estado de cada setup
 """

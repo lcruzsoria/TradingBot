@@ -14,43 +14,49 @@ from tradingbot.skills.bias.schedule import next_recalc
 from tradingbot.skills.setup.setups import Setup
 
 
-def setup(direction="short", kind="reversal", entry=105.0, confirm_x=10):
-    return Setup("NY-AM", "NY_AM", date(2026, 10, 6), "high", 105.0, 8, kind, direction, confirm_x, entry)
+def setup(direction="long", status="armed", kind="continuation", entry=105.0):
+    return Setup("NY-AM", "NY_AM", date(2026, 10, 6), direction, 105.0, 95.0, 100.0, 4, status, retest_x=5,
+                 rebreak_x=6, entry=entry, stop=99.5, target=115.0, kind=kind)
 
 
 def result(bias, day_open=100.0):
     return BiasResult(bias, date(2026, 10, 6), levels={"Apertura": day_open})
 
 
-def test_go_a_favor_del_sesgo_y_en_premium():
-    d = ExecutionGate().evaluate(setup("short"), 11, result(Bias.BEARISH))     # venta a 105 sobre la apertura 100
+def test_go_a_favor_del_sesgo():
+    d = ExecutionGate().evaluate(setup("long"), result(Bias.BULLISH))
     assert d.allowed and d.verdict == "GO" and all(c.passed for c in d.checks)
+    assert ExecutionGate().evaluate(setup("long", "filled"), result(Bias.BULLISH)).allowed
 
 
 def test_no_go_contra_el_sesgo():
-    d = ExecutionGate().evaluate(setup("short"), 11, result(Bias.BULLISH))
-    assert not d.allowed and d.reason.startswith("Sesgo: Short contra el sesgo Bullish")
+    d = ExecutionGate().evaluate(setup("long"), result(Bias.BEARISH))
+    assert not d.allowed and d.reason.startswith("Sesgo: Long contra el sesgo Bearish")
+    assert ExecutionGate().evaluate(setup("short"), result(Bias.BEARISH)).allowed
 
 
 def test_sin_sesgo_no_se_opera_salvo_que_se_permita():
-    assert "No Bias" in ExecutionGate().evaluate(setup(), 11, result(Bias.NO_BIAS)).reason
-    assert ExecutionGate(allow_no_bias=True).evaluate(setup(), 11, result(Bias.NO_BIAS)).allowed
-    assert "aún no está calculado" in ExecutionGate().evaluate(setup(), 11, None).reason
+    assert "No Bias" in ExecutionGate().evaluate(setup(), result(Bias.NO_BIAS)).reason
+    assert ExecutionGate(allow_no_bias=True).evaluate(setup(), result(Bias.NO_BIAS)).allowed
+    assert "aún no está calculado" in ExecutionGate().evaluate(setup(), None).reason
 
 
-def test_pendiente_y_setup_caducado():
-    d = ExecutionGate().evaluate(setup(direction=None, kind="pending", entry=None, confirm_x=None), 11, result(Bias.BEARISH))
-    assert not d.allowed and d.reason.startswith("Confirmado")
-    old = ExecutionGate(max_age_bars=2).evaluate(setup(confirm_x=3), 11, result(Bias.BEARISH))   # hace 7 velas
-    assert not old.allowed and old.reason.startswith("Vigente: confirmado hace 7")
+def test_esperando_pasos_caducado_e_invalidado():
+    d = ExecutionGate().evaluate(setup(status="sweep", entry=None), result(Bias.BULLISH))
+    assert not d.allowed and d.reason == "Armado: esperando el retest del 50 %"
+    d = ExecutionGate().evaluate(setup(status="retest", entry=None), result(Bias.BULLISH))
+    assert d.reason == "Armado: esperando la segunda ruptura"
+    d = ExecutionGate().evaluate(setup(status="expired"), result(Bias.BULLISH))
+    assert not d.allowed and d.reason.startswith("Vigente: caducado")
+    assert not ExecutionGate().evaluate(setup(status="invalid"), result(Bias.BULLISH)).allowed
 
 
 def test_premium_discount_solo_en_reversiones():
-    cheap = setup("short", entry=99.0)                                         # vende en descuento: mal
-    assert "descuento" in ExecutionGate().evaluate(cheap, 11, result(Bias.BEARISH)).reason
-    assert ExecutionGate(premium_discount=False).evaluate(cheap, 11, result(Bias.BEARISH)).allowed
-    cont = setup("short", kind="continuation", entry=99.0)                     # una continuación no se filtra
-    assert ExecutionGate().evaluate(cont, 11, result(Bias.BEARISH)).allowed
+    cheap = setup("short", kind="reversal", entry=99.0)                # vende en descuento: mal
+    assert "descuento" in ExecutionGate().evaluate(cheap, result(Bias.BEARISH)).reason
+    assert ExecutionGate(premium_discount=False).evaluate(cheap, result(Bias.BEARISH)).allowed
+    cont = setup("short", entry=99.0)                                  # una continuación no se filtra
+    assert ExecutionGate().evaluate(cont, result(Bias.BEARISH)).allowed
 
 
 def ny(h, m=0, d=6):

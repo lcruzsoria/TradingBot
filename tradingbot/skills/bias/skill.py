@@ -7,7 +7,7 @@ from ...clock import NY
 from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
-from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_MAX_AGE_BARS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
+from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
 
@@ -36,10 +36,7 @@ class BiasSkill(Skill):
         for key, value in (("RECALC_INDEX_HOURS", self.index_hours), ("RECALC_HOURS", self.hours)):
             if value < 0:
                 raise ValueError(f"BIAS_{key}={value:g} debe ser 0 (sin recálculo) o más.")
-        max_age = self.settings.get_int("EXEC_MAX_AGE_BARS", DEFAULT_MAX_AGE_BARS)
-        if max_age < 0:
-            raise ValueError(f"BIAS_EXEC_MAX_AGE_BARS={max_age} debe ser 0 o más.")
-        self.gate = ExecutionGate(max_age, self.settings.get_bool("EXEC_ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS),
+        self.gate = ExecutionGate(self.settings.get_bool("EXEC_ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS),
                                   self.settings.get_bool("EXEC_PREMIUM_DISCOUNT", DEFAULT_PREMIUM_DISCOUNT))
 
     # -- mensajes -----------------------------------------------------------------------------------
@@ -104,10 +101,10 @@ class BiasSkill(Skill):
     # -- Bias Execution -----------------------------------------------------------------------------------
     def _execution(self) -> None:
         p = self._setup
-        if p is None or not p["setups"]:
+        if p is None or p["last"] is None:
             return
-        setup = p["setups"][-1]                       # el más reciente (también si aún está pendiente)
+        setup = p["last"]                             # el vivo más reciente, o el último que terminó
         result = self.result if self.result_symbol == p["symbol"] else None
-        decision = self.gate.evaluate(setup, p["bars"], result)
+        decision = self.gate.evaluate(setup, result)
         self.publish("bias.execution", {"symbol": p["symbol"], "timeframe": p["timeframe"], "setup": setup,
                                         "decision": decision, "bias": result.bias if result else None})

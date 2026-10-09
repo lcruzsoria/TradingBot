@@ -605,36 +605,44 @@ class MainWindow(QMainWindow):
                       f"{levels or 'sin niveles'}")
 
     def _on_setup(self, p: dict) -> None:
-        if not p["setups"]:
+        s = p["last"]
+        if s is None:
             self.log_once("setup", (p["symbol"], None), f"setup: ninguna toma de liquidez de las TBR en {p['symbol']}")
             return
-        s = p["setups"][-1]                              # el más reciente, también si aún está pendiente
         tf = display_label(p["timeframe"])
-        detail = "\n".join([
-            f"{s.label}", "",
-            f"Mercado:        {p['symbol']} {tf}",
-            f"Zona TBR:       {s.zone} del {s.day:%d/%m}",
-            f"Liquidez:       {'High' if s.side == 'high' else 'Low'} de la zona en {fmt_price(s.level)}",
-            f"Toma:           vela de las {self._bar_time(s.sweep_x)}",
-            f"Confirmación:   {p['confirm_bars']} vela(s), cierre de las {self._bar_time(s.confirm_x)}"
-            if s.confirm_x is not None else f"Confirmación:   pendiente ({p['confirm_bars']} vela(s) desde la toma)",
-            f"Entrada ref.:   {fmt_price(s.entry)} (cierre de la vela de confirmación)" if s.entry is not None else "",
-            "", "Regla: cierre más allá del nivel = continuación; cierre de vuelta dentro de la zona = reversión.",
-        ])
-        tone = None if s.direction is None else "info"
-        self.log_once("setup", (p["symbol"], s.sweep_x, s.side, s.kind),
-                      f"setup: {s.label} ({p['symbol']} {tf}, {self._bar_time(s.sweep_x)})", detail, tone)
+        lines = [s.label, "",
+                 f"Mercado:        {p['symbol']} {tf}",
+                 f"TBR:            {s.zone} del {s.day:%d/%m}  (High {fmt_price(s.high)}, 50 % {fmt_price(s.mid)}, "
+                 f"Low {fmt_price(s.low)})",
+                 f"1 Toma:         {'High' if s.side == 'high' else 'Low'} de la TBR, vela de las {self._bar_time(s.sweep_x)}",
+                 f"2 Retest 50 %:  {self._bar_time(s.retest_x) if s.retest_x is not None else 'pendiente'}",
+                 f"3 2ª ruptura:   {self._bar_time(s.rebreak_x) if s.rebreak_x is not None else 'pendiente'}"]
+        if s.entry is not None:
+            rr = f"  (riesgo/beneficio {s.rr:.1f}R)" if s.rr else ""
+            lines += ["", f"Entrada (límite): {fmt_price(s.entry)}   Stop: {fmt_price(s.stop)}   "
+                          f"Objetivo (-1): {fmt_price(s.target)}{rr}"]
+        if s.fill_x is not None:
+            lines.append(f"Llenada:          vela de las {self._bar_time(s.fill_x)}")
+        if s.end_x is not None and s.status in ("target", "stop", "expired", "invalid"):
+            lines.append(f"Fin:              vela de las {self._bar_time(s.end_x)}" + (f" - {s.note}" if s.note else ""))
+        tone = ("info" if s.status in ("armed", "filled") else "go" if s.status == "target" else
+                "nogo" if s.status == "stop" else None)
+        self.log_once("setup", (p["symbol"], s.sweep_x, s.direction, s.status),
+                      f"setup: {s.label} ({p['symbol']} {tf}, {self._bar_time(s.sweep_x)})", "\n".join(lines), tone)
 
     def _on_execution(self, p: dict) -> None:
         s, d = p["setup"], p["decision"]
-        if s.direction is None:
-            return                                       # pendiente: lo anuncia Setup; el Bias decide al confirmarse
+        if s.status in ("sweep", "retest"):
+            return                                       # aún no hay nada que ejecutar: lo anuncia Setup
         lines = [f"{d.verdict}: {s.label}", f"Mercado: {p['symbol']} {display_label(p['timeframe'])}   "
                  f"Sesgo del día: {p['bias'].value if p['bias'] else 'sin calcular'}", "", "Controles:"]
         lines += [f"  {'✓' if c.passed else '✗'} {c.name:<20} {c.detail}" for c in d.checks]
+        if s.entry is not None:
+            lines += ["", f"Entrada (límite) {fmt_price(s.entry)}, stop {fmt_price(s.stop)}, "
+                          f"objetivo {fmt_price(s.target)}"]
         lines += ["", "El bot no envía órdenes: el GO / NO GO solo informa."]
         side = s.direction.capitalize()
-        self.log_once("execution", (p["symbol"], s.sweep_x, s.side, d.allowed, d.reason),
+        self.log_once("execution", (p["symbol"], s.sweep_x, s.direction, s.status, d.allowed, d.reason),
                       f"bias execution: {d.verdict} {side} ({s.zone}) - "
                       + ("todas las condiciones se cumplen" if d.allowed else d.reason),
                       "\n".join(lines), "go" if d.allowed else "nogo")

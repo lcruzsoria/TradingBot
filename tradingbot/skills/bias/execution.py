@@ -2,13 +2,15 @@
 
 Cada setup pasa por una lista de controles; basta que falle uno para que sea NO GO:
 
-1. Confirmado     el setup ya tiene dirección (han cerrado sus velas de confirmación).
-2. Vigente        se confirmó hace como mucho BIAS_EXEC_MAX_AGE_BARS velas: más tarde, la entrada ya no es la del
-                  setup (el precio se ha ido y el riesgo / beneficio cambia).
+1. Armado         el setup ha completado sus tres pasos y tiene la orden límite lista (o ya se llenó). Mientras espera
+                  el retest del 50 % o la segunda ruptura, todavía no hay nada que ejecutar.
+2. Vigente        el setup no ha caducado ni se ha invalidado (ni ha terminado ya en stop u objetivo).
 3. Sesgo          la dirección va a favor del sesgo del día: Bullish solo Long, Bearish solo Short. Con No Bias, solo
-                  si BIAS_EXEC_ALLOW_NO_BIAS=true (por defecto no: sin sesgo claro no se opera).
+                  si BIAS_EXEC_ALLOW_NO_BIAS=true (por defecto no: sin sesgo claro no se opera). Vale igual para una
+                  continuación que para una reversión: una reversión es válida cuando el sesgo es contrario a la
+                  continuación, porque entonces su dirección es la del sesgo.
 4. Premium / Discount (solo reversiones, BIAS_EXEC_PREMIUM_DISCOUNT): se compra por debajo de la apertura del día
-                  (descuento) y se vende por encima (premium). Una reversión Long por encima de la apertura compra caro.
+                  (descuento) y se vende por encima (premium).
 
 El bot NO envía órdenes: el resultado solo se publica (bias.execution) e informa.
 """
@@ -19,9 +21,11 @@ from dataclasses import dataclass
 from .models import Bias, BiasResult
 from .rules import fmt_price
 
-DEFAULT_MAX_AGE_BARS = 2
 DEFAULT_ALLOW_NO_BIAS = False
 DEFAULT_PREMIUM_DISCOUNT = True
+
+ARMED = ("armed", "filled")
+DEAD = ("expired", "invalid", "target", "stop")
 
 
 @dataclass(frozen=True)
@@ -43,27 +47,29 @@ class ExecutionDecision:
 
 
 class ExecutionGate:
-    def __init__(self, max_age_bars: int = DEFAULT_MAX_AGE_BARS, allow_no_bias: bool = DEFAULT_ALLOW_NO_BIAS,
-                 premium_discount: bool = DEFAULT_PREMIUM_DISCOUNT):
-        self.max_age_bars = max_age_bars
+    def __init__(self, allow_no_bias: bool = DEFAULT_ALLOW_NO_BIAS, premium_discount: bool = DEFAULT_PREMIUM_DISCOUNT):
         self.allow_no_bias = allow_no_bias
         self.premium_discount = premium_discount
 
-    def evaluate(self, setup, bars: int, result: BiasResult | None) -> ExecutionDecision:
-        """`setup`: tradingbot.skills.setup.setups.Setup; `bars`: velas cargadas (para saber su antigüedad)."""
+    def evaluate(self, setup, result: BiasResult | None) -> ExecutionDecision:
+        """`setup`: tradingbot.skills.setup.setups.Setup."""
+        from ..setup.setups import STATUS_NAMES
         checks: list[Check] = []
-        confirmed = setup.direction is not None
-        checks.append(Check("Confirmado", confirmed,
-                            "velas de confirmación cerradas" if confirmed else "esperando el cierre de confirmación"))
-        if confirmed:
-            age = bars - 1 - setup.confirm_x
-            checks.append(Check("Vigente", age <= self.max_age_bars,
-                                "confirmado en la última vela" if age == 0 else
-                                f"confirmado hace {age} vela(s) (máximo {self.max_age_bars})"))
+        armed = setup.status in ARMED
+        waiting = setup.status in ("sweep", "retest")
+        checks.append(Check("Armado", armed or setup.status in DEAD,
+                            "tres pasos completos, orden límite lista" if armed else
+                            STATUS_NAMES[setup.status] if waiting else "los tres pasos se completaron"))
+        checks.append(Check("Vigente", setup.status not in DEAD,
+                            "la orden sigue vigente" if setup.status not in DEAD else
+                            f"{STATUS_NAMES[setup.status]}" + (f" ({setup.note})" if setup.note else "")))
+        if armed:
             checks.append(self._bias_check(setup.direction, result))
             if self.premium_discount and setup.kind == "reversal":
                 checks.append(self._premium_discount(setup, result))
         failed = [c for c in checks if not c.passed]
+        if waiting:
+            return ExecutionDecision(False, f"Armado: {STATUS_NAMES[setup.status]}", tuple(checks[:1]))
         if failed:
             return ExecutionDecision(False, f"{failed[0].name}: {failed[0].detail}", tuple(checks))
         return ExecutionDecision(True, "todas las condiciones se cumplen", tuple(checks))

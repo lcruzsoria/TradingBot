@@ -11,6 +11,19 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro compacto en la cabecera del gráfico, a la derecha de los botones TDO, Midnight, PDH/PDL y TBR (en una matriz 2x2). |
 
+### El setup de continuación
+
+En cada TBR cerrada (Asia, London, Pre-NY, NY-AM, NY-PM) se anotan High, Low y 50 %. En un **largo**:
+
+1. **Toma de liquidez:** una vela supera el High.
+2. **Retest del 50 %:** el precio vuelve al rango y toca el 50 % (mecha o cierre). Si no lo toca, no hay setup.
+3. **Segunda ruptura:** vuelve a superar el High.
+
+**Entrada:** orden límite en el High, el nivel roto en los pasos 1 y 3. **Stop:** bajo el mínimo del paso 2. **Objetivo:**
+nivel -1 de Fibonacci (un rango sobre el High: el doble del rango contado desde el Low). El **corto** es el espejo, con el Low.
+Se invalida si, antes de la segunda ruptura, el precio toma el lado contrario; la orden caduca si el precio llega al objetivo
+sin llenarla o pasa `SETUP_WINDOW_HOURS`. Un setup por TBR y por lado. El Bias solo valida o no la dirección (Bias Execution).
+
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
 servidor comparando los ticks en vivo con el reloj de tu PC (unos segundos tras conectar) y convierte a Nueva York
@@ -128,7 +141,6 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |
 | `BIAS_MIN_SCORE` | `2` | Puntuación mínima (suma de voto x peso) para que haya sesgo. |
 | `BIAS_RECALC_INDEX_HOURS` / `BIAS_RECALC_HOURS` | `3` / `4` | Cada cuántas horas se recalcula el sesgo solo, alineado con el inicio del día de trading: índices USA / resto. `0`: desactivado. |
-| `BIAS_EXEC_MAX_AGE_BARS` | `2` | Velas que pueden pasar desde la confirmación de un setup para que siga siendo ejecutable (Bias Execution). |
 | `BIAS_EXEC_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO a los setups. |
 | `BIAS_EXEC_PREMIUM_DISCOUNT` | `true` | Las reversiones solo compran bajo la apertura del día y venden sobre ella. |
 | `BIAS_<REGLA>_WEIGHT` | `2` ruptura / `1` apertura | Peso de cada regla en la puntuación. |
@@ -150,9 +162,10 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
 | **SETUP** — la estrategia (tomas de liquidez de las zonas TBR) | | |
-| `SETUP_CONFIRM_BARS` | `3` | Velas de confirmación tras la toma del nivel, contando la que lo toma. |
-| `SETUP_ZONES` | vacío | Claves de las zonas TBR que se vigilan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
-| `SETUP_TYPES` | `reversal, continuation` | Tipos de setup que interesan. |
+| `SETUP_WINDOW_HOURS` | `24` | Horas, desde que acaba la TBR, para completar los tres pasos y llenar la orden límite. |
+| `SETUP_TP_RANGES` | `1` | Objetivo, en rangos de la TBR sobre el High (bajo el Low en cortos): 1 = nivel -1 de Fibonacci. |
+| `SETUP_ZONES` | vacío | Claves de las TBR que se vigilan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `SETUP_TYPES` | `continuation` | Tipos de setup (de momento solo continuación). |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
@@ -299,7 +312,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
-| `setup` | 4 | La estrategia: continuaciones o reversiones tras tomar la liquidez del High o el Low de una zona TBR (`candles.loaded` + `tbr.updated` -> `setup.updated`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
+| `setup` | 4 | La estrategia: continuación sobre cada TBR (toma de liquidez, retest del 50 %, segunda ruptura; entrada límite, stop y objetivo -1) (`candles.loaded` + `tbr.updated` -> `setup.updated`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
 El anillo está completo; quedan libres los tres satélites pequeños (`aux1`, `aux2`, `aux3`).
