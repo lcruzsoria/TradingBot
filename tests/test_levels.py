@@ -222,3 +222,39 @@ def test_el_registro_anota_el_cierre_de_mercados(tmp_path, monkeypatch):
     win._on_market_closed({"when": when.replace(day=6), "weekly": False, "markets": ("Futuros de índices USA",),
                            "index_reopen": 18 * 60, "reopen": 17 * 60})
     assert "cierre de los futuros de índices USA a las 17:00 NY" in win.log_view.toPlainText()
+
+
+def test_cambio_de_dia_de_trading_a_la_hora_de_cada_activo():
+    from zoneinfo import ZoneInfo
+    from tradingbot.skills.levels.daylevels import new_trading_day
+    ny = ZoneInfo("America/New_York")
+    at = lambda day, h, m=0, s=0: datetime(2025, 3, day, h, m, s, tzinfo=ny)      # noqa: E731  (lunes 3 ... domingo 9)
+    forex = new_trading_day(at(3, 16, 59, 50), at(3, 17, 0, 10), 17 * 60)
+    assert forex["day"] == "MARTES" and forex["when"] == at(3, 17)                    # el día lleva el nombre del que termina
+    assert new_trading_day(at(3, 16, 59, 50), at(3, 17, 0, 10), 18 * 60) is None      # los índices aún no han cambiado
+    indices = new_trading_day(at(3, 17, 59, 50), at(3, 18, 0, 10), 18 * 60)
+    assert indices["day"] == "MARTES" and indices["when"] == at(3, 18)
+    assert new_trading_day(at(9, 16, 59, 50), at(9, 17, 0, 10), 17 * 60)["day"] == "LUNES"   # domingo por la tarde
+    assert new_trading_day(at(7, 16, 59, 50), at(7, 17, 0, 10), 17 * 60) is None     # viernes: el mercado cierra
+    assert new_trading_day(at(8, 16, 59, 50), at(8, 17, 0, 10), 17 * 60) is None     # sábado
+    assert new_trading_day(at(3, 17, 0, 10), at(3, 17, 0, 30), 17 * 60) is None      # ya anotado
+
+
+def test_el_registro_anota_el_cambio_de_dia_de_cada_grupo_de_activos(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from zoneinfo import ZoneInfo
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD", "NAS100.r", "XAUUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "levels"}]), cfg, "t")
+    ny = ZoneInfo("America/New_York")
+    base = {"day": "MARTES", "us_indices": ("NAS100", "SP500")}
+    win._on_market_day({**base, "when": datetime(2025, 3, 3, 17, 0, tzinfo=ny), "index": False, "start": 17 * 60})
+    win._on_market_day({**base, "when": datetime(2025, 3, 3, 18, 0, tzinfo=ny), "index": True, "start": 18 * 60})
+    text = win.log_view.toPlainText()
+    assert "nuevo día de trading (MARTES) a las 17:00 NY - Forex, metales y resto" in text
+    assert "nuevo día de trading (MARTES) a las 18:00 NY - índices USA" in text

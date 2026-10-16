@@ -9,7 +9,7 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
                         DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_US_INDICES, SMA_STYLES, compute, days, is_us_index,
-                        market_close, parse_time)
+                        market_close, new_trading_day, parse_time)
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -21,7 +21,7 @@ class LevelsSkill(Skill):
                    "PDH / PDL (máximo y mínimo del día anterior), y dónde empieza cada día: a las 18:00 de NY en los "
                    "índices americanos y a las 17:00 en el resto.")
     subscribes = ("candles.loaded", "clock.offset", "levels.sma")
-    publishes = ("levels.updated", "market.closed")
+    publishes = ("levels.updated", "market.closed", "market.day")
     slot = 3
     interval = 20.0                       # cada cuánto se comprueba si ha cerrado un mercado
 
@@ -84,7 +84,7 @@ class LevelsSkill(Skill):
             self.update()
 
     def tick(self) -> None:
-        """Avisa (market.closed) cuando cierra el mercado de los futuros de índices o Forex, a la hora de cierre de NY."""
+        """Avisa cuando cierra un mercado (market.closed) y cuando empieza el día de trading de los índices o del resto (market.day)."""
         now, prev = datetime.now(NY), self._checked
         self._checked = now
         if self.error:
@@ -92,6 +92,10 @@ class LevelsSkill(Skill):
         closed = market_close(prev, now, self.market_close)
         if closed:
             self.publish("market.closed", {**closed, "index_reopen": self.index_day_start, "reopen": self.day_start})
+        for index, start in ((True, self.index_day_start), (False, self.day_start)):     # cada activo cambia de día a su hora
+            new_day = new_trading_day(prev, now, start)
+            if new_day:
+                self.publish("market.day", {**new_day, "index": index, "start": start, "us_indices": self.us_indices})
 
     def update(self) -> None:
         p = self._last

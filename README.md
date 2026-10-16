@@ -92,6 +92,10 @@ Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al f
 pasan un poco de la última vela. Además, una **línea vertical punteada** marca el inicio de cada día de trading, y el
 nombre del día (LUNES, MARTES...) va abajo, centrado entre su separador y el siguiente. Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
 colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
+**Avisos en el Registro:** la skill Levels anota el cierre de mercados (futuros de índices USA cada día laborable, Forex el
+viernes; `LEVELS_MARKET_CLOSE`) y el cambio de día de trading de cada activo a su hora: 18:00 NY en los índices
+americanos y 17:00 NY en el resto, con los activos de tu lista de Quotes que corresponden. De domingo a jueves.
+
 **SMA** (botón a la izquierda de TDO): media móvil simple de los cierres, de 30 periodos por defecto, calculada con las velas del
 timeframe que se está viendo. Con **clic derecho** en el botón se abre su ventana: periodos, color de la línea y trazo
 (normal, discontinuo o punteado); se aplica al momento y se guarda en el bloque LEVELS de `tradingbot.env`.

@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "setup.updated": self._on_setup,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.updated": self._on_setup,
             "bias.schedule": self._on_bias_schedule, "bias.execution": self._on_execution,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
@@ -705,6 +705,17 @@ class MainWindow(QMainWindow):
                      f"Cierre diario de los futuros de los índices americanos ({hour} NY): reabren a las "
                      f"{hhmm(p['index_reopen'])} NY con un nuevo día de trading.\nForex sigue abierto: su día de trading "
                      f"empieza a las {hhmm(p['reopen'])} NY.", tone="warn")
+
+    def _on_market_day(self, p: dict) -> None:
+        """Cambio de día de trading: a las 18:00 NY en los índices americanos y a las 17:00 en el resto de activos."""
+        from ..skills.levels.daylevels import is_us_index
+        symbols = [s for s in self.watchlist if is_us_index(s, p["us_indices"]) == p["index"]]
+        hour = p["when"].strftime("%H:%M")
+        group = "índices USA" if p["index"] else "Forex, metales y resto"
+        names = ", ".join(symbols) or "ninguno de tu lista de Quotes"
+        self.log(f"mercados: nuevo día de trading ({p['day']}) a las {hour} NY - {group}",
+                 f"Empieza el día de trading del {p['day']} para {group} ({hour} NY).\nActivos de tu lista: {names}.\n"
+                 "Los niveles TDO, PDH/PDL y los separadores del gráfico se renuevan con este día.", tone="info")
 
     def _on_setup(self, p: dict) -> None:
         s = p["last"]

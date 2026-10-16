@@ -136,3 +136,17 @@ def market_close(prev: datetime, now: datetime, close_minutes: int) -> dict | No
     weekly = now.weekday() == 4
     return {"when": closing, "weekly": weekly,
             "markets": ("Futuros de índices USA", "Forex") if weekly else ("Futuros de índices USA",)}
+
+
+def new_trading_day(prev: datetime, now: datetime, start_minutes: int) -> dict | None:
+    """Cambio de día de trading ocurrido entre `prev` y `now` (hora de NY) para un activo cuyo día empieza a `start_minutes`.
+
+    El día lleva el nombre del día en que termina (el que empieza el domingo por la tarde es el LUNES). Los mercados
+    abren de domingo a jueves por la tarde: el viernes y el sábado no empieza ningún día de trading.
+    """
+    if prev >= now or now.weekday() not in (6, 0, 1, 2, 3):
+        return None
+    start = now.replace(hour=start_minutes // 60, minute=start_minutes % 60, second=0, microsecond=0)
+    if not prev < start <= now:
+        return None
+    return {"when": start, "day": WEEKDAYS[(now.weekday() + 1) % 7]}
