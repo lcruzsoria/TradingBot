@@ -133,13 +133,13 @@ class AboveBelowMidnight(BiasRule):
 
 @register_rule("htf_sweep")
 class HtfSweepRule(BiasRule):
-    """Barrido de la vela anterior: el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores.
+    """Sweep mecha de la vela anterior: el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores.
 
     Si la vela n-1 barrió el High de la n-2 y cerró dentro de su rango -> bajista; si barrió el Low y cerró dentro -> alcista.
     Barrer los dos lados, cerrar fuera o no barrer no puntúa. La vela actual (0) no interviene. Ver bias/htf.py.
     Parámetros: BIAS_HTF_SWEEP_INDEX_HOURS (3) y BIAS_HTF_SWEEP_HOURS (4): tamaño de las velas en índices / resto.
     """
-    title = "Barrido de la vela anterior"
+    title = "Sweep mecha de la vela anterior"
     weight = 2.0
 
     def evaluate(self, ctx: BiasContext) -> RuleVote:
