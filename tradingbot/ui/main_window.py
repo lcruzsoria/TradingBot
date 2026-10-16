@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
@@ -18,6 +18,7 @@ from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
+from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
 from .sma_dialog import SmaDialog
 from .bridge import UiBridge
@@ -214,7 +215,9 @@ class MainWindow(QMainWindow):
         self.sma_btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool("SHOW_SMA", False))
         self.sma_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.sma_btn.customContextMenuRequested.connect(lambda _pos: self.open_sma_config())
-        self.sma_cfg_btn = QPushButton("⚙")                  # abre la ventana de la SMA (periodos, color y trazo)
+        self.sma_cfg_btn = QPushButton()                    # rueda: abre la ventana de la SMA (periodos, color y trazo)
+        self.sma_cfg_btn.setIcon(gear_icon(theme.TEXT))
+        self.sma_cfg_btn.setIconSize(QSize(16, 16))
         self.sma_cfg_btn.setProperty("chip", "true")
         self.sma_cfg_btn.setFixedWidth(30)
         self.sma_cfg_btn.setToolTip("Configurar la SMA: periodos, color de la línea y trazo")
@@ -384,7 +387,7 @@ class MainWindow(QMainWindow):
     def _refresh_sma_tip(self) -> None:
         period, color, style = self._sma_cfg
         self.sma_btn.setToolTip(f"Media móvil simple de {period} periodos ({style}, {color}) sobre las velas del timeframe visible.\n"
-                                "Pulsa ⚙ (o clic derecho en el botón) para cambiar los periodos, el color y el trazo.")
+                                "Pulsa la rueda (o clic derecho en el botón) para cambiar los periodos, el color y el trazo.")
 
     def open_sma_config(self) -> None:
         """Ventana de la SMA: periodos, color y trazo; se aplica al momento y se guarda en tradingbot.env."""
@@ -530,6 +533,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(theme.stylesheet())
         self.chart.apply_theme()
         self.bias_hist.style()
+        self.sma_cfg_btn.setIcon(gear_icon(theme.TEXT))
         self._refresh_rules_link()
         self.rules_list.refresh()
         self.ring.update()

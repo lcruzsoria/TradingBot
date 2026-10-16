@@ -103,7 +103,7 @@ viernes; `LEVELS_MARKET_CLOSE`) y el cambio de día de trading de cada activo a 
 americanos y 17:00 NY en el resto, con los activos de tu lista de Quotes que corresponden. De domingo a jueves.
 
 **SMA** (botón a la izquierda de TDO): media móvil simple de los cierres, de 30 periodos por defecto, calculada con las velas del
-timeframe que se está viendo. Con el botón **⚙** de al lado (o clic derecho en el botón) se abre su ventana: periodos, color de la línea y trazo
+timeframe que se está viendo. Con el botón de la **rueda dentada** de al lado (o clic derecho en el botón) se abre su ventana: periodos, color de la línea y trazo
 (normal, discontinuo o punteado); se aplica al momento y se guarda en el bloque LEVELS de `tradingbot.env`.
 
 Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *Apertura* que antes pintaba el Bias
@@ -246,7 +246,7 @@ Reglas incluidas (cada una vota +1, -1 o 0 y tiene su peso `BIAS_<REGLA>_WEIGHT`
 | `tdo` | 1 | +1 sobre el **TDO** (True Day Open: apertura del día de trading, 18:00 NY en índices americanos y 17:00 en el resto), -1 bajo él. |
 | `midnight` | 1 | +1 sobre la apertura de las **00:00 de Nueva York**, -1 bajo ella. No vota hasta que existe esa vela. |
 | `above_below_open` | 1 | Apertura del día por fecha del servidor. La sustituye `tdo`: no las actives juntas (contaría doble). |
-| `sma` | 2 | **Precio vs SMA** (opcional): media móvil simple de los cierres (botón SMA del gráfico: 30 periodos por defecto, con las velas del timeframe visible). Precio **por encima** de la SMA: +peso (alcista); **por debajo**: -peso (bajista). Los periodos se cambian con el botón ⚙ del botón SMA. |
+| `sma` | 2 | **Precio vs SMA** (opcional): media móvil simple de los cierres (botón SMA del gráfico: 30 periodos por defecto, con las velas del timeframe visible). Precio **por encima** de la SMA: +peso (alcista); **por debajo**: -peso (bajista). Los periodos se cambian con el botón de la rueda junto al botón SMA. |
 | `htf_break` | 2 | **Continuación de la vela anterior** (opcional, aún por medir): mismas velas que `htf_sweep` (H3 en índices, H4 en el resto); el sesgo de la vela actual sale de la n-1 y la n-2. Si la n-1 **cierra por encima del High** de la n-2: +1 (continuación alcista); si **cierra por debajo del Low**: -1 (continuación bajista); si cierra dentro, no puntúa; si la n-1 barre con mecha los dos lados de la n-2 tampoco puntúa. Es la complementaria del barrido: nunca puntúan a la vez. |
 | `htf_sweep` | 2 | **Sweep mecha de la vela anterior** (opcional, aún por medir): el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores ya cerradas, la n-1 y la n-2. Si la n-1 barre el High de la n-2 y cierra dentro de su rango: -1 (bajista); si barre el Low y cierra dentro: +1 (alcista). Barrer los dos lados, cerrar fuera o no barrer ninguno no puntúa. Las velas se alinean con el inicio del día de trading en NY (18:00 índices, 17:00 resto); tamaño con `BIAS_HTF_SWEEP_INDEX_HOURS` / `BIAS_HTF_SWEEP_HOURS`. |
 

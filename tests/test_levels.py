@@ -290,7 +290,7 @@ def test_el_boton_de_ajustes_de_la_sma_abre_su_ventana_y_aplica_los_cambios(tmp_
     bus, published = EventBus(), []
     bus.subscribe("t", "levels.sma", published.append)
     win = main_window.MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig(parse(""))), [{"type": "levels"}]), cfg, "t")
-    assert win.sma_cfg_btn.text() == "⚙" and win.sma_cfg_btn.isVisibleTo(win)
+    assert not win.sma_cfg_btn.icon().isNull() and win.sma_cfg_btn.isVisibleTo(win)    # rueda dibujada, sin depender de la fuente
     win.sma_cfg_btn.click()                                           # el botón de ajustes
     assert opened == [(30, "#00ACC1", "normal")]
     assert published[-1].payload == {"period": 12, "color": "#112233", "style": "discontinuo"}
