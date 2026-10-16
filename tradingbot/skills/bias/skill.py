@@ -9,6 +9,7 @@ from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
 from ..levels.daylevels import DEFAULT_SMA_PERIOD
+from .history import score_history
 from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
@@ -20,7 +21,7 @@ class BiasSkill(Skill):
                    "3 h en los índices americanos y cada 4 h en el resto, y decide si cada setup detectado se puede "
                    "ejecutar (GO / NO GO) y por qué.")
     subscribes = ("candles.loaded", "bias.recalc", "levels.updated", "setup.updated", "clock.offset")
-    publishes = ("bias.updated", "bias.schedule", "bias.execution", "feed.refresh")
+    publishes = ("bias.updated", "bias.schedule", "bias.execution", "bias.history", "feed.refresh")
     slot = 1
     interval = CHECK_SECONDS
 
@@ -103,7 +104,24 @@ class BiasSkill(Skill):
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
+        self._history()
         self._execution()
+
+    def _history(self) -> None:
+        """Puntuación que habría tenido el sesgo en cada vela del gráfico (histograma bajo el precio)."""
+        c = self._last
+        rules = [(r.key, r.weight) for r in getattr(self.services.engine, "rules", []) if getattr(r, "key", "")]
+        index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
+        start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
+        ahead, _ = server_minus_ny(self._offset)
+        htf_hours = self.sweep_index_hours if index else self.sweep_hours
+        recalc = self._plan[3] if self._plan else (self.index_hours if index else self.hours)
+        df = c["df"]
+        period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD))
+        scores = score_history(df["ts"].to_numpy(), df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(),
+                               df["close"].to_numpy(), rules, ahead, start, recalc, htf_hours, period)
+        self.publish("bias.history", {"symbol": c["symbol"], "timeframe": c["timeframe"], "scores": scores,
+                                      "min_score": getattr(self.services.engine, "min_score", 1.0)})
 
     def _sma_active(self) -> bool:
         return any(getattr(r, "key", "") == "sma" for r in getattr(self.services.engine, "rules", []))

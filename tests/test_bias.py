@@ -357,3 +357,38 @@ def test_la_skill_calcula_la_sma_con_las_velas_y_los_periodos_de_levels():
     manager.stop()
     vote = events[-1].payload["result"].votes[0]
     assert vote.vote == 1 and "SMA 30" in vote.detail and vote.points == 2
+
+
+def test_historico_del_sesgo_se_congela_en_cada_vela_htf():
+    from tradingbot.skills.bias.history import score_history
+    df = htf_frame([(105, 95, 100), (110, 98, 108), (120, 80, 110)])                # 3 bloques de 16 velas M15
+    args = (df["ts"], df["open"], df["high"], df["low"], df["close"])
+    cont = score_history(*args, [("htf_break", 2.0)], AHEAD_H, 17 * 60, 4, 4, 30)
+    assert len(cont) == 48 and set(cont[:32]) == {0.0} and set(cont[32:]) == {2.0}   # la n-1 cierra sobre el High de la n-2
+    tdo = score_history(*args, [("tdo", 1.0), ("htf_break", 2.0)], AHEAD_H, 17 * 60, 4, 4, 30)
+    assert set(tdo[:16]) == {0.0} and set(tdo[16:32]) == {1.0} and set(tdo[32:]) == {3.0}   # 1 del TDO + 2 de la continuación
+    assert all(len(set(tdo[i:i + 16])) == 1 for i in (0, 16, 32))                  # no cambia dentro de la vela
+    assert len(score_history([], [], [], [], [], [("tdo", 1.0)], AHEAD_H, 17 * 60, 4, 4, 30)) == 0
+
+
+def test_el_boton_sesgo_muestra_el_histograma_bajo_el_grafico(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "levels"}]), cfg, "t")
+    assert win.hist_btn.text() == "Sesgo" and not win.hist_btn.isChecked() and not win.bias_hist.isVisibleTo(win)
+    win.hist_btn.setChecked(True)
+    assert win.bias_hist.isVisibleTo(win)
+    df = htf_frame([(105, 95, 100), (110, 98, 108)])
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "1h", "seconds": 0.1})
+    win._on_bias_history({"symbol": "EURUSD", "timeframe": "1h", "scores": [0.0, 3.0, -3.0, 1.0], "min_score": 2.0})
+    assert win.bias_hist.bar_count == 4
+    win._on_bias_history({"symbol": "GBPUSD", "timeframe": "1h", "scores": [1.0], "min_score": 2.0})      # otro activo: se ignora
+    assert win.bias_hist.bar_count == 4

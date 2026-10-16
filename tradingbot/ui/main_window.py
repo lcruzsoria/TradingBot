@@ -18,6 +18,7 @@ from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
+from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
 from .sma_dialog import SmaDialog
 from .bridge import UiBridge
 from .chart import ChartView
@@ -93,7 +94,7 @@ class MainWindow(QMainWindow):
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
             "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.updated": self._on_setup,
-            "bias.schedule": self._on_bias_schedule, "bias.execution": self._on_execution,
+            "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history, "bias.execution": self._on_execution,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
@@ -214,6 +215,12 @@ class MainWindow(QMainWindow):
         self.sma_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.sma_btn.customContextMenuRequested.connect(lambda _pos: self.open_sma_config())
         self._sma_cfg = (30, "#00ACC1", "normal")
+        # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
+        self.hist_btn = QPushButton("Sesgo")
+        self.hist_btn.setProperty("chip", "true")
+        self.hist_btn.setCheckable(True)
+        self.hist_btn.setToolTip("Histograma de la puntuación del sesgo en cada vela del timeframe visible, bajo el gráfico.\n"
+                                 "Verde: sesgo alcista; rojo: bajista; gris: sin sesgo. Las líneas discontinuas marcan el umbral.")
         tools = QHBoxLayout()
         tools.setSpacing(6)
         self.tf_group = QButtonGroup(self)
@@ -247,6 +254,7 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
+        grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.sma_btn, 0, 0)                   # a la izquierda de TDO (así el panel no crece en altura)
         top.addLayout(grid)
         self.bias_card = BiasCard()
@@ -272,6 +280,12 @@ class MainWindow(QMainWindow):
         self.sma_btn.toggled.connect(self.chart.show_sma)
         self._refresh_sma_tip()
         chart_panel.body.addWidget(self.chart, 1)
+        self.chart.getPlotItem().getAxis("right").setWidth(PRICE_AXIS_WIDTH)
+        self.bias_hist = BiasHistogram()
+        self.bias_hist.link_to(self.chart)
+        self.bias_hist.setVisible(False)
+        self.hist_btn.toggled.connect(self.bias_hist.setVisible)
+        chart_panel.body.addWidget(self.bias_hist)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
         chart_panel.body.addWidget(self.chart_stats)
@@ -503,6 +517,7 @@ class MainWindow(QMainWindow):
         theme.apply(palette)
         QApplication.instance().setStyleSheet(theme.stylesheet())
         self.chart.apply_theme()
+        self.bias_hist.style()
         self._refresh_rules_link()
         self.rules_list.refresh()
         self.ring.update()
@@ -691,6 +706,11 @@ class MainWindow(QMainWindow):
         self.log_once("levels", (p["symbol"], p["timeframe"], start, tuple(sorted(today.items()))),
                       f"levels: día de trading desde las {start // 60:02d}:{start % 60:02d} NY ({kind}) - "
                       f"{levels or 'sin niveles'}")
+
+    def _on_bias_history(self, p: dict) -> None:
+        if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
+            return
+        self.bias_hist.set_scores(p["scores"], p["min_score"])
 
     def _on_market_closed(self, p: dict) -> None:
         hour = p["when"].strftime("%H:%M")
