@@ -100,7 +100,7 @@ def test_quotes_lee_su_bloque():
         skill.on_start()
 
 
-def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por_defecto():
+def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por_defecto(tmp_path):
     lines = envconfig.ENV_FILE.read_text(encoding="utf-8").splitlines()
     keys = [m.group(1) for line in lines if (m := re.match(r"#?([A-Z][A-Z0-9_]+)=", line))]
     for key in ("APP_PROFILE", "APP_DEMO", "FEED_SYMBOL", "FEED_TIMEFRAME", "FEED_MAX_BARS", "QUOTES_INTERVAL",
@@ -120,7 +120,14 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
             assert lines[j].startswith("#"), f"{line} no tiene comentario"
     # tal como se sube al repositorio, el fichero equivale a los valores por defecto del código
     from tradingbot.config import DEFAULT_CONFIG_FILE
-    project, defaults = load_app_config(DEFAULT_CONFIG_FILE, envconfig.load(environ={})), load_app_config(DEFAULT_CONFIG_FILE)
+    # (se usa la versión subida a git: el fichero local lo cambian el editor de reglas y el de temas)
+    import subprocess
+    shipped = subprocess.run(["git", "show", "HEAD:tradingbot.env"], cwd=envconfig.ENV_FILE.parent, capture_output=True)
+    path = envconfig.ENV_FILE
+    if shipped.returncode == 0:
+        path = tmp_path / "tradingbot.env"
+        path.write_bytes(shipped.stdout)
+    project, defaults = load_app_config(DEFAULT_CONFIG_FILE, envconfig.load(path, environ={})), load_app_config(DEFAULT_CONFIG_FILE)
     assert project["app"] == defaults["app"]
     rules = lambda cfg: [(r["type"], float(r.get("tolerance_pct", 0))) for r in cfg["bias"]["rules"]]  # noqa: E731
     assert rules(project) == rules(defaults)
