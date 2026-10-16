@@ -68,7 +68,12 @@ class BiasHistogram(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._items.append(line)
-        self.getPlotItem().getAxis("right").setTicks([[(self._min, f"+{self._min:g}"), (0.0, "0"), (-self._min, f"-{self._min:g}")]])
+        ticks = [(self._min, f"+{self._min:g}"), (0.0, "0"), (-self._min, f"-{self._min:g}")]      # umbral del sesgo
+        top_value, low_value = float(np.max(y)), float(np.min(y))                                  # máximo y mínimo alcanzados
+        for value in (top_value, low_value):
+            if value and all(abs(value - known) > 0.01 for known, _label in ticks):
+                ticks.append((value, f"{value:+g}"))
+        self.getPlotItem().getAxis("right").setTicks([ticks])
         top = max(float(np.max(np.abs(y))), self._min) * 1.15
         pi.getViewBox().setYRange(-top, top, padding=0)
 

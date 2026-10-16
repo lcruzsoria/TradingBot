@@ -391,6 +391,8 @@ def test_el_boton_sesgo_muestra_el_histograma_bajo_el_grafico(tmp_path, monkeypa
     win._on_bias_history({"symbol": "EURUSD", "timeframe": "1h", "scores": [0.0, 3.0, -3.0, 1.0], "min_score": 2.0})
     assert win.bias_hist.bar_count == 4
     ticks = win.bias_hist.getPlotItem().getAxis("right")._tickLevels[0]               # el eje marca el umbral del sesgo: +2 / 0 / -2
-    assert [label for _value, label in ticks] == ["+2", "0", "-2"]
+    assert [label for _value, label in ticks] == ["+2", "0", "-2", "+3", "-3"]        # umbral y máximo / mínimo alcanzados
+    win._on_bias_history({"symbol": "EURUSD", "timeframe": "1h", "scores": [0.0, 2.0, -2.0], "min_score": 2.0})
+    assert [label for _value, label in win.bias_hist.getPlotItem().getAxis("right")._tickLevels[0]] == ["+2", "0", "-2"]
     win._on_bias_history({"symbol": "GBPUSD", "timeframe": "1h", "scores": [1.0], "min_score": 2.0})      # otro activo: se ignora
-    assert win.bias_hist.bar_count == 4
+    assert win.bias_hist.bar_count == 3
