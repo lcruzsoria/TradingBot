@@ -336,7 +336,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             saved = f"no se pudieron guardar ({exc})"
         self._sync_rules()
-        listing = ", ".join(f"{key} ×{weight:g}" for key, weight in selection) or "ninguna"
+        listing = ", ".join(f"{key} +{weight:g}" for key, weight in selection) or "ninguna"
         self.log(f"bias: reglas actualizadas - {listing}; puntuación mínima {min_score:g} ({saved})", tone="info")
         if self.candles is not None:
             self.bus.publish("bias.recalc", {}, source="ui")
@@ -582,10 +582,10 @@ class MainWindow(QMainWindow):
         lines = [f"Sesgo: {result.bias.value}   ({p.get('symbol', '')}, día {result.day})",
                  f"Motivo del cálculo: {reason}",
                  f"Puntuación: {result.score:+g}  (Bullish con +{result.min_score:g} o más, "
-                 f"Bearish con -{result.min_score:g} o menos)", "", "Reglas (voto x peso = puntos):"]
+                 f"Bearish con -{result.min_score:g} o menos)", "", "Reglas (voto, peso y puntos):"]
         marks = {1: "▲ alcista", -1: "▼ bajista", 0: "– sin voto"}
         for v in result.votes:
-            lines.append(f"  {marks[v.vote]:<11} x{v.weight:g} = {v.points:+g}   {v.rule}: {v.detail}")
+            lines.append(f"  {marks[v.vote]:<11} peso +{v.weight:g}: {v.points:+g}   {v.rule}: {v.detail}")
         if result.levels:
             lines += ["", "Niveles: " + ", ".join(f"{k} {fmt_price(val)}" for k, val in result.levels.items())]
         self.log(f"bias: {result.bias.value} ({p.get('symbol', '')}, puntuación {result.score:+g}) - {reason}",

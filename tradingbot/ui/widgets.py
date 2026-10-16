@@ -320,7 +320,7 @@ class RulesList(QWidget):
         mark_label.setStyleSheet(f"color: {color}; font-weight: 700;")
         name_label = QLabel(name)
         name_label.setStyleSheet("font-weight: 600;")
-        weight_label = QLabel(f"×{weight:g}")
+        weight_label = QLabel(f"+{weight:g}")
         weight_label.setObjectName("Muted")
         h.addWidget(mark_label)
         h.addWidget(name_label, 1)

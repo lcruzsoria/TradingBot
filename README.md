@@ -241,7 +241,7 @@ El sesgo se calcula al cargar velas y al pulsar *Recalcular sesgo*.
 
 ### Panel «Reglas del sesgo»
 
-Muestra una línea por cada regla activa: su voto (▲ alcista, ▼ bajista, – sin voto), su nombre y su peso (`×2`), y debajo la
+Muestra una línea por cada regla activa: su voto (▲ alcista, ▼ bajista, – sin voto), su nombre y su peso (`+2`), y debajo la
 puntuación total frente al mínimo. Los precios y el motivo de cada voto salen en la ayuda emergente al pasar el ratón.
 
 El texto **Voto de cada regla** (arriba a la derecha del panel) es un enlace que abre el editor: marca qué reglas aplican al

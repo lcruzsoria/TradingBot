@@ -32,7 +32,7 @@ class RulesDialog(QDialog):
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
         intro = QLabel("Marca las reglas que aplican al sesgo y dales un peso. Cada regla vota +1, -1 o 0; el sesgo "
-                       "sale de la suma de voto × peso.")
+                       "sale de la suma de los puntos de cada regla (±peso).")
         intro.setWordWrap(True)
         intro.setObjectName("Muted")
         root.addWidget(intro)
