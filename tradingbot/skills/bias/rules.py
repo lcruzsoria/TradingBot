@@ -147,3 +147,21 @@ class HtfSweepRule(BiasRule):
         if htf is None:
             return self.vote(0, "Sin velas H3 / H4 para evaluar el barrido")
         return self.vote(htf.vote, htf.detail)
+
+
+@register_rule("htf_break")
+class HtfBreakRule(BiasRule):
+    """Continuación de la vela anterior: el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores.
+
+    Si la vela n-1 cierra POR ENCIMA del High de la n-2 -> continuación alcista; si cierra POR DEBAJO del Low de la n-2 ->
+    continuación bajista; si cierra dentro de su rango no puntúa; si barre con mecha los dos lados de la n-2 tampoco puntúa.
+    Es la regla complementaria del barrido: no puntúan a la vez. La vela actual (0) no interviene. Parámetros: BIAS_HTF_SWEEP_INDEX_HOURS (3) y BIAS_HTF_SWEEP_HOURS (4), compartidos.
+    """
+    title = "Continuación de la vela anterior"
+    weight = 2.0
+
+    def evaluate(self, ctx: BiasContext) -> RuleVote:
+        brk = ctx.htf_break
+        if brk is None:
+            return self.vote(0, "Sin velas H3 / H4 para evaluar la continuación")
+        return self.vote(brk.vote, brk.detail)

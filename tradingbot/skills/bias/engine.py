@@ -53,9 +53,9 @@ class BiasEngine:
             self.min_score = max(float(min_score), 1e-9)
 
     def evaluate(self, candles: pd.DataFrame, day: date | None = None, levels: dict | None = None,
-                 htf: object | None = None) -> BiasResult:
+                 htf: object | None = None, htf_break: object | None = None) -> BiasResult:
         """`levels`: niveles del día de la skill Levels ("tdo", "midnight") para las reglas que los usan."""
-        ctx = build_context(candles, day, levels, htf)
+        ctx = build_context(candles, day, levels, htf, htf_break)
         if ctx is None or len(ctx.today) == 0:
             return BiasResult(Bias.NO_BIAS, day, summary="Sin velas para evaluar el día")
 

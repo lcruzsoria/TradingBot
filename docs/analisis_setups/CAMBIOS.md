@@ -34,6 +34,8 @@ a git). Cada Excel incluye las hojas **Cambios** (qué cambia y por qué) y **Co
 | v6 | **v5 con el spread real** | 7.313 | 26,6 % | **−0,046** | 0,94 | −487R | 37 | **−2,3** |
 | v7 | v6 + Bias Execution: solo a favor del sesgo | 4.273 | 29,8 % | **−0,001** | 1,00 | −167R | 25 | −0,03 |
 | v8 | v6 sin operar contra el sesgo | 6.443 | 27,6 % | −0,030 | 0,96 | −351R | 33 | −1,4 |
+| v9 | v6 con Bias Execution usando solo el barrido de la vela anterior | 1.048 | 24,9 % | −0,082 | 0,89 | −149R | 23 | −1,6 |
+| v10 | v7 con el barrido sumado a las reglas actuales (peso 2) | 3.825 | 29,0 % | −0,029 | 0,96 | −218R | 26 | −1,1 |
 
 La reversión C (propuesta, aún no implementada) no cambia entre versiones: 8.057 operaciones, R medio +0,013, PF 1,02,
 máx. drawdown −178R.
@@ -165,6 +167,80 @@ spread: el spread medio es el 8,4 % del riesgo de la operación.
 
 El **Midnight es la regla más informativa**: con la operación contra el Midnight la continuación pierde −0,154R; el TDO le sigue.
 La ruptura del día anterior discrimina menos, aunque apenas da casos (el precio rara vez está fuera del rango previo).
+
+## v9 y v10: regla de barrido de la vela anterior (H3 en índices, H4 en el resto)
+
+**Criterio** (definido por ti). El sesgo de la vela actual (la 0) se calcula con las dos anteriores ya cerradas, la n‑1 y la
+n‑2. Si la n‑1 **barre el High de la n‑2 y cierra dentro de su rango**, el sesgo es **bajista**; si **barre el Low y cierra dentro**,
+**alcista**. Si barre los dos lados, cierra fuera (ruptura) o no barre ninguno, no hay sesgo y la regla no puntúa. Las velas se
+alinean con el inicio del día de trading en NY (H3: 18, 21, 00, 03...; H4: 17, 21, 01, 05...). Está implementada como regla
+`htf_sweep` (peso 2 por defecto, **no activa por defecto**) y se reconstruye en el análisis con los mismos datos.
+
+**Cambio.**
+- **v9:** sobre v6, solo se opera a favor del sesgo que da el barrido (sin barrido válido no hay sesgo y no se opera).
+- **v10:** sobre v7, el barrido (peso 2) se suma a las reglas actuales (ruptura ×2, TDO, Midnight); solo a favor del sesgo.
+
+**Por qué.** Medir si el primer criterio nuevo de Bias aporta, aislado y combinado.
+
+**Resultado como filtro de los setups** (con spread real):
+
+| Filtro | Operaciones | R medio | Máx. drawdown |
+|---|---:|---:|---:|
+| Sin filtro (v6) | 7.312 | −0,046 | −487R |
+| Reglas actuales a favor (v7) | 4.273 | −0,001 | −167R |
+| **Solo barrido a favor (v9)** | 1.048 | **−0,082** | −149R |
+| **Reglas actuales + barrido a favor (v10)** | 3.825 | **−0,029** | −218R |
+
+- **El barrido empeora los resultados.** Solo, queda por debajo de no filtrar; sumado a las reglas actuales, pasa de −0,001R a −0,029R.
+- Aportación de la regla a la continuación: cuando el barrido **apoya** la operación −0,082R (n = 1.048), si es **neutro** −0,056R
+  (n = 4.514) y si va **en contra** +0,001R (n = 1.750). Es decir, el efecto es al revés de lo esperado, aunque sin significación
+  (t de −1,6 y 0,0).
+- En la reversión C, el barrido a favor da −0,056R (n = 1.832) y sumado a las reglas actuales, −0,016R (antes +0,007R).
+
+**Medida directa: ¿la vela 0 cierra en la dirección del sesgo?** (hoja «Barrido - predicción vela», independiente de los setups).
+Los mercados subieron en este periodo, así que hay que restar lo que haría cualquier vela (el 52,5 % cierra al alza sin ninguna
+regla). El 71 % de las velas no tiene sesgo, el 14,6 % es bajista y el 14,2 % alcista.
+
+| Sesgo del barrido | Velas | Acierta la dirección | Una vela cualquiera | Ventaja de acierto | Ventaja de movimiento | t |
+|---|---:|---:|---:|---:|---:|---:|
+| Bajista (barrió el High) | 6.616 | 48,4 % | 47,5 % | +0,9 puntos | −0,004 rangos | −0,3 |
+| Alcista (barrió el Low) | 6.412 | 52,8 % | 52,5 % | +0,3 puntos | +0,027 rangos | 2,1 |
+
+- **El barrido no anticipa la dirección de la vela:** acierta lo mismo que el azar (la ventaja es de menos de un punto).
+- **Lado bajista:** ninguna ventaja (t = −0,3).
+- **Lado alcista:** una ventaja mínima, del 2,7 % del rango de la vela anterior (t = 2,1), que con tantas pruebas puede ser azar.
+- Por mercados no hay un patrón: XAUUSD y DJ30.r salen algo mejor en el lado alcista, NAS100.r y SP500.r salen sin ventaja.
+
+**Conclusión.** Con la definición actual (barrer el High o el Low de la n‑2 y cerrar dentro), el barrido **no aporta información
+útil** sobre la dirección de la vela ni mejora los setups de las TBR en estos mercados. Se deja implementado pero inactivo.
+
+**Ideas para una segunda regla** (a definir contigo): probar la lectura contraria (barrer y cerrar fuera como *continuación*),
+medir el barrido de la vela n‑1 con la dirección del día (TDO / Midnight) como filtro, o usar otros marcos temporales (H1 o H12).
+
+## v11 y v12: regla de continuación de la vela anterior, y sesgo congelado por vela HTF
+
+**Cambio de metodología (afecta a v7-v12).** El sesgo total solo se recalcula al crearse la vela 0 (H3 en índices, H4 en el
+resto) y se mantiene hasta la siguiente. Se calcula con el precio de apertura de esa vela, sin mirar al futuro. Antes, la
+ruptura del día anterior, el TDO y el Midnight se evaluaban en cada vela de M15. El bot en vivo hace lo mismo: los niveles solo
+recalculan el sesgo si falta el TDO o es de otro día.
+
+**Regla de continuación (`htf_break`).** Si la vela n-1 cierra sobre el High de la n-2, el voto es +1; si cierra bajo el Low,
+-1. Si cierra dentro, la n-1 es interna o barre con mecha el High y el Low de la n-2 (envolvente), el voto es 0.
+
+| versión | operaciones | win rate % | R medio | R total | profit factor | max drawdown (R) |
+|---|---|---|---|---|---|---|
+| v7 (reglas actuales, a favor) | 2925 | 28,3 | 0,000 | +1,3 | 1,00 | -155,6 |
+| v11 (solo continuación) | 1543 | 26,8 | -0,024 | -36,9 | 0,97 | -81,2 |
+| v12 (reglas actuales + continuación, peso 2) | 3216 | 27,6 | -0,014 | -45,6 | 0,98 | -184,4 |
+
+**Predicción directa de la vela 0** (hojas «Barrido - predicción vela» y «Continuación - predicción vela»): ninguna de las dos
+reglas supera al azar de forma útil.
+- Barrido: bajista 48,5 % de acierto frente a 47,5 % de una vela cualquiera (+0,9 puntos); alcista 52,8 % frente a 52,5 % (+0,3).
+- Continuación: bajista 47,2 % frente a 47,5 % (-0,3 puntos); alcista 51,8 % frente a 52,5 % (-0,7).
+
+**Lectura.** Congelar el sesgo por vela no cambia el resultado de v7 (R medio 0,000, antes -0,001). La continuación de la vela
+anterior no aporta información direccional y no mejora la estrategia: v12 queda por debajo de v7. Ni el barrido ni la
+continuación justifican, de momento, activarse por defecto.
 
 ## Reversión C con spread real (cambio de metodología)
 

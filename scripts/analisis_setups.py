@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tradingbot.config import load_profiles, select_profile                      # noqa: E402
 from tradingbot.envconfig import EnvConfig                                       # noqa: E402
-from tradingbot.skills.bias.htf import sweep_vote                                # noqa: E402
+from tradingbot.skills.bias.htf import break_vote, sweep_vote                                # noqa: E402
 from tradingbot.skills.feed.mt5_client import Mt5Source                          # noqa: E402
 from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index   # noqa: E402
 from tradingbot.skills.setup.setups import detect                                # noqa: E402
@@ -117,11 +117,22 @@ VARIANTES = (
              "Midnight); solo a favor del sesgo.",
              "Ver si el barrido añade información a las reglas de dirección del día.",
              "mercado", "mitad", 1.5, sesgo_reglas="con_sweep", sesgo="a favor", spread=True, min_rango=0.8),
+    Variante("v11", "v6 con Bias Execution usando solo la continuación de la vela anterior",
+             "Sobre v6, solo se opera a favor del sesgo que da la regla de continuación: si la vela n-1 (H3 en índices, H4 en el "
+             "resto) cierra por encima del High de la n-2 el sesgo de la vela 0 es alcista; si cierra por debajo del Low, bajista; "
+             "si cierra dentro, no hay sesgo y no se opera.",
+             "Probar el segundo criterio nuevo de Bias, aislado: si cerrar fuera de la vela anterior anticipa la dirección.",
+             "mercado", "mitad", 1.5, sesgo_reglas="solo_brk", sesgo="a favor", spread=True, min_rango=0.8),
+    Variante("v12", "v6 con Bias Execution: reglas actuales más la continuación (peso 2)",
+             "Sobre v7, el sesgo suma la regla de continuación de la vela anterior con peso 2 a las reglas actuales (ruptura x2, "
+             "TDO, Midnight); solo a favor del sesgo.",
+             "Ver si la continuación añade información a las reglas de dirección del día.",
+             "mercado", "mitad", 1.5, sesgo_reglas="con_brk", sesgo="a favor", spread=True, min_rango=0.8),
 )
 
 
 # -- sesgo reconstruido -------------------------------------------------------------------------------
-def htf_sweep_array(ts, h, l, c, start_hours: int, hours: int) -> np.ndarray:
+def htf_sweep_array(ts, h, l, c, start_hours: int, hours: int, kind: str = "sweep") -> np.ndarray:
     """Voto del barrido de la vela anterior para cada vela M15: el de la vela H3 / H4 en la que está, calculado solo con las
     dos velas anteriores ya cerradas (n-1 y n-2): sin mirar la vela en curso."""
     bucket = ((ts - AHEAD) - start_hours * 3600) // (hours * 3600)
@@ -132,7 +143,8 @@ def htf_sweep_array(ts, h, l, c, start_hours: int, hours: int) -> np.ndarray:
     hi, lo, cl = np.maximum.reduceat(h, starts), np.minimum.reduceat(l, starts), c[ends]
     votes = np.zeros(len(starts), dtype=int)
     for b in range(2, len(starts)):
-        votes[b] = sweep_vote(hi[b - 2], lo[b - 2], hi[b - 1], lo[b - 1], cl[b - 1])[0]
+        votes[b] = (sweep_vote(hi[b - 2], lo[b - 2], hi[b - 1], lo[b - 1], cl[b - 1])[0] if kind == "sweep"
+                    else break_vote(hi[b - 2], lo[b - 2], hi[b - 1], lo[b - 1], cl[b - 1])[0])
     return votes[ids]
 
 
@@ -154,6 +166,7 @@ def sweep_events(sym, ts, o, h, l, c, start_hours: int, hours: int) -> list[dict
         move = cl[b] - op[b]
         out.append({"mercado": sym, "velas": f"H{hours}", "voto": vote, "inicio (NY)": pd.Timestamp(int(t0[b]), unit="s"),
                     "movimiento de la vela (rangos de la n-1)": move / rng_prev,
+                    "voto continuación": break_vote(hi[b - 2], lo[b - 2], hi[b - 1], lo[b - 1], cl[b - 1])[0],
                     "movimiento (% del precio)": 100 * move / op[b],
                     "cierra al alza": bool(move > 0),
                     "máximo desde la apertura (rangos)": (hi[b] - op[b]) / rng_prev,
@@ -161,30 +174,37 @@ def sweep_events(sym, ts, o, h, l, c, start_hours: int, hours: int) -> list[dict
     return out
 
 
-def sweep_prediction(ev: pd.DataFrame) -> pd.DataFrame:
-    """Tabla: por mercado y sesgo del barrido, cuánto acierta la dirección de la vela 0 y cuánto se mueve a favor."""
+def sweep_prediction(ev: pd.DataFrame, vote_col: str = "voto",
+                     labels=(("bajista (barrió el High)", -1), ("alcista (barrió el Low)", 1))) -> pd.DataFrame:
+    """Tabla: por mercado y sesgo del barrido, cuánto acierta la dirección de la vela 0 y cuánto se mueve a favor, comparado
+    con lo que haría cualquier vela (los mercados han subido en este periodo: hay que restarlo)."""
     rows = []
+    col = "movimiento de la vela (rangos de la n-1)"
     groups = [("TODOS", ev)] + [(k, g) for k, g in ev.groupby("mercado")]
     for name, g in groups:
         base_up = 100 * g["cierra al alza"].mean()
-        for label, vote in (("bajista (barrió el High)", -1), ("alcista (barrió el Low)", 1), ("sin sesgo", 0)):
-            sub = g[g["voto"] == vote]
-            if not len(sub):
+        for label, vote in labels:
+            sub = g[g[vote_col] == vote]
+            if not len(sub) or not vote:
                 continue
-            sign = vote if vote else 1
-            move = sign * sub["movimiento de la vela (rangos de la n-1)"]
-            hit = 100 * (sub["cierra al alza"] == (vote >= 0)).mean() if vote else float("nan")
-            sd = move.std(ddof=1)
-            rows.append({"mercado": name, "sesgo del barrido": label, "velas": len(sub), "% de velas": round(100 * len(sub) / len(g), 1),
-                         "acierta la dirección %": round(hit, 1) if vote else np.nan,
-                         "% de velas alcistas en general": round(base_up, 1),
-                         "movimiento medio a favor (rangos de la n-1)": round(move.mean(), 3) if vote else np.nan,
-                         "estadístico t": round(move.mean() / (sd / np.sqrt(len(sub))), 2) if vote and sd and len(sub) > 1 else np.nan})
+            move = vote * sub[col]
+            allmove = vote * g[col]                                    # lo mismo con cualquier vela, en esa dirección
+            hit = 100 * (sub["cierra al alza"] == (vote > 0)).mean()
+            base_hit = base_up if vote > 0 else 100 - base_up
+            diff = move.mean() - allmove.mean()
+            se = np.sqrt(move.var(ddof=1) / len(move) + allmove.var(ddof=1) / len(allmove))
+            rows.append({"mercado": name, "sesgo del barrido": label, "velas con ese sesgo": len(sub),
+                         "% de velas": round(100 * len(sub) / len(g), 1),
+                         "acierta la dirección %": round(hit, 1), "acierto de una vela cualquiera %": round(base_hit, 1),
+                         "ventaja de acierto (puntos)": round(hit - base_hit, 1),
+                         "movimiento medio a favor (rangos de la n-1)": round(move.mean(), 3),
+                         "movimiento medio de una vela cualquiera": round(allmove.mean(), 3),
+                         "ventaja de movimiento": round(diff, 3), "estadístico t de la ventaja": round(diff / se, 2)})
     return pd.DataFrame(rows)
 
 
 def bias_arrays(ts, o, h, l, c, start_hours: int, sweep_hours: int = 4) -> dict:
-    """Votos y puntuación del Bias del bot en cada vela, con los datos disponibles en ella (sin mirar al futuro).
+    """Votos y puntuación del Bias del bot en cada vela (sin mirar al futuro). Se calcula al abrir cada vela HTF y se mantiene.
 
     prev: ruptura del día de trading anterior (+1 sobre su máximo, -1 bajo su mínimo). tdo: precio vs la apertura del día de
     trading (True Day Open). mid: precio vs la apertura de las 00:00 NY (0 hasta que existe esa vela).
@@ -198,18 +218,26 @@ def bias_arrays(ts, o, h, l, c, start_hours: int, sweep_hours: int = 4) -> dict:
     d_open = o[first][ids]
     day_h, day_l = np.maximum.reduceat(h, starts), np.minimum.reduceat(l, starts)
     prev_h, prev_l = np.r_[np.nan, day_h][ids], np.r_[np.nan, day_l][ids]
-    prev = np.where(c > prev_h, 1, 0) - np.where(c < prev_l, 1, 0)
-    tdo = np.sign(c - d_open).astype(int)
+    px = o                      # el sesgo se calcula al abrir la vela HTF: con el precio de apertura de su primera vela
+    prev = np.where(px > prev_h, 1, 0) - np.where(px < prev_l, 1, 0)
+    tdo = np.sign(px - d_open).astype(int)
     idx = np.arange(len(ts))
     after_mid = np.where(t >= (day + 1) * 86400, idx, len(ts))            # 00:00 NY del día en que termina el día de trading
     mid_idx = np.minimum.reduceat(after_mid, starts)[ids]
     valid = (mid_idx < len(ts)) & (idx >= mid_idx)
     mid_open = o[np.minimum(mid_idx, len(ts) - 1)]
-    mid = np.where(valid, np.sign(c - mid_open), 0).astype(int)
+    mid = np.where(valid, np.sign(px - mid_open), 0).astype(int)
+    # Congelado: el sesgo total solo se recalcula al crearse la vela 0 (H3 en índices, H4 en el resto) y se mantiene hasta la siguiente.
+    bucket = (t - start_hours * 3600) // (sweep_hours * 3600)
+    blk = np.r_[True, bucket[1:] != bucket[:-1]]
+    frozen = np.flatnonzero(blk)[np.cumsum(blk) - 1]
+    prev, tdo, mid = prev[frozen], tdo[frozen], mid[frozen]
     sweep = htf_sweep_array(ts, h, l, c, start_hours, sweep_hours)
+    brk = htf_sweep_array(ts, h, l, c, start_hours, sweep_hours, "break")
     nuevo = 2 * prev + tdo + mid
-    return {"prev": prev, "tdo": tdo, "mid": mid, "sweep": sweep, "nuevo": nuevo, "viejo": 2 * prev + tdo,
-            "con_sweep": nuevo + 2 * sweep, "solo_sweep": 2 * sweep, "d_open": d_open}
+    return {"prev": prev, "tdo": tdo, "mid": mid, "sweep": sweep, "brk": brk, "nuevo": nuevo, "viejo": 2 * prev + tdo,
+            "con_sweep": nuevo + 2 * sweep, "solo_sweep": 2 * sweep,
+            "con_brk": nuevo + 2 * brk, "solo_brk": 2 * brk, "d_open": d_open}
 
 
 def vote_vs_trade(vote: int, direction: int) -> str:
@@ -225,7 +253,10 @@ def bias_columns(bias: dict, k: int, d: int) -> dict:
             "voto Midnight": vote_vs_trade(int(bias["mid"][k]), d),
             "voto barrido vela anterior": vote_vs_trade(int(bias["sweep"][k]), d),
             "puntuación sesgo (con barrido)": int(bias["con_sweep"][k]), "sesgo (con barrido)": alignment(bias["con_sweep"][k], d),
-            "sesgo (solo barrido)": alignment(bias["solo_sweep"][k], d)}
+            "sesgo (solo barrido)": alignment(bias["solo_sweep"][k], d),
+            "voto continuación vela anterior": vote_vs_trade(int(bias["brk"][k]), d),
+            "puntuación sesgo (con continuación)": int(bias["con_brk"][k]), "sesgo (con continuación)": alignment(bias["con_brk"][k], d),
+            "sesgo (solo continuación)": alignment(bias["solo_brk"][k], d)}
 
 
 def alignment(score: float, direction: int) -> str:
@@ -563,7 +594,9 @@ def main() -> None:
     source.close()
 
     meta_df, E = pd.DataFrame(meta), pd.DataFrame(events)
-    sweep_pred = sweep_prediction(pd.DataFrame(sweep_rows))
+    sweep_df = pd.DataFrame(sweep_rows)
+    sweep_pred = sweep_prediction(sweep_df)
+    break_pred = sweep_prediction(sweep_df, "voto continuación", (("bajista (cerró bajo el Low)", -1), ("alcista (cerró sobre el High)", 1)))
     C, C_sp = pd.DataFrame(c_trades), pd.DataFrame(c_trades_sp)
     results = {}
     for var in versiones:
@@ -610,14 +643,14 @@ def main() -> None:
     for var in versiones:
         T, done, M = results[var.clave]
         path = out / f"analisis_setups_{var.clave}.xlsx"
-        write_excel(path, T, done, M, E, meta_df, var, comp, comp_tbr, comp_bias, cambios, comp_c, sweep_pred)
+        write_excel(path, T, done, M, E, meta_df, var, comp, comp_tbr, comp_bias, cambios, comp_c, sweep_pred, break_pred)
         print("Excel:", path, f"({len(T)} operaciones, {len(M)} setups sin entrar)")
     print()
     print(comp.drop(columns=["ganadoras", "perdedoras", "R medio ganadora", "R medio perdedora", "mejor R", "peor R"]).to_string(index=False))
 
 
 # -- Excel --------------------------------------------------------------------------------------------
-def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambios, comp_c, sweep_pred) -> None:
+def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambios, comp_c, sweep_pred, break_pred) -> None:
     from openpyxl.chart import LineChart, Reference
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -650,7 +683,9 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
         part = done[done["tipo"] == kind].sort_values("fecha_entrada")
         for rules, col in (("nuevas (ruptura, TDO, Midnight)", "sesgo"), ("antiguas (ruptura, apertura)", "sesgo (reglas antiguas)"),
                            ("nuevas + barrido de la vela anterior (peso 2)", "sesgo (con barrido)"),
-                           ("solo barrido de la vela anterior", "sesgo (solo barrido)")):
+                           ("solo barrido de la vela anterior", "sesgo (solo barrido)"),
+                           ("nuevas + continuación de la vela anterior (peso 2)", "sesgo (con continuación)"),
+                           ("solo continuación de la vela anterior", "sesgo (solo continuación)")):
             for label, allowed in regimes:
                 sub = part if allowed is None else part[part[col].isin(allowed)]
                 if len(sub):
@@ -660,7 +695,8 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
     for kind in kinds:
         part = done[done["tipo"] == kind]
         for col, name in (("voto ruptura previo", "ruptura del día anterior"), ("voto TDO", "TDO"), ("voto Midnight", "Midnight"),
-                          ("voto barrido vela anterior", "barrido de la vela anterior (H3/H4)")):
+                          ("voto barrido vela anterior", "barrido de la vela anterior (H3/H4)"),
+                          ("voto continuación vela anterior", "continuación de la vela anterior (H3/H4)")):
             for vote in ("apoya", "neutro", "contra"):
                 sub = part[part[col] == vote].sort_values("fecha_entrada")
                 if len(sub):
@@ -762,7 +798,8 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         sheets = [("Cambios", cambios), ("Comparativa", comp), ("Comparativa por TBR", comp_tbr),
                   ("Comparativa por sesgo", comp_bias), ("Comparativa reversión C", comp_c), ("Costes del spread", costs), ("Aportación del Bias", bias_value),
-                  ("Aportación por regla", by_rule), ("Barrido - predicción vela", sweep_pred), ("Distribución del sesgo", dist), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
+                  ("Aportación por regla", by_rule), ("Barrido - predicción vela", sweep_pred),
+                  ("Continuación - predicción vela", break_pred), ("Distribución del sesgo", dist), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
                   ("Por mercado", by_sym), ("Por dirección", by_dir), ("Por sesgo", by_bias), ("Por hora entrada NY", by_hour),
                   ("Por día de la semana", by_dow), ("Por rango", by_range), ("Por riesgo-rango", by_risk),
                   ("Premium-Discount", by_pd), ("Embudo por TBR", funnel), ("Continuación vs reversión", probs),

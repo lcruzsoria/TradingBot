@@ -259,3 +259,60 @@ def test_la_skill_bias_evalua_el_barrido_de_la_vela_anterior():
     manager.stop()
     result = events[-1].payload["result"]
     assert result.votes[0].vote == -1 and result.bias is Bias.BEARISH and "H4" in result.votes[0].detail
+
+
+# -- continuación de la vela anterior (n-1 cierra fuera del rango de la n-2) ------------------------------------------
+from tradingbot.skills.bias.htf import break_vote, htf_break                   # noqa: E402
+from tradingbot.skills.bias.rules import HtfBreakRule                          # noqa: E402
+
+
+def test_voto_de_continuacion_de_la_vela_anterior():
+    assert break_vote(105, 95, 107, 98, 106)[0] == 1 and "alcista" in break_vote(105, 95, 107, 98, 106)[1]   # cierra sobre el High
+    assert break_vote(105, 95, 102, 90, 94)[0] == -1 and "bajista" in break_vote(105, 95, 102, 90, 94)[1]    # cierra bajo el Low
+    assert break_vote(105, 95, 106, 98, 105)[0] == 0       # cerrar justo en el High no es cerrar por encima
+    assert break_vote(105, 95, 104, 96, 100)[0] == 0       # interna a la n-2: sin sesgo
+    assert break_vote(105, 95, 108, 92, 107)[0] == 0       # barre los dos lados con mecha: sin sesgo aunque cierre fuera
+    assert break_vote(105, 95, 108, 92, 93)[0] == 0 and "el High y el Low" in break_vote(105, 95, 108, 92, 93)[1]
+
+
+def test_la_continuacion_usa_la_n1_y_la_n2_y_complementa_al_barrido():
+    # n-2: 95-105. n-1 cierra en 108: continuación alcista (aunque su máximo supere el High, no cerró dentro: sin barrido)
+    df = htf_frame([(105, 95, 100), (110, 98, 108), (120, 80, 110)])
+    brk = htf_break(df, AHEAD_H, 17 * 60, 4, 15)
+    assert brk.vote == 1 and "alcista" in brk.detail and "21:00" in brk.detail
+    assert htf_sweep(df, AHEAD_H, 17 * 60, 4, 15).vote == 0                    # cerrar fuera: el barrido no puntúa
+    bajista = htf_break(htf_frame([(105, 95, 100), (102, 90, 92), (110, 90, 100)]), AHEAD_H, 17 * 60, 4, 15)
+    assert bajista.vote == -1 and "bajista" in bajista.detail
+    # cerrar dentro: puntúa el barrido, no la continuación
+    dentro = htf_frame([(105, 95, 100), (107, 98, 101), (110, 90, 100)])
+    assert htf_break(dentro, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(dentro, AHEAD_H, 17 * 60, 4, 15).vote == -1
+    assert htf_break(htf_frame([(105, 95, 100), (107, 98, 101)]), AHEAD_H, 17 * 60, 4, 15).vote == 0   # faltan velas
+    envolvente = htf_frame([(105, 95, 100), (110, 90, 108), (110, 90, 100)])      # la n-1 barre los dos lados y cierra sobre el High
+    assert htf_break(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 0
+    interna = htf_frame([(105, 95, 100), (103, 97, 100), (110, 90, 100)])         # la n-1 es interna a la n-2
+    assert htf_break(interna, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(interna, AHEAD_H, 17 * 60, 4, 15).vote == 0
+
+
+def test_regla_htf_break_vota_y_la_skill_la_usa():
+    import time
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    import tradingbot.skills  # noqa: F401
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)
+    df = htf_frame([(105, 95, 100), (110, 98, 108), (120, 80, 110)])
+    res = BiasEngine([HtfBreakRule()]).evaluate(candles, htf_break=htf_break(df, AHEAD_H, 17 * 60, 4, 15))
+    assert res.votes[0].vote == 1 and res.votes[0].weight == 2 and res.bias is Bias.BULLISH
+    assert BiasEngine([HtfBreakRule()]).evaluate(candles).votes[0].vote == 0
+    bus, events = EventBus(), []
+    bus.subscribe("t", "bias.updated", events.append)
+    manager = SkillManager(bus, Services(None, BiasEngine([HtfSweepRule(), HtfBreakRule()]), {"app": {}}, EnvConfig()),
+                           [{"type": "bias"}])
+    manager.start()
+    df["time"], df["tick_volume"] = pd.to_datetime(df["ts"], unit="s"), 1
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not events and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    votes = events[-1].payload["result"].votes
+    assert [v.vote for v in votes] == [0, 1] and "continuación alcista" in votes[1].detail     # no puntúan a la vez

@@ -7,7 +7,7 @@ from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
-from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_sweep
+from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
 from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
@@ -54,9 +54,14 @@ class BiasSkill(Skill):
         if topic == "levels.updated":
             self._schedule(p["symbol"], p["timeframe"], p["day_start"], p.get("us_index", False))
             self._levels = p
-            if self._last is None or self._day_levels() == self._eval_levels:
+            if self._last is None:
                 return
-            self._reason = "niveles del día (TDO / Midnight)"     # han cambiado: hay que recalcular con ellos
+            # El sesgo se congela al abrirse cada vela HTF: los niveles solo lo recalculan si falta el TDO o es de otro día
+            # (carga inicial o cambio de día); el Midnight que aparece a mitad de vela esperará al siguiente recálculo.
+            now, old = self._day_levels(), self._eval_levels
+            if now == old or ("tdo" in old and now.get("tdo") == old["tdo"]):
+                return
+            self._reason = "niveles del día (TDO)"
         if topic == "clock.offset":
             if p.get("server_offset") == self._offset:
                 return
@@ -87,7 +92,8 @@ class BiasSkill(Skill):
         if self._last is None:
             return
         self._eval_levels = self._day_levels()
-        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels, htf=self._htf())
+        htf, brk = self._htf()
+        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels, htf=htf, htf_break=brk)
         self.result_symbol = self._last["symbol"]
         self.set_caption(self.result.bias.value)
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
@@ -96,14 +102,16 @@ class BiasSkill(Skill):
         self._execution()
 
     def _htf(self):
-        """Barrido de la vela anterior (H3 en índices, H4 en el resto) con las velas del gráfico; None si la regla no está activa."""
-        if not any(getattr(r, "key", "") == "htf_sweep" for r in getattr(self.services.engine, "rules", [])):
-            return None
+        """(barrido, continuación) de la vela anterior en H3 (índices) / H4 (resto); None en la que no esté activa."""
+        active = {getattr(r, "key", "") for r in getattr(self.services.engine, "rules", [])}
+        if not active & {"htf_sweep", "htf_break"}:
+            return None, None
         c = self._last
         index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
         start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
         ahead, _ = server_minus_ny(self._offset)
-        return htf_sweep(c["df"], ahead, start, self.sweep_index_hours if index else self.sweep_hours, minutes(c["timeframe"]))
+        args = (c["df"], ahead, start, self.sweep_index_hours if index else self.sweep_hours, minutes(c["timeframe"]))
+        return (htf_sweep(*args) if "htf_sweep" in active else None), (htf_break(*args) if "htf_break" in active else None)
 
     def _day_levels(self) -> dict:
         """TDO y Midnight del día en curso, de la skill Levels, si corresponden a las velas con las que se evalúa."""
