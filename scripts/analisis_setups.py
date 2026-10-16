@@ -59,6 +59,7 @@ class Variante:
     entrada: str = "limite"      # "limite": orden límite en el nivel roto; "mercado": apertura de la vela siguiente a la 2ª ruptura
     stop: str = "retest"         # ver STOPS
     objetivo: float = 1.0        # rangos más allá del nivel roto
+    spread: bool = False         # aplica el spread real de cada vela de entrada
     min_rango: float = 0.0       # filtro: rango de la TBR >= esta fracción de la mediana de sus últimas 20 sesiones (0 = sin filtro)
 
 
@@ -79,13 +80,18 @@ VARIANTES = (
              "Sobre v3, solo se opera si el rango de la TBR es al menos el 80 % de la mediana de sus últimas 20 sesiones "
              "(la misma TBR del mismo mercado). Se calcula con datos anteriores: no mira al futuro.",
              "En v1-v3 el cuartil de rangos más estrechos es el peor; con rangos pequeños el spread y el ruido pesan más "
-             "que el movimiento.", "mercado", "extremo", 1.0, 0.8),
+             "que el movimiento.", "mercado", "extremo", 1.0, min_rango=0.8),
     Variante("v5", "Entrada a mercado, stop en el 50 %, objetivo a 1,5 rangos y filtro de rango",
              "Sobre v4, el stop pasa del extremo opuesto de la TBR al 50 % de la TBR y el objetivo del nivel -1 (1 rango) a 1,5 rangos "
              "más allá del nivel roto. Elegidos con la 1ª mitad del histórico (hoja 'Sensibilidad 1ª vs 2ª mitad' de v4: mejor "
              "celda, +0,062R) y comprobados en la 2ª mitad (+0,092R).",
              "Si el precio vuelve al 50 % tras la 2ª ruptura, la continuación ha fallado: es el stop natural. Con él, el objetivo "
-             "más lejano compensa los stops más frecuentes.", "mercado", "mitad", 1.5, 0.8),
+             "más lejano compensa los stops más frecuentes.", "mercado", "mitad", 1.5, min_rango=0.8),
+    Variante("v6", "v5 con el spread real de cada entrada",
+             "Sobre v5, se aplica el spread real que MT5 registra en cada vela (Vantage demo). El largo compra al ask y sale al "
+             "bid; el corto vende al bid y sale al ask. El riesgo (1R) incluye el spread. Misma entrada, stop, objetivo y filtro.",
+             "Hasta v5 no había costes: con una ventaja de +0,06R hay que saber si el spread se la come.",
+             "mercado", "mitad", 1.5, spread=True, min_rango=0.8),
 )
 
 
@@ -114,32 +120,63 @@ def first_hit(mask: np.ndarray) -> int | None:
     return int(idx[0]) if idx.size else None
 
 
-def sim_from_fill(h, l, c, m, entry, stop, tp, d, horizon):
+def sim_from_fill(h, l, c, m, entry, stop, tp, d, horizon, cost=0.0):
     """Resultado de una operación llenada en la vela m: ('target'|'stop'|'abierta', fin, R, MAE, MFE).
 
     MAE / MFE: máxima excursión en contra / a favor (en precio). Si caben stop y objetivo en la misma vela, cuenta el stop.
+
+    cost: spread (en precio) al entrar. Las velas son de precio bid: un largo compra al ask (entrada + spread) y sale al bid;
+    un corto vende al bid y sale al ask, así que su stop y su objetivo saltan `cost` antes en las velas bid. El riesgo (1R)
+    incluye el spread. Con cost = 0 no hay costes.
     """
     end = min(len(h), m + horizon)
     hs, ls = h[m:end], l[m:end]
-    risk = (entry - stop) * d
     if d > 0:
+        entry_eff = entry + cost
+        risk = entry_eff - stop
         s_hit, t_hit = first_hit(ls <= stop), first_hit(hs >= tp)
+        r_target = (tp - entry_eff) / risk
     else:
-        s_hit, t_hit = first_hit(hs >= stop), first_hit(ls <= tp)
+        entry_eff = entry
+        risk = stop - entry
+        s_hit, t_hit = first_hit(hs >= stop - cost), first_hit(ls <= tp - cost)
+        r_target = (entry - tp) / risk
     if s_hit is not None and (t_hit is None or s_hit <= t_hit):
         status, last, r = "stop", s_hit, -1.0
     elif t_hit is not None:
-        status, last, r = "target", t_hit, abs(tp - entry) / risk
+        status, last, r = "target", t_hit, r_target
     else:
         status, last = "abierta", len(hs) - 1
-        r = (c[end - 1] - entry) * d / risk
+        r = ((c[end - 1] - entry_eff) if d > 0 else (entry - (c[end - 1] + cost))) / risk
     seg_h, seg_l = hs[:last + 1], ls[:last + 1]
-    mae = max(0.0, (entry - seg_l.min()) if d > 0 else (seg_h.max() - entry))
-    mfe = max(0.0, (seg_h.max() - entry) if d > 0 else (entry - seg_l.min()))
-    return status, m + last, r, mae, mfe
+    if d > 0:
+        mae, mfe = entry_eff - seg_l.min(), seg_h.max() - entry_eff
+    else:
+        mae, mfe = seg_h.max() + cost - entry, entry - (seg_l.min() + cost)
+    return status, m + last, r, max(0.0, mae), max(0.0, mfe)
 
 
-def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_range=float('nan')):
+def spread_prices(source, sym, df) -> np.ndarray:
+    """Spread (en precio) de cada vela de `df`, tal como lo registra MT5 (puntos x tamaño del punto del símbolo)."""
+    from tradingbot.skills.feed.mt5_client import CHUNK
+    mt5 = source._mt5
+    point = mt5.symbol_info(sym).point
+    frames, total, oldest = [], 0, None
+    while oldest is None or oldest > int(df["ts"].iloc[0]):
+        rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M15, total, CHUNK)
+        if rates is None or len(rates) == 0:
+            break
+        frames.append(pd.DataFrame(rates)[["time", "spread"]])
+        total += len(rates)
+        oldest = int(rates["time"].min())
+        if len(rates) < CHUNK:
+            break
+    sp = pd.concat(frames).drop_duplicates("time").rename(columns={"time": "ts"})
+    merged = df[["ts"]].merge(sp, on="ts", how="left")["spread"]
+    return (merged.fillna(merged.median()).to_numpy().astype(float)) * point
+
+
+def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_range=float('nan'), spread=None):
     """Operación de la continuación según la versión `var`, o None si no hay operación (no se llena, sin recorrido...)."""
     k = st.rebreak_x
     if var.min_rango and not rel_range >= var.min_rango:      # NaN (sin historial suficiente) también se descarta
@@ -156,11 +193,12 @@ def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_r
     level = st.high if d > 0 else st.low                       # nivel roto: la entrada límite y la base del objetivo
     stops = {"retest": st.stop, "mitad": st.mid, "extremo": st.low if d > 0 else st.high}
     stop = stops[var.stop]
-    risk = (entry - stop) * d
+    cost = float(spread[m]) if var.spread and spread is not None else 0.0
+    risk = (entry + cost - stop) if d > 0 else (stop - entry)           # 1R, con el spread incluido en los largos
     target = level + d * var.objetivo * rng
     if risk <= 0 or (target - entry) * d <= 0:
         return None
-    status, end_x, r, mae, mfe = sim_from_fill(h, l, c, m, entry, stop, target, d, 2 * WINDOW)
+    status, end_x, r, mae, mfe = sim_from_fill(h, l, c, m, entry, stop, target, d, 2 * WINDOW, cost)
     row = {**base, "fecha_entrada": ny(m), "hora entrada (NY)": ny(m).hour, "día semana": DAYS[ny(m).weekday()],
            "hora salida (NY)": ny(end_x), "entrada": entry, "stop": stop, "objetivo": target, "riesgo": risk,
            "riesgo / rango": risk / rng, "R potencial": abs(target - entry) / risk,
@@ -170,12 +208,15 @@ def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_r
            "MAE (R)": mae / risk, "MFE (R)": mfe / risk, "MAE (rangos)": mae / rng, "MFE (rangos)": mfe / rng,
            "puntuación sesgo": int(score[k]), "sesgo": alignment(score[k], d),
            "entrada vs apertura": "premium" if entry > d_open[m] else "descuento",
-           "rango vs mediana 20 sesiones": rel_range}
+           "rango vs mediana 20 sesiones": rel_range, "spread (precio)": cost, "spread en R": cost / risk}
+    if var.spread:                                              # mismo trade sin costes, para medir cuánto cuesta el spread
+        free = sim_from_fill(h, l, c, m, entry, stop, target, d, 2 * WINDOW)
+        row["R sin spread"] = round(free[2], 2) if free[0] != "abierta" else np.nan
     for stop_key in STOPS:                                      # rejilla de sensibilidad: R para cada stop y objetivo
         for mult in TPS:
             stop2, tgt2 = stops[stop_key], level + d * mult * rng
             ok = (entry - stop2) * d > 0 and (tgt2 - entry) * d > 0
-            res = sim_from_fill(h, l, c, m, entry, stop2, tgt2, d, 2 * WINDOW) if ok else None
+            res = sim_from_fill(h, l, c, m, entry, stop2, tgt2, d, 2 * WINDOW, cost) if ok else None
             row[f"R[{stop_key}|{tp_label(mult)}]"] = round(res[2], 2) if res and res[0] != "abierta" else np.nan
     return row
 
@@ -287,6 +328,7 @@ def main() -> None:
         o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
         index = is_us_index(sym, DEFAULT_US_INDICES)
         score, d_open = bias_score(ts, o, h, l, c, 18 if index else 17)
+        spread = spread_prices(source, sym, df)
         sessions = compute(ts, h, l, zones, AHEAD, 15, days=1_000_000)
         ny = lambda x: pd.Timestamp(int(ts[int(x)]) - AHEAD, unit="s")           # noqa: E731
         meta.append({"mercado": sym, "velas M15": len(df), "desde (NY)": ny(0), "hasta (NY)": ny(len(df) - 1),
@@ -308,7 +350,7 @@ def main() -> None:
                     "hora toma (NY)": ny(st.sweep_x), "hora retest (NY)": ny(st.retest_x) if st.retest_x is not None else None,
                     "hora 2ª ruptura (NY)": ny(st.rebreak_x) if st.rebreak_x is not None else None}
             for var in versiones:
-                row = continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel.get((st.zone_key, st.day), float('nan')))
+                row = continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel.get((st.zone_key, st.day), float('nan')), spread)
                 (trades if row is not None else missed)[var.clave].append(row if row is not None else dict(base))
 
         # ---- eventos tras el retest y reversión C ----
@@ -406,6 +448,18 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
                                             labels=["<=0,5", "0,5-0,65", "0,65-0,8", "0,8-1", ">1"])
     by_risk = group_stats(done, ["tipo", "riesgo / rango (tramo)"])
 
+    costs = pd.DataFrame()
+    if var.spread:                    # cuánto cuesta el spread y cuánto spread aguanta la ventaja
+        cc = done[done["tipo"] == "Continuación"].copy()
+        cc["spread % precio"] = 100 * cc["spread (precio)"] / cc["entrada"]
+        rows = []
+        for key, g in [*cc.groupby("mercado"), ("TODOS", cc)]:
+            free, paid = g["R sin spread"].mean(), g["R"].mean()
+            rows.append({"mercado": key, "operaciones": len(g), "spread medio (precio)": g["spread (precio)"].mean(),
+                         "spread % del precio": g["spread % precio"].mean(), "spread medio en R": g["spread en R"].mean(),
+                         "R medio sin spread": free, "R medio con spread": paid, "coste del spread (R)": free - paid,
+                         "veces el spread que aguanta la ventaja": free / (free - paid) if free - paid else np.nan})
+        costs = pd.DataFrame(rows).round(4)
     # embudo y probabilidades por TBR: tras la toma de liquidez y el retest, ¿qué viene primero?
     E = E.copy()
     sweeps = E.groupby(["TBR"]).size().rename("tomas de liquidez")
@@ -480,7 +534,7 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         sheets = [("Cambios", cambios), ("Comparativa", comp), ("Comparativa por TBR", comp_tbr),
-                  ("Comparativa por sesgo", comp_bias), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
+                  ("Comparativa por sesgo", comp_bias), ("Costes del spread", costs), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
                   ("Por mercado", by_sym), ("Por dirección", by_dir), ("Por sesgo", by_bias), ("Por hora entrada NY", by_hour),
                   ("Por día de la semana", by_dow), ("Por rango", by_range), ("Por riesgo-rango", by_risk),
                   ("Premium-Discount", by_pd), ("Embudo por TBR", funnel), ("Continuación vs reversión", probs),
