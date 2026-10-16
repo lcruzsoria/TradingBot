@@ -95,7 +95,7 @@ class BiasSkill(Skill):
         htf, brk = self._htf()
         self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels, htf=htf, htf_break=brk)
         self.result_symbol = self._last["symbol"]
-        self.set_caption(self.result.bias.value)
+        self.set_caption(f"{self.result.bias.value} ({self.result.score:+g})")      # sesgo y puntuación que lo define
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"

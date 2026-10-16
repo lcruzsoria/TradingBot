@@ -232,7 +232,9 @@ class RingView(QWidget):
         p.drawText(QRectF(cx - size, cy - size * 0.42, 2 * size, size * 0.5), Qt.AlignmentFlag.AlignCenter, title)
         sub_font = QFont(self.font()); sub_font.setPointSizeF(7.8 if size > 40 else 6.5)
         p.setFont(sub_font)
-        p.setPen(QColor(theme.BEAR if view.state == "error" else theme.MUTED))
+        caption = view.caption
+        tone = theme.BULL if caption.startswith("Bullish") else theme.BEAR if caption.startswith("Bearish") else theme.MUTED
+        p.setPen(QColor(theme.BEAR if view.state == "error" else tone if key == "bias" else theme.MUTED))
         text = "error" if view.state == "error" else (view.caption or (f"x {view.handled}" if view.handled else ""))
         text = QFontMetrics(sub_font).elidedText(text, Qt.TextElideMode.ElideRight, int(size * 1.45))
         p.drawText(QRectF(cx - size, cy + size * 0.06, 2 * size, size * 0.4), Qt.AlignmentFlag.AlignCenter, text)

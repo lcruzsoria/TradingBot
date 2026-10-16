@@ -316,3 +316,10 @@ def test_regla_htf_break_vota_y_la_skill_la_usa():
     manager.stop()
     votes = events[-1].payload["result"].votes
     assert [v.vote for v in votes] == [0, 1] and "continuación alcista" in votes[1].detail     # no puntúan a la vez
+
+
+def test_hexagono_muestra_sesgo_y_puntuacion():
+    from tradingbot.skills.bias.models import Bias, BiasResult
+    r = BiasResult(Bias.BULLISH, None, score=4.0, min_score=2.0)
+    assert f"{r.bias.value} ({r.score:+g})" == "Bullish (+4)"
+    assert f"{Bias.BEARISH.value} ({-3.0:+g})" == "Bearish (-3)"
