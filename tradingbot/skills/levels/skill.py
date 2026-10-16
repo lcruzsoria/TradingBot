@@ -7,7 +7,8 @@ from ...clock import server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
-                        DEFAULT_MAX_TF_MINUTES, DEFAULT_US_INDICES, compute, days, is_us_index, parse_time)
+                        DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_US_INDICES, SMA_STYLES, compute, days, is_us_index,
+                        parse_time)
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -18,7 +19,7 @@ class LevelsSkill(Skill):
     description = ("Calcula los niveles de cada día de trading: TDO (True Day Open), Midnight (00:00 de Nueva York) y "
                    "PDH / PDL (máximo y mínimo del día anterior), y dónde empieza cada día: a las 18:00 de NY en los "
                    "índices americanos y a las 17:00 en el resto.")
-    subscribes = ("candles.loaded", "clock.offset")
+    subscribes = ("candles.loaded", "clock.offset", "levels.sma")
     publishes = ("levels.updated",)
     slot = 3
 
@@ -50,6 +51,12 @@ class LevelsSkill(Skill):
             if not COLOR.match(color):
                 raise ValueError(f"LEVELS_{key}_COLOR={color!r}: usa un color #RRGGBB.")
             self.colors[key.lower()] = color.upper()
+        self.sma_period = self.settings.get_int("SMA_PERIOD", DEFAULT_SMA_PERIOD)
+        if self.sma_period < 1:
+            raise ValueError(f"LEVELS_SMA_PERIOD={self.sma_period} debe ser 1 o más.")
+        self.sma_style = self.settings.get("SMA_STYLE", SMA_STYLES[0]).strip().lower()
+        if self.sma_style not in SMA_STYLES:
+            raise ValueError(f"LEVELS_SMA_STYLE={self.sma_style!r}: usa {', '.join(SMA_STYLES)}.")
 
     def start_for(self, symbol: str) -> int:
         """Minutos (hora de NY) a los que empieza el día de trading de este activo."""
@@ -58,7 +65,12 @@ class LevelsSkill(Skill):
     def handle(self, event: Event) -> None:
         if self.error:
             raise ValueError(self.error)
-        if event.topic == "clock.offset":
+        if event.topic == "levels.sma":                      # la media se reconfigura desde su botón
+            p = event.payload
+            self.sma_period, self.sma_style, self.colors["sma"] = int(p["period"]), p["style"], p["color"].upper()
+            if self._last is None:
+                return
+        elif event.topic == "clock.offset":
             if event.payload.get("server_offset") == self.offset:
                 return
             self.offset = event.payload.get("server_offset")
@@ -79,8 +91,10 @@ class LevelsSkill(Skill):
             lines = compute(ts, df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), ahead, start,
                             self.days)
             day_list = days(ts, ahead, start) if self.separators else []
+        sma = df["close"].rolling(self.sma_period).mean().to_numpy()
         self.set_caption(f"día {start // 60:02d}:{start % 60:02d}" if available else f"no en {display_label(tf)}")
         self.publish("levels.updated", {"symbol": symbol, "timeframe": tf, "lines": lines, "days": day_list,
                                         "day_start": start, "us_index": is_us_index(symbol, self.us_indices),
                                         "available": available, "estimated": estimated,
-                                        "colors": self.colors, "max_tf": self.max_tf})
+                                        "colors": self.colors, "max_tf": self.max_tf, "sma": sma,
+                                        "sma_period": self.sma_period, "sma_style": self.sma_style})

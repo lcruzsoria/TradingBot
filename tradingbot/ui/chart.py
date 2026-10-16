@@ -260,6 +260,9 @@ class ChartView(pg.PlotWidget):
         self._day_lines: list = []
         self._day_colors: dict[str, str] = {}
         self._level_groups: set[str] = set()
+        self._sma: tuple | None = None            # (valores, color, trazo) de la última SMA recibida
+        self._sma_visible = False
+        self._sma_item = None
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
@@ -299,6 +302,7 @@ class ChartView(pg.PlotWidget):
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
         self.set_day_levels([], [], self._day_colors)
+        self.set_sma(None)
         self.set_last_price(float(c[-1]))
         vb.setLimits(xMin=-5, xMax=self._n + 60)
         if keep_view and old_n:
@@ -465,6 +469,35 @@ class ChartView(pg.PlotWidget):
             curve.setZValue(-4)
             pi.addItem(curve, ignoreBounds=True)
             self._day_items.append(curve)
+
+    # -- media móvil simple ----------------------------------------------------------------------------
+    def set_sma(self, values, color: str = "#00ACC1", style: str = "normal") -> None:
+        """values: la SMA de cada vela (NaN al principio) o None para quitarla."""
+        self._sma = None if values is None else (np.asarray(values, dtype=float), color, style)
+        self._draw_sma()
+
+    def show_sma(self, visible: bool) -> None:
+        self._sma_visible = visible
+        self._draw_sma()
+
+    def _draw_sma(self) -> None:
+        pi = self.getPlotItem()
+        if self._sma_item is not None:
+            pi.removeItem(self._sma_item)
+            self._sma_item = None
+        if self._sma is None or not self._sma_visible:
+            return
+        values, color, style = self._sma
+        pen_style = {"discontinuo": Qt.PenStyle.DashLine, "punteado": Qt.PenStyle.DotLine}.get(style, Qt.PenStyle.SolidLine)
+        item = pg.PlotCurveItem(x=np.arange(len(values), dtype=float), y=values, connect="finite",
+                                pen=pg.mkPen(color, width=1.5, style=pen_style))
+        item.setZValue(-3)
+        pi.addItem(item, ignoreBounds=True)
+        self._sma_item = item
+
+    @property
+    def sma_drawn(self) -> bool:
+        return self._sma_item is not None
 
     @property
     def day_item_count(self) -> int:

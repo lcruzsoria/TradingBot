@@ -18,6 +18,7 @@ from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
+from .sma_dialog import SmaDialog
 from .bridge import UiBridge
 from .chart import ChartView
 from .errors import explain_error
@@ -204,6 +205,15 @@ class MainWindow(QMainWindow):
             btn.setVisible(levels_skill is not None)
             btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool(key, False))
             self.level_btns[group] = btn
+        # SMA: media móvil de los cierres del timeframe visible; clic derecho para configurarla
+        self.sma_btn = QPushButton("SMA")
+        self.sma_btn.setProperty("chip", "true")
+        self.sma_btn.setCheckable(True)
+        self.sma_btn.setVisible(levels_skill is not None)
+        self.sma_btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool("SHOW_SMA", False))
+        self.sma_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.sma_btn.customContextMenuRequested.connect(lambda _pos: self.open_sma_config())
+        self._sma_cfg = (30, "#00ACC1", "normal")
         tools = QHBoxLayout()
         tools.setSpacing(6)
         self.tf_group = QButtonGroup(self)
@@ -237,6 +247,7 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2)
+        grid.addWidget(self.sma_btn, 2, 0)                   # bajo PDH/PDL
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
@@ -257,6 +268,9 @@ class MainWindow(QMainWindow):
         for group, btn in self.level_btns.items():
             self.chart.show_level(group, btn.isChecked())
             btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
+        self.chart.show_sma(self.sma_btn.isChecked())
+        self.sma_btn.toggled.connect(self.chart.show_sma)
+        self._refresh_sma_tip()
         chart_panel.body.addWidget(self.chart, 1)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
@@ -340,6 +354,30 @@ class MainWindow(QMainWindow):
         self.log(f"bias: reglas actualizadas - {listing}; umbral ±{min_score:g} ({saved})", tone="info")
         if self.candles is not None:
             self.bus.publish("bias.recalc", {}, source="ui")
+
+    def _refresh_sma_tip(self) -> None:
+        period, color, style = self._sma_cfg
+        self.sma_btn.setToolTip(f"Media móvil simple de {period} periodos ({style}, {color}) sobre las velas del timeframe visible.\n"
+                                "Clic derecho para cambiar los periodos, el color y el trazo.")
+
+    def open_sma_config(self) -> None:
+        """Ventana de la SMA: periodos, color y trazo; se aplica al momento y se guarda en tradingbot.env."""
+        dialog = SmaDialog(self, *self._sma_cfg)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self._apply_sma(*dialog.values())
+
+    def _apply_sma(self, period: int, color: str, style: str) -> None:
+        self._sma_cfg = (period, color, style)
+        try:
+            for key, value in (("SMA_PERIOD", str(period)), ("SMA_COLOR", color), ("SMA_STYLE", style)):
+                envconfig.set_value(envconfig.ENV_FILE, f"LEVELS_{key}", value)
+            saved = f"guardada en {envconfig.ENV_FILE.name}"
+        except OSError as exc:
+            saved = f"no se pudo guardar ({exc})"
+        self._refresh_sma_tip()
+        self.log(f"levels: SMA de {period} periodos, {style}, {color} ({saved})", tone="info")
+        self.bus.publish("levels.sma", {"period": period, "color": color, "style": style}, source="ui")
 
     # -- utilidades -----------------------------------------------------------------------------
     def _sync_top_heights(self) -> None:
@@ -634,6 +672,9 @@ class MainWindow(QMainWindow):
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return
         self.chart.set_day_levels(p["lines"], p["days"], p["colors"])
+        self._sma_cfg = (p["sma_period"], p["colors"]["sma"], p["sma_style"])
+        self.chart.set_sma(p["sma"], p["colors"]["sma"], p["sma_style"])
+        self._refresh_sma_tip()
         for btn in self.level_btns.values():
             btn.setEnabled(p["available"])
             btn.setToolTip(btn.property("tip") if p["available"] else

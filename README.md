@@ -92,6 +92,10 @@ Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al f
 pasan un poco de la última vela. Además, una **línea vertical punteada** marca el inicio de cada día de trading, y el
 nombre del día (LUNES, MARTES...) va abajo, centrado entre su separador y el siguiente. Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
 colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
+**SMA** (botón bajo PDH/PDL): media móvil simple de los cierres, de 30 periodos por defecto, calculada con las velas del
+timeframe que se está viendo. Con **clic derecho** en el botón se abre su ventana: periodos, color de la línea y trazo
+(normal, discontinuo o punteado); se aplica al momento y se guarda en el bloque LEVELS de `tradingbot.env`.
+
 Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *Apertura* que antes pintaba el Bias
 (el Bias sigue usando el día del servidor del broker en sus reglas).
 
@@ -158,6 +162,8 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_SHOW_TDO` / `_SHOW_MIDNIGHT` / `_SHOW_PDHL` | `false` | Botones TDO, Midnight y PDH/PDL activados al arrancar. |
 | `LEVELS_INDEX_DAY_START` / `LEVELS_DAY_START` | `18:00` / `17:00` | Inicio del día de trading (separador y TDO), en hora de NY: índices americanos / resto de activos. |
 | `LEVELS_US_INDICES` | `NAS100, SP500, DJ30, US30, US100, US500, USTEC, US2000, SPX500, NDX100` | Inicios de nombre que cuentan como índice americano (sin distinguir mayúsculas; `NAS100` vale para `NAS100.r`). |
+| `LEVELS_SHOW_SMA` | `false` | Botón SMA activado al arrancar. |
+| `LEVELS_SMA_PERIOD` / `_SMA_COLOR` / `_SMA_STYLE` | `30` / `#00ACC1` / `normal` | Periodos, color `#RRGGBB` y trazo (`normal`, `discontinuo`, `punteado`) de la SMA. |
 | `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre centrado. |
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |

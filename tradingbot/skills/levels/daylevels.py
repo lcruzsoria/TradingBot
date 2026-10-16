@@ -25,7 +25,9 @@ WEEKDAYS = ("LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DO
 # Valores por defecto (tradingbot.env, bloque LEVELS)
 DEFAULT_DAYS = 10
 DEFAULT_MAX_TF_MINUTES = 720          # hasta H12: con velas diarias "el día" es una sola vela
-DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86"}
+DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86", "SMA": "#00ACC1"}
+DEFAULT_SMA_PERIOD = 30                # velas del timeframe que se está viendo
+SMA_STYLES = ("normal", "discontinuo", "punteado")
 DEFAULT_DAY_START = "17:00"           # inicio del día (y TDO) en hora de NY: forex, metales, cripto...
 DEFAULT_INDEX_DAY_START = "18:00"     # ...y en los índices americanos
 DEFAULT_US_INDICES = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")

@@ -84,7 +84,7 @@ def run_skill(env_text, timeframe="1h", symbol="EURUSD"):
     manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), [{"type": "levels"}])
     manager.start()
     ts, o, h, l = hourly(3)
-    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l})
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": o})
     bus.publish("candles.loaded", {"symbol": symbol, "timeframe": timeframe, "df": df}, source="feed")
     deadline = time.time() + 3
     while not events and time.time() < deadline:
@@ -127,8 +127,9 @@ def test_los_botones_muestran_cada_nivel(tmp_path, monkeypatch):
     win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "1h", "seconds": 0.1})
     win._on_day_levels({"symbol": "EURUSD", "timeframe": "1h", "lines": compute(ts, o, h, l, AHEAD, FOREX),
                         "days": days(ts, AHEAD, FOREX), "day_start": FOREX, "available": True, "estimated": False,
-                        "max_tf": 720,
-                        "colors": {"tdo": "#787B86", "midnight": "#FF9800", "pdhl": "#2962FF", "separator": "#787B86"}})
+                        "max_tf": 720, "sma": df["close"].rolling(5).mean().to_numpy(), "sma_period": 5, "sma_style": "punteado",
+                        "colors": {"tdo": "#787B86", "midnight": "#FF9800", "pdhl": "#2962FF", "separator": "#787B86",
+                                   "sma": "#00ACC1"}})
     only_pdhl = win.chart.day_item_count                    # 2 curvas + 4 rótulos (PDH y PDL de 2 días)
     assert only_pdhl == 6
     win.level_btns["tdo"].setChecked(True)
@@ -139,3 +140,49 @@ def test_los_botones_muestran_cada_nivel(tmp_path, monkeypatch):
     seps = win.chart.separators                             # no dependen de los botones
     assert list(seps._x) == [23.5, 47.5] and seps._labels == ["MARTES", "MIÉRCOLES", "JUEVES"]
     assert list(seps._centers) == [11.5, 35.5, 59.5]
+
+
+def test_la_sma_se_calcula_con_las_velas_visibles_y_se_reconfigura():
+    skill, events = run_skill("LEVELS_SMA_PERIOD=5\nLEVELS_SMA_COLOR=#ff0000\nLEVELS_SMA_STYLE=punteado\n")
+    p = events[-1].payload
+    assert p["sma_period"] == 5 and p["sma_style"] == "punteado" and p["colors"]["sma"] == "#FF0000"
+    assert len(p["sma"]) == 72 and np.isnan(p["sma"][3]) and not np.isnan(p["sma"][4])      # los 4 primeros, sin media
+    _, events = run_skill("")
+    assert events[-1].payload["sma_period"] == 30 and events[-1].payload["sma_style"] == "normal"   # por defecto
+    skill, events = run_skill("LEVELS_SMA_STYLE=rayas\n")
+    assert skill.state.value == "error" and "LEVELS_SMA_STYLE" in skill.note
+    skill, events = run_skill("LEVELS_SMA_PERIOD=0\n")
+    assert skill.state.value == "error" and "LEVELS_SMA_PERIOD" in skill.note
+
+
+def test_el_boton_sma_dibuja_y_configura_la_media(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import envconfig, settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    env_file = tmp_path / "tradingbot.env"
+    env_file.write_text("LEVELS_SMA_PERIOD=30\n", encoding="utf-8")
+    monkeypatch.setattr(envconfig, "ENV_FILE", env_file)
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
+    bus, published = EventBus(), []
+    bus.subscribe("t", "levels.sma", published.append)
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig(parse(""))), [{"type": "levels"}]), cfg, "t")
+    assert win.sma_btn.text() == "SMA" and not win.sma_btn.isChecked()
+    ts, o, h, l = hourly(3)
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": o, "time": pd.to_datetime(ts, unit="s")})
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "1h", "seconds": 0.1})
+    win._on_day_levels({"symbol": "EURUSD", "timeframe": "1h", "lines": [], "days": [], "day_start": FOREX, "available": True,
+                        "estimated": False, "max_tf": 720, "sma": df["close"].rolling(5).mean().to_numpy(), "sma_period": 5,
+                        "sma_style": "discontinuo", "colors": {"sma": "#FF0000", "separator": "#787B86"}})
+    assert not win.chart.sma_drawn                          # el botón está apagado
+    win.sma_btn.setChecked(True)
+    assert win.chart.sma_drawn
+    win.sma_btn.setChecked(False)
+    assert not win.chart.sma_drawn
+    win._apply_sma(50, "#00FF00", "punteado")
+    saved = envconfig.parse(env_file.read_text(encoding="utf-8"))
+    assert saved["LEVELS_SMA_PERIOD"] == "50" and saved["LEVELS_SMA_COLOR"] == "#00FF00" and saved["LEVELS_SMA_STYLE"] == "punteado"
+    assert published[-1].payload == {"period": 50, "color": "#00FF00", "style": "punteado"}
