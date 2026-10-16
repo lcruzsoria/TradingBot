@@ -3,13 +3,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import numpy as np
+
 from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
 from ..levels.daylevels import DEFAULT_SMA_PERIOD
-from .history import block_ids, lateral_flags, score_history
+from .history import block_ids, frozen_votes, lateral_flags
 from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
@@ -118,15 +120,18 @@ class BiasSkill(Skill):
         recalc = self._plan[3] if self._plan else (self.index_hours if index else self.hours)
         df = c["df"]
         period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD))
-        scores = score_history(df["ts"].to_numpy(), df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(),
-                               df["close"].to_numpy(), rules, ahead, start, recalc, htf_hours, period)
+        votes = frozen_votes(df["ts"].to_numpy(), df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(),
+                             df["close"].to_numpy(), rules, ahead, start, recalc, htf_hours, period)
+        scores = votes @ np.array([float(w) for _k, w in rules]) if len(rules) else np.zeros(len(df))
+        titles = [(r.title or r.key, r.weight) for r in getattr(self.services.engine, "rules", []) if getattr(r, "key", "")]
         engine = self.services.engine
         lateral = None
         if getattr(engine, "lateral_enabled", False):                    # velas cuyo bloque empezó con el mercado lateral
             ids = block_ids(df["ts"].to_numpy().astype("int64") - int(ahead), start * 60, recalc or htf_hours)
             lateral = lateral_flags(df["ts"].to_numpy(), df["close"].to_numpy(), engine.lateral_hours, engine.lateral_min, ids)
         self.publish("bias.history", {"symbol": c["symbol"], "timeframe": c["timeframe"], "scores": scores,
-                                      "min_score": getattr(engine, "min_score", 1.0), "lateral": lateral})
+                                      "min_score": getattr(engine, "min_score", 1.0), "lateral": lateral,
+                                      "rules": titles, "votes": votes})
 
     def _sma_active(self) -> bool:
         return any(getattr(r, "key", "") == "sma" for r in getattr(self.services.engine, "rules", []))

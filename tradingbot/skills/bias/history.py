@@ -122,17 +122,22 @@ def rule_votes(ts, o, h, l, c, keys, ahead: int, anchor_minutes: int, htf_hours:
     return votes
 
 
+def frozen_votes(ts, o, h, l, c, rules: list[tuple[str, float]], ahead: int, anchor_minutes: int, recalc_hours: float,
+                 htf_hours: int, sma_period: int) -> np.ndarray:
+    """Voto (+1 / -1 / 0) de cada regla activa en cada vela, congelado al abrirse el bloque: matriz (velas x reglas)."""
+    ts = np.asarray(ts, dtype=np.int64)
+    n = len(ts)
+    if n == 0 or not rules:
+        return np.zeros((n, len(rules)))
+    votes = rule_votes(ts, o, h, l, c, [key for key, _w in rules], ahead, anchor_minutes, htf_hours, sma_period)
+    matrix = np.column_stack([np.nan_to_num(votes.get(key, np.zeros(n))) for key, _w in rules])
+    if recalc_hours and recalc_hours > 0:
+        matrix = matrix[block_ids(ts - int(ahead), anchor_minutes * 60, recalc_hours)]
+    return matrix
+
+
 def score_history(ts, o, h, l, c, rules: list[tuple[str, float]], ahead: int, anchor_minutes: int, recalc_hours: float,
                   htf_hours: int, sma_period: int) -> np.ndarray:
     """Puntuación (suma de voto x peso) de cada vela. `rules`: (clave, peso) de las reglas activas."""
-    ts = np.asarray(ts, dtype=np.int64)
-    if len(ts) == 0:
-        return np.zeros(0)
-    votes = rule_votes(ts, o, h, l, c, [key for key, _w in rules], ahead, anchor_minutes, htf_hours, sma_period)
-    total = np.zeros(len(ts))
-    for key, weight in rules:
-        if key in votes:
-            total += np.nan_to_num(votes[key]) * float(weight)
-    if recalc_hours and recalc_hours > 0:                              # congelado: solo cambia al crearse la vela 0
-        total = total[block_ids(ts - int(ahead), anchor_minutes * 60, recalc_hours)]
-    return total
+    matrix = frozen_votes(ts, o, h, l, c, rules, ahead, anchor_minutes, recalc_hours, htf_hours, sma_period)
+    return matrix @ np.array([float(w) for _k, w in rules]) if matrix.shape[1] else np.zeros(len(matrix))

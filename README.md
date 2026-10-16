@@ -98,6 +98,11 @@ sesgo alcista; rojo: bajista; gris: sin sesgo; las líneas discontinuas marcan e
 futuro y se congela en cada vela HTF (3 h en índices, 4 h en el resto), como el bot en vivo. Soporta las reglas
 `prev_day_break`, `tdo` (y `above_below_open`), `midnight`, `htf_sweep`, `htf_break` y `sma`.
 
+El histograma es **interactivo**: al pulsar una barra se marca esa vela (línea vertical en el histograma y en el gráfico) y el
+panel **Reglas del sesgo** muestra el voto, el peso y los puntos de cada regla activa en esa vela, con su fecha y hora de NY junto
+al título. Sin ninguna vela marcada (o con el histograma apagado) muestra la vela actual (`TF=M15 · Vela actual`). Se desmarca con
+el clic derecho o volviendo a pulsar la misma barra. En las velas pasadas solo hay voto y peso (no los precios de cada regla).
+
 **Avisos en el Registro:** la skill Levels anota el cierre de mercados (futuros de índices USA cada día laborable, Forex el
 viernes; `LEVELS_MARKET_CLOSE`) y el cambio de día de trading de cada activo a su hora: 18:00 NY en los índices
 americanos y 17:00 NY en el resto, con los activos de tu lista de Quotes que corresponden. De domingo a jueves.

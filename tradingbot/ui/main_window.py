@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, 
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..skills.bias import BiasResult
+from ..skills.bias.models import Bias, RuleVote
 from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny
 from ..core import Event, EventBus, SkillManager
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
             self.ring.selected = first
             self._show_skill(first)
         self.log("TradingBot listo.")
+        self._refresh_rules_view()
         wanted = app_cfg["app"]["symbol"]
         if self.watchlist and self._match_symbol(wanted) is None:
             self.log(f"'{wanted}' no está en el panel Quotes: se usa {self.current_symbol}.")
@@ -300,6 +302,8 @@ class MainWindow(QMainWindow):
         self.bias_hist.link_to(self.chart)
         self.bias_hist.setVisible(False)
         self.hist_btn.toggled.connect(self.bias_hist.setVisible)
+        self.hist_btn.toggled.connect(lambda on: self._select_bar(None) if not on else None)
+        self.bias_hist.bar_selected.connect(self._select_bar)
         chart_panel.body.addWidget(self.bias_hist)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
@@ -335,6 +339,11 @@ class MainWindow(QMainWindow):
 
         rules = Panel("Reglas del sesgo")
         self.rules_panel = rules
+        self.rules_when = QLabel("")                                 # vela a la que corresponden las reglas que se ven
+        self.rules_when.setObjectName("CardNote")
+        rules.head.insertWidget(1, self.rules_when)
+        self._hist_data: dict | None = None                          # último bias.history (votos de cada regla en cada vela)
+        self._live_result: BiasResult | None = None                  # sesgo de la vela actual (el que calcula el bot)
         rules.note.setTextFormat(Qt.TextFormat.RichText)             # «Voto de cada regla» es un enlace al editor
         rules.note.setCursor(Qt.CursorShape.PointingHandCursor)
         rules.note.setToolTip("Elige qué reglas aplican al sesgo y su peso")
@@ -574,6 +583,10 @@ class MainWindow(QMainWindow):
     def _on_candles(self, p: dict) -> None:
         df, symbol, tf = p["df"], p["symbol"], p["timeframe"]
         self.charted_symbol = symbol
+        if not p.get("refresh"):
+            self.bias_hist.select(None)                              # otro activo o timeframe: se pierde la vela marcada
+            self.chart.set_marker(None)
+            self._hist_data = None
         self.error_banner.hide()
         if self.connected:
             self._set_status("Conectado", "ok")
@@ -647,7 +660,8 @@ class MainWindow(QMainWindow):
     def _on_bias(self, p: dict) -> None:
         result: BiasResult = p["result"]
         self.bias_card.set_result(result)
-        self.rules_list.set_result(result)
+        self._live_result = result
+        self._refresh_rules_view()
         # Los niveles del día (apertura, máximo y mínimo previos) los pinta ahora la skill levels con sus botones.
         tone = "go" if result.bias.value == "Bullish" else "nogo" if result.bias.value == "Bearish" else None
         reason = p.get("reason") or "carga de velas"
@@ -726,10 +740,42 @@ class MainWindow(QMainWindow):
                       f"levels: día de trading desde las {start // 60:02d}:{start % 60:02d} NY ({kind}) - "
                       f"{levels or 'sin niveles'}")
 
+    # -- reglas de la vela marcada en el histograma ------------------------------------------------------------------
+    def _select_bar(self, index) -> None:
+        self.bias_hist.select(index)
+        self.chart.set_marker(index)
+        self._refresh_rules_view()
+
+    def _historic_result(self, index: int) -> BiasResult | None:
+        """El sesgo de la vela `index` reconstruido con los votos congelados de cada regla (sin precios: solo voto y peso)."""
+        p = self._hist_data
+        if p is None or not 0 <= index < len(p["scores"]):
+            return None
+        votes = tuple(RuleVote(title, int(p["votes"][index][k]), "Voto del bloque de esa vela (reconstruido del histórico)", weight)
+                      for k, (title, weight) in enumerate(p["rules"]))
+        score, minimum = float(p["scores"][index]), float(p["min_score"])
+        lateral = bool(p.get("lateral") is not None and p["lateral"][index])
+        bias = Bias.NO_BIAS if lateral else Bias.BULLISH if score >= minimum else Bias.BEARISH if score <= -minimum else Bias.NO_BIAS
+        return BiasResult(bias, None, votes, {}, f"Vela del {self._bar_time(index)}", score, minimum, lateral)
+
+    def _refresh_rules_view(self) -> None:
+        """Panel de reglas: las de la vela marcada en el histograma o, si no hay ninguna, las de la vela actual."""
+        index = self.bias_hist.selected if self.bias_hist.isVisibleTo(self) else None
+        shown = self._historic_result(index) if index is not None else None
+        tf = f"TF={display_label(self.current_tf())}"
+        if shown is not None:
+            self.rules_when.setText(f"  ·  {tf}  ·  {self._bar_time(index)}")
+            self.rules_list.set_result(shown)
+        else:
+            self.rules_when.setText(f"  ·  {tf}  ·  Vela actual")
+            self.rules_list.set_result(self._live_result)
+
     def _on_bias_history(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return
+        self._hist_data = p
         self.bias_hist.set_scores(p["scores"], p["min_score"], p.get("lateral"))
+        self._refresh_rules_view()
 
     def _on_market_closed(self, p: dict) -> None:
         hour = p["when"].strftime("%H:%M")

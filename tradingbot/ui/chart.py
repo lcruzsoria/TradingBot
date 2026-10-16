@@ -470,6 +470,21 @@ class ChartView(pg.PlotWidget):
             pi.addItem(curve, ignoreBounds=True)
             self._day_items.append(curve)
 
+    def set_marker(self, index: int | None) -> None:
+        """Línea vertical sobre la vela marcada en el histograma del sesgo (None: sin marca)."""
+        pi = self.getPlotItem()
+        marker = getattr(self, "_marker", None)
+        if index is None:
+            if marker is not None:
+                marker.hide()
+            return
+        if marker is None:
+            marker = self._marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(theme.ACCENT, width=1, style=Qt.PenStyle.DashLine))
+            marker.setZValue(5)
+            pi.addItem(marker, ignoreBounds=True)
+        marker.setPos(float(index))
+        marker.show()
+
     # -- media móvil simple ----------------------------------------------------------------------------
     def set_sma(self, values, color: str = "#00ACC1", style: str = "normal") -> None:
         """values: la SMA de cada vela (NaN al principio) o None para quitarla."""

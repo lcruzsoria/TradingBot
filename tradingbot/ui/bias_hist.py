@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from . import theme
@@ -14,6 +14,8 @@ PRICE_AXIS_WIDTH = 74    # igual que el eje de precio, para que las velas queden
 
 class BiasHistogram(pg.PlotWidget):
     """Puntuación del Bias en cada vela: verde con sesgo alcista, rojo con sesgo bajista y gris sin sesgo."""
+
+    bar_selected = Signal(object)        # índice de la vela marcada, o None si se desmarca
 
     def __init__(self) -> None:
         super().__init__(background=theme.CHART_BG)
@@ -29,6 +31,14 @@ class BiasHistogram(pg.PlotWidget):
         self._lateral = None
         self._min = 1.0
         self._items: list = []
+        self._selected: int | None = None
+        self._marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(theme.ACCENT, width=2))
+        self._marker.setZValue(10)
+        self._marker.hide()
+        pi.addItem(self._marker, ignoreBounds=True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Pulsa una barra para ver el voto de cada regla en esa vela (clic derecho o la misma barra: vuelve a la actual)")
+        pi.scene().sigMouseClicked.connect(self._clicked)
         self.style()
 
     def style(self) -> None:
@@ -37,6 +47,35 @@ class BiasHistogram(pg.PlotWidget):
         ax.setPen(pg.mkPen(theme.CHART_GRID or theme.BORDER))
         ax.setTextPen(pg.mkPen(theme.CHART_TEXT))
         self._draw()
+
+    @property
+    def selected(self) -> int | None:
+        return self._selected
+
+    def select(self, index: int | None) -> None:
+        """Marca una vela (o ninguna) sin emitir la señal."""
+        self._selected = index
+        self._marker.setVisible(index is not None)
+        if index is not None:
+            self._marker.setPos(float(index))
+
+    def click_at(self, x: float | None, clear: bool = False) -> None:
+        """Pulsación sobre el histograma en la coordenada de vela `x`: marca esa vela, o la desmarca si ya lo estaba."""
+        if clear or x is None:
+            index = None
+        else:
+            index = int(round(x))
+            if not 0 <= index < len(self._scores) or index < len(self._scores) - MAX_BARS or index == self._selected:
+                index = None
+        self.select(index)
+        self.bar_selected.emit(index)
+
+    def _clicked(self, event) -> None:
+        vb = self.getPlotItem().getViewBox()
+        if not vb.sceneBoundingRect().contains(event.scenePos()):
+            return
+        right = event.button() == Qt.MouseButton.RightButton
+        self.click_at(vb.mapSceneToView(event.scenePos()).x(), clear=right)
 
     def link_to(self, chart) -> None:
         """El eje de tiempo sigue al del gráfico de precio."""

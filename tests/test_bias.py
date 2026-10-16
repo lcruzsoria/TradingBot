@@ -422,3 +422,44 @@ def test_filtro_de_lateralidad_deja_sin_sesgo_un_mercado_que_fue_y_volvio():
     assert res.bias is Bias.NO_BIAS and res.lateral and "lateral" in res.summary.lower() and res.score == 2
     con_filtro.configure([("tdo", 2.0)], lateral_min=0.0)         # el editor lo apaga en caliente
     assert con_filtro.evaluate(candles, levels=niveles).bias is Bias.BULLISH
+
+
+def test_histograma_interactivo_muestra_las_reglas_de_la_vela_marcada(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.skills.bias.models import BiasResult, RuleVote
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    texts = lambda: [lab.text() for lab in win.rules_list.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]   # noqa: E731
+    assert win.rules_when.text().endswith("TF=M15  ·  Vela actual")                         # por defecto: la vela actual
+    df = htf_frame([(105, 95, 100), (110, 98, 108)])
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "15m", "seconds": 0.1})
+    live = BiasResult(Bias.BULLISH, None, (RuleVote("Precio vs TDO", 1, "x", 2.0), RuleVote("Precio vs Midnight", 1, "x", 1.0)), {}, "", 3.0, 3.0)
+    win._on_bias({"result": live, "symbol": "EURUSD", "timeframe": "15m", "reason": "t"})
+    n = len(df)
+    votes = np.zeros((n, 2))
+    votes[5] = [-1, -1]                                                                       # la vela 5: las dos reglas bajistas
+    scores = votes @ np.array([2.0, 1.0])
+    win._on_bias_history({"symbol": "EURUSD", "timeframe": "15m", "scores": scores, "min_score": 3.0, "lateral": None,
+                          "rules": [("Precio vs TDO", 2.0), ("Precio vs Midnight", 1.0)], "votes": votes})
+    win.hist_btn.setChecked(True)
+    assert "+2" in texts() and "Vela actual" in win.rules_when.text()                         # sin marcar: la vela actual
+    win.bias_hist.click_at(5)                                                                 # clic en la vela 5
+    assert win.bias_hist.selected == 5 and "Vela actual" not in win.rules_when.text()
+    assert "TF=M15" in win.rules_when.text() and "NY" in win.rules_when.text()                # fecha y hora de la vela
+    assert "-2" in texts() and "-1" in texts() and "(peso -2)" in texts() and "Puntuación -3  ·  umbral -3  ·  Bearish" in texts()
+    win.bias_hist.click_at(5)                                                                 # la misma barra: desmarca
+    assert win.bias_hist.selected is None and "Vela actual" in win.rules_when.text() and "+2" in texts()
+    win.bias_hist.click_at(5)
+    win.hist_btn.setChecked(False)                                                            # histograma apagado: vuelve a la actual
+    assert "Vela actual" in win.rules_when.text() and win.bias_hist.selected is None
+    win.hist_btn.setChecked(True)
+    win.bias_hist.click_at(10_000)                                                            # fuera de las velas: nada marcado
+    assert win.bias_hist.selected is None
