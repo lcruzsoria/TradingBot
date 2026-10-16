@@ -29,6 +29,8 @@ class BiasSkill(Skill):
         self._setup: dict | None = None
         self._next: datetime | None = None
         self._plan: tuple | None = None          # (símbolo, timeframe, inicio del día, horas, índice USA)
+        self._levels: dict | None = None         # último levels.updated (TDO y Midnight para las reglas)
+        self._eval_levels: dict = {}             # niveles con los que se calculó el sesgo vigente
         self._reason = "carga de velas"
         # tradingbot.env, bloque BIAS
         self.index_hours = self.settings.get_float("RECALC_INDEX_HOURS", DEFAULT_INDEX_HOURS)
@@ -44,7 +46,10 @@ class BiasSkill(Skill):
         topic, p = event.topic, event.payload
         if topic == "levels.updated":
             self._schedule(p["symbol"], p["timeframe"], p["day_start"], p.get("us_index", False))
-            return
+            self._levels = p
+            if self._last is None or self._day_levels() == self._eval_levels:
+                return
+            self._reason = "niveles del día (TDO / Midnight)"     # han cambiado: hay que recalcular con ellos
         if topic == "setup.updated":
             self._setup = p
             self._execution()
@@ -67,13 +72,29 @@ class BiasSkill(Skill):
             self._reason = "a petición (botón Recalcular)"
         if self._last is None:
             return
-        self.result = self.services.engine.evaluate(self._last["df"])
+        self._eval_levels = self._day_levels()
+        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels)
         self.result_symbol = self._last["symbol"]
         self.set_caption(self.result.bias.value)
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
         self._execution()
+
+    def _day_levels(self) -> dict:
+        """TDO y Midnight del día en curso, de la skill Levels, si corresponden a las velas con las que se evalúa."""
+        p, c = self._levels, self._last
+        if p is None or c is None or not p.get("available") or (p["symbol"], p["timeframe"]) != (c["symbol"], c["timeframe"]):
+            return {}
+        today: dict[str, float] = {}
+        tdo = max((ln for ln in p["lines"] if ln.kind == "tdo"), key=lambda ln: ln.x0, default=None)
+        if tdo is not None:
+            today["tdo"] = tdo.price
+            # el Midnight del día en curso: el que empieza después del TDO de hoy (antes de las 00:00 NY aún no existe)
+            mid = max((ln for ln in p["lines"] if ln.kind == "midnight" and ln.x0 > tdo.x0), key=lambda ln: ln.x0, default=None)
+            if mid is not None:
+                today["midnight"] = mid.price
+        return today
 
     def tick(self) -> None:
         """Si ha llegado la hora del recálculo, pide velas nuevas al feed (el sesgo se recalcula al llegar)."""

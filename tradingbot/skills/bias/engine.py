@@ -35,8 +35,9 @@ class BiasEngine:
             rules.append(RULE_REGISTRY[key](**params))
         return cls(rules, cfg.get("min_score", 1), cfg.get("require_all", False))
 
-    def evaluate(self, candles: pd.DataFrame, day: date | None = None) -> BiasResult:
-        ctx = build_context(candles, day)
+    def evaluate(self, candles: pd.DataFrame, day: date | None = None, levels: dict | None = None) -> BiasResult:
+        """`levels`: niveles del día de la skill Levels ("tdo", "midnight") para las reglas que los usan."""
+        ctx = build_context(candles, day, levels)
         if ctx is None or len(ctx.today) == 0:
             return BiasResult(Bias.NO_BIAS, day, summary="Sin velas para evaluar el día")
 
@@ -55,6 +56,10 @@ class BiasEngine:
             levels["Mín. previo"] = ctx.prev_low
         if ctx.day_open is not None:
             levels["Apertura"] = ctx.day_open
+        if ctx.tdo is not None:
+            levels["TDO"] = ctx.tdo
+        if ctx.midnight is not None:
+            levels["Midnight"] = ctx.midnight
         return BiasResult(bias, ctx.day, tuple(votes), levels, summary, score, self.min_score)
 
     def _aggregate(self, votes: list[RuleVote]) -> tuple[Bias, str]:

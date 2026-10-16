@@ -110,3 +110,69 @@ def test_trade_filter():
     assert f.check(Direction.LONG)[0] is True
     allowed, reason = f.check(Direction.SHORT)
     assert allowed is False and "bloqueado" in reason
+
+
+# -- reglas TDO y Midnight ---------------------------------------------------------------------------------
+from tradingbot.skills.bias.rules import AboveBelowMidnight, AboveBelowTdo   # noqa: E402
+
+
+def test_regla_tdo_vota_segun_el_precio_y_el_nivel():
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)                       # el último precio es 1,06
+    sobre = BiasEngine([AboveBelowTdo()]).evaluate(candles, levels={"tdo": 1.05})
+    assert sobre.votes[0].vote == 1 and "sobre el TDO" in sobre.votes[0].detail and sobre.levels["TDO"] == 1.05
+    bajo = BiasEngine([AboveBelowTdo()]).evaluate(candles, levels={"tdo": 1.08})
+    assert bajo.votes[0].vote == -1 and "bajo el TDO" in bajo.votes[0].detail
+    en_nivel = BiasEngine([AboveBelowTdo(tolerance_pct=1)]).evaluate(candles, levels={"tdo": 1.055})
+    assert en_nivel.votes[0].vote == 0                                   # dentro de la zona neutra
+    sin = BiasEngine([AboveBelowTdo()]).evaluate(candles)
+    assert sin.votes[0].vote == 0 and "Sin TDO" in sin.votes[0].detail
+
+
+def test_regla_midnight_no_vota_hasta_que_existe():
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)
+    antes = BiasEngine([AboveBelowMidnight()]).evaluate(candles, levels={"tdo": 1.05})
+    assert antes.votes[0].vote == 0 and "Aún no hay Midnight" in antes.votes[0].detail
+    despues = BiasEngine([AboveBelowMidnight()]).evaluate(candles, levels={"tdo": 1.05, "midnight": 1.1})
+    assert despues.votes[0].vote == -1 and despues.levels["Midnight"] == 1.1
+
+
+def test_tdo_y_midnight_juntos_dan_sesgo_y_opuestos_se_anulan():
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)
+    eng = BiasEngine([AboveBelowTdo(), AboveBelowMidnight()], min_score=2)
+    assert eng.evaluate(candles, levels={"tdo": 1.0, "midnight": 1.03}).bias is Bias.BULLISH      # +1 +1
+    assert eng.evaluate(candles, levels={"tdo": 1.0, "midnight": 1.09}).bias is Bias.NO_BIAS      # +1 -1
+    assert eng.evaluate(candles, levels={"tdo": 1.09, "midnight": 1.08}).bias is Bias.BEARISH     # -1 -1
+    # con la ruptura del día anterior (peso 2) por delante de ambos
+    full = BiasEngine([PrevDayBreak(), AboveBelowTdo(), AboveBelowMidnight()], min_score=2)
+    assert full.evaluate(make_candles((1.0, 1.1), 1.10, 1.12), levels={"tdo": 1.0, "midnight": 1.11}).score == 4        # +2 +1 +1
+
+
+def test_la_skill_bias_recalcula_cuando_llegan_los_niveles_del_dia():
+    import time
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.skills.levels.daylevels import Line
+    import tradingbot.skills  # noqa: F401
+    bus, events = EventBus(), []
+    bus.subscribe("t", "bias.updated", events.append)
+    engine_ = BiasEngine([PrevDayBreak(), AboveBelowTdo(), AboveBelowMidnight()], min_score=2)
+    manager = SkillManager(bus, Services(None, engine_, {"app": {}}, EnvConfig()), [{"type": "bias"}])
+    manager.start()
+    df = make_candles((1.0, 1.1), 1.04, 1.06)
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not events and time.time() < deadline:
+        time.sleep(0.02)
+    assert events[-1].payload["result"].votes[1].detail.startswith("Sin TDO")       # aún sin niveles
+    lines = [Line("tdo", 1.0, 0, 9), Line("midnight", 1.03, 4, 9), Line("tdo", 1.05, 20, 30), Line("midnight", 1.09, 12, 30)]
+    bus.publish("levels.updated", {"symbol": "EURUSD", "timeframe": "15m", "lines": lines, "days": [], "day_start": 1020,
+                                   "available": True}, source="levels")
+    while len(events) < 2 and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    p = events[-1].payload
+    assert p["reason"].startswith("niveles del día")
+    votes = p["result"].votes
+    # el TDO de hoy es el último (1,05); el Midnight válido es el posterior a él: ninguno (el de x0=12 es de ayer)
+    assert votes[1].vote == 1 and "1.05" in votes[1].detail
+    assert votes[2].vote == 0 and "Aún no hay Midnight" in votes[2].detail

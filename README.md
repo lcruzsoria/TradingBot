@@ -138,7 +138,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Quotes y de las cifras de la cuenta (admite decimales). |
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
 | **BIAS** — sesgo del día | | |
-| `BIAS_RULES` | `prev_day_break, above_below_open` | Reglas activas, separadas por comas. `ninguna`: sin reglas (siempre No Bias). |
+| `BIAS_RULES` | `prev_day_break, tdo, midnight` | Reglas activas, separadas por comas (`prev_day_break`, `tdo`, `midnight`, `above_below_open`). `ninguna`: sin reglas (siempre No Bias). |
 | `BIAS_MIN_SCORE` | `2` | Puntuación mínima (suma de voto x peso) para que haya sesgo. |
 | `BIAS_RECALC_INDEX_HOURS` / `BIAS_RECALC_HOURS` | `3` / `4` | Cada cuántas horas se recalcula el sesgo solo, alineado con el inicio del día de trading: índices USA / resto. `0`: desactivado. |
 | `BIAS_EXEC_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO a los setups. |
@@ -210,18 +210,29 @@ ponlo en **Ilimitado** y reinicia el terminal. El historial disponible depende t
 Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión). Se configura en el bloque BIAS de `tradingbot.env`:
 
 ```ini
-BIAS_RULES=prev_day_break, above_below_open   # reglas activas
+BIAS_RULES=prev_day_break, tdo, midnight       # reglas activas
 BIAS_MIN_SCORE=2                              # puntuación mínima (voto x peso)
 BIAS_PREV_DAY_BREAK_WEIGHT=2                  # peso de cada regla
 BIAS_REQUIRE_ALL=false                        # true: todas las reglas activas deben coincidir
-BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0         # parámetro tolerance_pct de above_below_open
+BIAS_TDO_TOLERANCE_PCT=0                      # parámetro tolerance_pct de la regla tdo
 ```
 
 - `BIAS_REQUIRE_ALL=false`: cada regla suma voto x peso; hay sesgo si la puntuación llega a `+BIAS_MIN_SCORE` (Bullish) o `-BIAS_MIN_SCORE` (Bearish). Si no, **No Bias**.
 - `BIAS_REQUIRE_ALL=true`: solo hay sesgo si todas las reglas votan lo mismo.
 - Para desactivar una regla, quítala de `BIAS_RULES`.
 
-Las dos reglas incluidas (`prev_day_break`, `above_below_open`) son **solo ejemplos** para ver el sistema funcionando. Sustitúyelas por tus criterios.
+Reglas incluidas (cada una vota +1, -1 o 0 y tiene su peso `BIAS_<REGLA>_WEIGHT`):
+
+| Regla | Peso | Vota |
+|---|---:|---|
+| `prev_day_break` | 2 | +1 si el precio supera el máximo del día anterior, -1 si cae bajo el mínimo. |
+| `tdo` | 1 | +1 sobre el **TDO** (True Day Open: apertura del día de trading, 18:00 NY en índices americanos y 17:00 en el resto), -1 bajo él. |
+| `midnight` | 1 | +1 sobre la apertura de las **00:00 de Nueva York**, -1 bajo ella. No vota hasta que existe esa vela. |
+| `above_below_open` | 1 | Apertura del día por fecha del servidor. La sustituye `tdo`: no las actives juntas (contaría doble). |
+
+`tdo` y `midnight` usan los niveles de la skill Levels (si está apagada o el timeframe es grande, votan 0). Con `BIAS_MIN_SCORE=2`,
+`prev_day_break` por sí sola basta para tener sesgo, y TDO y Midnight juntos en el mismo sentido también; si apuntan a lados
+opuestos se anulan. El sesgo se recalcula también cuando cambian el TDO o el Midnight (por ejemplo, al llegar las 00:00 NY).
 
 El día se determina con la hora del servidor del broker (la que muestra MT5), que puede no coincidir con tu hora local.
 El sesgo se calcula al cargar velas y al pulsar *Recalcular sesgo*.

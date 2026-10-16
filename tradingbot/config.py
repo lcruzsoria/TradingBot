@@ -26,7 +26,7 @@ DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type
 # Valores por defecto de tradingbot.env
 DEFAULT_SYMBOL = "EURUSD"                                     # FEED_SYMBOL
 DEFAULT_MAX_BARS = 2_000_000                                  # FEED_MAX_BARS
-DEFAULT_BIAS_RULES = ("prev_day_break", "above_below_open")   # BIAS_RULES
+DEFAULT_BIAS_RULES = ("prev_day_break", "tdo", "midnight")   # BIAS_RULES
 DEFAULT_MIN_SCORE = 2                                         # BIAS_MIN_SCORE
 DEFAULT_REQUIRE_ALL = False                                   # BIAS_REQUIRE_ALL
 

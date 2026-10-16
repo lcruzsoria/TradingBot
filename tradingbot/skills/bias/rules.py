@@ -88,3 +88,44 @@ class AboveBelowOpen(BiasRule):
         if price < day_open - tol:
             return self.vote(-1, f"Precio {fmt_price(price)} bajo la apertura {fmt_price(day_open)}")
         return self.vote(0, f"Precio {fmt_price(price)} en la apertura {fmt_price(day_open)}")
+
+
+def _level_vote(rule: BiasRule, ctx: BiasContext, level: float | None, name: str, missing: str) -> RuleVote:
+    """Voto de una regla de nivel: +1 con el precio por encima del nivel, -1 por debajo, 0 sobre él (zona neutra opcional)."""
+    price = ctx.last_price
+    if price is None or level is None:
+        return rule.vote(0, missing)
+    tol = level * float(rule.params.get("tolerance_pct", 0.0)) / 100.0
+    if price > level + tol:
+        return rule.vote(1, f"Precio {fmt_price(price)} sobre {name} {fmt_price(level)}")
+    if price < level - tol:
+        return rule.vote(-1, f"Precio {fmt_price(price)} bajo {name} {fmt_price(level)}")
+    return rule.vote(0, f"Precio {fmt_price(price)} en {name} {fmt_price(level)}")
+
+
+@register_rule("tdo")
+class AboveBelowTdo(BiasRule):
+    """Relación del precio con el TDO (True Day Open): la apertura del día de trading de ese activo.
+
+    El día empieza a las 18:00 de NY en los índices americanos y a las 17:00 en el resto (LEVELS_INDEX_DAY_START /
+    LEVELS_DAY_START). Por encima del TDO -> alcista; por debajo -> bajista. Necesita la skill Levels.
+    Parámetro opcional: tolerance_pct (zona neutra alrededor del nivel, en %).
+    """
+    title = "Precio vs TDO"
+
+    def evaluate(self, ctx: BiasContext) -> RuleVote:
+        return _level_vote(self, ctx, ctx.tdo, "el TDO", "Sin TDO del día (skill Levels apagada o timeframe grande)")
+
+
+@register_rule("midnight")
+class AboveBelowMidnight(BiasRule):
+    """Relación del precio con el Midnight: la apertura de las 00:00 de Nueva York del día en curso.
+
+    Por encima -> alcista; por debajo -> bajista. Antes de las 00:00 NY todavía no existe y no vota.
+    Necesita la skill Levels. Parámetro opcional: tolerance_pct.
+    """
+    title = "Precio vs Midnight"
+
+    def evaluate(self, ctx: BiasContext) -> RuleVote:
+        return _level_vote(self, ctx, ctx.midnight, "el Midnight",
+                           "Aún no hay Midnight (antes de las 00:00 NY) o la skill Levels está apagada")
