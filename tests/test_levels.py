@@ -258,3 +258,41 @@ def test_el_registro_anota_el_cambio_de_dia_de_cada_grupo_de_activos(tmp_path, m
     text = win.log_view.toPlainText()
     assert "nuevo día de trading (MARTES) a las 17:00 NY - Forex, metales y resto" in text
     assert "nuevo día de trading (MARTES) a las 18:00 NY - índices USA" in text
+
+
+def test_el_boton_de_ajustes_de_la_sma_abre_su_ventana_y_aplica_los_cambios(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import envconfig, settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui import main_window
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    env_file = tmp_path / "tradingbot.env"
+    env_file.write_text("LEVELS_SMA_PERIOD=30\n", encoding="utf-8")
+    monkeypatch.setattr(envconfig, "ENV_FILE", env_file)
+    opened = []
+
+    class FakeDialog:
+        DialogCode = main_window.SmaDialog.DialogCode
+
+        def __init__(self, parent, period, color, style):
+            opened.append((period, color, style))
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def values(self):
+            return 12, "#112233", "discontinuo"
+
+    monkeypatch.setattr(main_window, "SmaDialog", FakeDialog)
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
+    bus, published = EventBus(), []
+    bus.subscribe("t", "levels.sma", published.append)
+    win = main_window.MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig(parse(""))), [{"type": "levels"}]), cfg, "t")
+    assert win.sma_cfg_btn.text() == "⚙" and win.sma_cfg_btn.isVisibleTo(win)
+    win.sma_cfg_btn.click()                                           # el botón de ajustes
+    assert opened == [(30, "#00ACC1", "normal")]
+    assert published[-1].payload == {"period": 12, "color": "#112233", "style": "discontinuo"}
+    win.sma_btn.customContextMenuRequested.emit(win.sma_btn.rect().center())   # y el clic derecho
+    assert opened[-1] == (12, "#112233", "discontinuo") and len(opened) == 2

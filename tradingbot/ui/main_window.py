@@ -214,6 +214,12 @@ class MainWindow(QMainWindow):
         self.sma_btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool("SHOW_SMA", False))
         self.sma_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.sma_btn.customContextMenuRequested.connect(lambda _pos: self.open_sma_config())
+        self.sma_cfg_btn = QPushButton("⚙")                  # abre la ventana de la SMA (periodos, color y trazo)
+        self.sma_cfg_btn.setProperty("chip", "true")
+        self.sma_cfg_btn.setFixedWidth(30)
+        self.sma_cfg_btn.setToolTip("Configurar la SMA: periodos, color de la línea y trazo")
+        self.sma_cfg_btn.setVisible(levels_skill is not None)
+        self.sma_cfg_btn.clicked.connect(self.open_sma_config)
         self._sma_cfg = (30, "#00ACC1", "normal")
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
@@ -255,7 +261,13 @@ class MainWindow(QMainWindow):
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
-        grid.addWidget(self.sma_btn, 0, 0)                   # a la izquierda de TDO (así el panel no crece en altura)
+        sma_cell = QWidget()
+        sma_row = QHBoxLayout(sma_cell)
+        sma_row.setContentsMargins(0, 0, 0, 0)
+        sma_row.setSpacing(4)
+        sma_row.addWidget(self.sma_btn, 1)
+        sma_row.addWidget(self.sma_cfg_btn)
+        grid.addWidget(sma_cell, 0, 0)                   # a la izquierda de TDO (así el panel no crece en altura)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
@@ -372,7 +384,7 @@ class MainWindow(QMainWindow):
     def _refresh_sma_tip(self) -> None:
         period, color, style = self._sma_cfg
         self.sma_btn.setToolTip(f"Media móvil simple de {period} periodos ({style}, {color}) sobre las velas del timeframe visible.\n"
-                                "Clic derecho para cambiar los periodos, el color y el trazo.")
+                                "Pulsa ⚙ (o clic derecho en el botón) para cambiar los periodos, el color y el trazo.")
 
     def open_sma_config(self) -> None:
         """Ventana de la SMA: periodos, color y trazo; se aplica al momento y se guarda en tradingbot.env."""
