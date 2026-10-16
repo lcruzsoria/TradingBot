@@ -309,7 +309,7 @@ class RulesList(QWidget):
                 widget.setParent(None)                     # sale ya de la interfaz; el borrado real llega después
                 widget.deleteLater()
 
-    def _line(self, mark: str, color: str, name: str, weight: float, tip: str, points: float | None = None) -> QWidget:
+    def _line(self, mark: str, color: str, name: str, weight: float, tip: str, points: float | None = None, vote: int = 0) -> QWidget:
         row = QWidget()
         row.setToolTip(tip)
         h = QHBoxLayout(row)
@@ -324,7 +324,7 @@ class RulesList(QWidget):
         value_label.setStyleSheet(f"color: {color}; font-weight: 700;")
         value_label.setMinimumWidth(26)
         value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        weight_label = QLabel(f"(peso +{weight:g})")
+        weight_label = QLabel(f"(peso {weight * vote:+g})" if vote else f"(peso {weight:g})")      # con el signo del voto
         weight_label.setObjectName("Muted")
         h.addWidget(mark_label)
         h.addWidget(name_label, 1)
@@ -339,9 +339,10 @@ class RulesList(QWidget):
             colors = {1: theme.BULL, -1: theme.BEAR, 0: theme.NEUTRAL}
             marks = {1: "▲", -1: "▼", 0: "–"}
             for vote in result.votes:
-                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points))
+                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points, vote.vote))
             tone = {Bias.BULLISH: theme.BULL, Bias.BEARISH: theme.BEAR}.get(result.bias, theme.MUTED)
-            total = QLabel(f"Puntuación {result.score:+g}  ·  mínimo {result.min_score:g}  ·  {result.bias.value}")
+            threshold = {Bias.BULLISH: f"+{result.min_score:g}", Bias.BEARISH: f"-{result.min_score:g}"}.get(result.bias, f"±{result.min_score:g}")
+            total = QLabel(f"Puntuación {result.score:+g}  ·  umbral {threshold}  ·  {result.bias.value}")
             total.setStyleSheet(f"color: {tone}; font-size: 11px;")
             total.setToolTip(result.summary)
             self._rows.addWidget(total)

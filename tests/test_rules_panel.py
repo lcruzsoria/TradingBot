@@ -42,15 +42,15 @@ def test_el_motor_cambia_reglas_y_pesos_en_caliente_y_conserva_parametros():
 def test_la_lista_muestra_una_linea_por_regla_con_su_peso(qapp):
     lista = RulesList()
     lista.set_rules([("Ruptura del día anterior", 2.0), ("Precio vs TDO", 1.0)])
-    assert "(peso +2)" in texts(lista) and "(peso +1)" in texts(lista) and "Ruptura del día anterior" in texts(lista)
+    assert "(peso 2)" in texts(lista) and "(peso 1)" in texts(lista) and "Ruptura del día anterior" in texts(lista)
     votes = (RuleVote("Ruptura del día anterior", 1, "Precio 1.123 sobre el máximo previo 1.100", 2.0),
              RuleVote("Precio vs TDO", -1, "Precio 1.123 bajo el TDO 1.130", 1.0))
     lista.set_result(BiasResult(Bias.BULLISH, None, votes, {}, "resumen", 1.0, 2.0))
     assert "+2" in texts(lista) and "-1" in texts(lista)          # valor actual de cada regla (voto x peso), antes del peso
-    assert texts(lista).index("+2") < texts(lista).index("(peso +2)")
+    assert texts(lista).index("+2") < texts(lista).index("(peso +2)") and "(peso -1)" in texts(lista)   # el peso lleva el signo del voto
     shown = texts(lista)
     assert not any("1.123" in t for t in shown)                       # los precios van en la ayuda emergente
-    assert any("Puntuación +1" in t and "mínimo 2" in t for t in shown)
+    assert any("Puntuación +1" in t and "umbral +2" in t for t in shown)
     # si las reglas activas cambian, el sesgo mostrado ya no vale y se vuelve a la lista de reglas
     lista.set_rules([("Precio vs Midnight", 1.0)])
     assert "Precio vs Midnight" in texts(lista) and not any("Puntuación" in t for t in texts(lista))
@@ -85,10 +85,10 @@ def test_el_enlace_voto_de_cada_regla_abre_el_editor_y_aplica_y_guarda(qapp, tmp
     bus = EventBus()
     win = MainWindow(bus, SkillManager(bus, Services(None, engine, cfg, EnvConfig()), []), cfg, "t")
     assert "Voto de cada regla" in win.rules_panel.note.text() and "href" in win.rules_panel.note.text()
-    assert [t for t in texts(win.rules_list) if t.startswith("(peso")] == ["(peso +2)", "(peso +1)"]
+    assert [t for t in texts(win.rules_list) if t.startswith("(peso")] == ["(peso 2)", "(peso 1)"]
     win._apply_rules([("tdo", 1.5), ("midnight", 1.0)], 2.5)
     assert [(r.key, r.weight) for r in engine.rules] == [("tdo", 1.5), ("midnight", 1.0)] and engine.min_score == 2.5
-    assert [t for t in texts(win.rules_list) if t.startswith("(peso")] == ["(peso +1.5)", "(peso +1)"]
+    assert [t for t in texts(win.rules_list) if t.startswith("(peso")] == ["(peso 1.5)", "(peso 1)"]
     saved = envconfig.parse(env_file.read_text(encoding="utf-8"))
     assert saved["BIAS_RULES"] == "tdo, midnight" and saved["BIAS_TDO_WEIGHT"] == "1.5"
     assert saved["BIAS_MIDNIGHT_WEIGHT"] == "1" and saved["BIAS_MIN_SCORE"] == "2.5"

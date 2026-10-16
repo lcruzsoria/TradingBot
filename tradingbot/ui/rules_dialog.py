@@ -73,7 +73,7 @@ class RulesDialog(QDialog):
         root.addLayout(grid)
 
         minimum = QHBoxLayout()
-        minimum.addWidget(QLabel("Puntuación mínima para tener sesgo"))
+        minimum.addWidget(QLabel("Umbral de puntuación para tener sesgo (±)"))
         self.min_spin = QDoubleSpinBox()
         self.min_spin.setRange(0.5, 20.0)
         self.min_spin.setSingleStep(0.5)
