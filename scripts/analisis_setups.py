@@ -296,6 +296,8 @@ def reversal_c(s, h, l, c, window):
         if ev["f"] is not None:
             f, entry, stop, tp = ev["f"], ev["low2"], top, bot - rng
             risk = stop - entry
+            # niveles en precios reales, para simular con spread (bid/ask) fuera del espejo
+            ev.update(e_real=flip * entry, s_real=flip * stop, t_real=flip * tp, bot_real=flip * bot, rng=rng)
             # orden límite (venta en el espejo): se llena al retestar el nivel; caduca si antes llega al objetivo
             last = min(n, f + 1 + window)
             m = None
@@ -312,6 +314,66 @@ def reversal_c(s, h, l, c, window):
                           stop=flip * stop, target=flip * tp, risk=risk, rng=rng)
         out.append(ev)
     return out
+
+
+def real_c_trade(h, l, c, sp, ev, window):
+    """Reversión C simulada en precios reales con el spread de cada vela, o None si no hay operación.
+
+    Las velas son bid. Venta límite (corto): se llena cuando el bid llega a la entrada; compra límite (largo): cuando el ask
+    (bid + spread) baja hasta ella. Stop y objetivo se activan por el lado que corresponde (ver sim_from_fill). El riesgo (1R)
+    incluye el spread. La orden caduca si antes de llenarse llega al objetivo o pasa la ventana.
+    """
+    d = -ev["flip"]
+    f, entry, stop, tp = ev["f"], ev["e_real"], ev["s_real"], ev["t_real"]
+    if (entry - stop) * d <= 0:
+        return None
+    n = len(h)
+    m = None
+    for q in range(f + 1, min(n, f + 1 + window)):
+        if d < 0:
+            touched, hit_tp = h[q] >= entry, l[q] + sp[q] <= tp
+        else:
+            touched, hit_tp = l[q] + sp[q] <= entry, h[q] >= tp
+        if touched:
+            m = q
+            break
+        if hit_tp:
+            return None
+    if m is None:
+        return None
+    cost = float(sp[m])
+    e_sim = entry if d < 0 else entry - cost                 # la compra límite se paga al ask: entrada efectiva = entry
+    status, end_x, r, mae, mfe = sim_from_fill(h, l, c, m, e_sim, stop, tp, d, 2 * window, cost)
+    free = sim_from_fill(h, l, c, m, entry, stop, tp, d, 2 * window)
+    r_low = sim_from_fill(h, l, c, m, e_sim, stop, ev["bot_real"], d, 2 * window, cost)[2]
+    risk = (e_sim + cost - stop) if d > 0 else (stop - e_sim)
+    return dict(m=m, status=status, end_x=end_x, r=r, mae=mae, mfe=mfe, r_low=r_low, entry=entry, stop=stop, target=tp,
+                risk=risk, rng=ev["rng"], cost=cost, r_free=free[2] if free[0] != "abierta" else np.nan)
+
+
+def c_row(sym, s, ev, b, d, ny, bias):
+    """Fila de la hoja Operaciones para la reversión C (b: resultado de la simulación; sin spread si no tiene 'cost')."""
+    cost = b.get("cost", 0.0)
+    row = {
+        "mercado": sym, "tipo": "Reversión C", "TBR": s.zone.name, "día TBR": pd.Timestamp(s.day),
+        "dirección": "long" if d > 0 else "short", "estado setup": b["status"] if b["status"] != "abierta" else "filled",
+        "High": s.high, "50 %": (s.high + s.low) / 2, "Low": s.low, "rango": b["rng"],
+        "rango % precio": 100 * b["rng"] / s.high, "hora toma (NY)": ny(ev["i"]), "hora retest (NY)": ny(ev["j"]),
+        "hora 2ª ruptura (NY)": ny(ev["f"]), "fecha_entrada": ny(b["m"]), "hora entrada (NY)": ny(b["m"]).hour,
+        "día semana": DAYS[ny(b["m"]).weekday()], "hora salida (NY)": ny(b["end_x"]),
+        "entrada": b["entry"], "stop": b["stop"], "objetivo": b["target"], "riesgo": b["risk"],
+        "riesgo / rango": b["risk"] / b["rng"], "R potencial": abs(b["target"] - b["entry"]) / b["risk"],
+        "velas hasta llenar": b["m"] - ev["f"], "velas en operación": b["end_x"] - b["m"],
+        "resultado": b["status"], "R": b["r"] if b["status"] != "abierta" else np.nan,
+        "R abierta (a mercado)": b["r"] if b["status"] == "abierta" else np.nan,
+        "MAE (R)": b["mae"] / b["risk"], "MFE (R)": b["mfe"] / b["risk"],
+        "MAE (rangos)": b["mae"] / b["rng"], "MFE (rangos)": b["mfe"] / b["rng"],
+        **bias_columns(bias, ev["f"], d),
+        "spread (precio)": cost, "spread en R": cost / b["risk"],
+        "R con objetivo en el Low/High opuesto": round(b["r_low"], 2)}
+    if "cost" in b:
+        row["R sin spread"] = round(b["r_free"], 2) if b["r_free"] == b["r_free"] else np.nan
+    return row
 
 
 # -- estadísticas -------------------------------------------------------------------------------------
@@ -359,7 +421,7 @@ def main() -> None:
     zones = zones_from_settings(EnvConfig().section("TBR"))
     trades = {v.clave: [] for v in versiones}
     missed = {v.clave: [] for v in versiones}
-    c_trades, events, meta = [], [], []
+    c_trades, c_trades_sp, events, meta = [], [], [], []
     for want in args.simbolos:
         sym = source.resolve_symbol(want)
         if not sym:
@@ -404,33 +466,24 @@ def main() -> None:
                 events.append({"mercado": sym, "TBR": s.zone.name, "lado de la toma": "High" if direction == 1 else "Low",
                                "retest del 50 %": ev["j"] is not None, "siguiente": ev["siguiente"]})
                 if "r" not in ev:
+                    if ev["f"] is not None:
+                        real = real_c_trade(h, l, c, spread, ev, WINDOW)
+                        if real is not None:
+                            c_trades_sp.append(c_row(sym, s, ev, real, -direction, ny, bias))
                     continue
                 d = -direction
-                c_trades.append({
-                    "mercado": sym, "tipo": "Reversión C", "TBR": s.zone.name, "día TBR": pd.Timestamp(s.day),
-                    "dirección": "long" if d > 0 else "short", "estado setup": ev["status"] if ev["status"] != "abierta" else "filled",
-                    "High": s.high, "50 %": (s.high + s.low) / 2, "Low": s.low, "rango": ev["rng"],
-                    "rango % precio": 100 * ev["rng"] / s.high, "hora toma (NY)": ny(ev["i"]), "hora retest (NY)": ny(ev["j"]),
-                    "hora 2ª ruptura (NY)": ny(ev["f"]), "fecha_entrada": ny(ev["m"]), "hora entrada (NY)": ny(ev["m"]).hour,
-                    "día semana": DAYS[ny(ev["m"]).weekday()], "hora salida (NY)": ny(ev["end_x"]),
-                    "entrada": ev["entry"], "stop": ev["stop"], "objetivo": ev["target"], "riesgo": ev["risk"],
-                    "riesgo / rango": ev["risk"] / ev["rng"], "R potencial": abs(ev["target"] - ev["entry"]) / ev["risk"],
-                    "velas hasta llenar": ev["m"] - ev["f"], "velas en operación": ev["end_x"] - ev["m"],
-                    "resultado": ev["status"], "R": ev["r"] if ev["status"] != "abierta" else np.nan,
-                    "R abierta (a mercado)": ev["r"] if ev["status"] == "abierta" else np.nan,
-                    "MAE (R)": ev["mae"] / ev["risk"], "MFE (R)": ev["mfe"] / ev["risk"],
-                    "MAE (rangos)": ev["mae"] / ev["rng"], "MFE (rangos)": ev["mfe"] / ev["rng"],
-                    **bias_columns(bias, ev["f"], d),
-                    "spread (precio)": float(spread[ev["m"]]), "spread en R": float(spread[ev["m"]]) / ev["risk"],
-                    "R con spread (aprox.)": (ev["r"] - float(spread[ev["m"]]) / ev["risk"]) if ev["status"] != "abierta" else np.nan,
-                    "R con objetivo en el Low/High opuesto": round(ev["r_low"], 2)})
+                c_trades.append(c_row(sym, s, ev, ev, d, ny, bias))                 # v1-v5: sin costes
+                if ev["f"] is not None:
+                    real = real_c_trade(h, l, c, spread, ev, WINDOW)                # v6 en adelante: spread real
+                    if real is not None:
+                        c_trades_sp.append(c_row(sym, s, ev, real, d, ny, bias))
     source.close()
 
     meta_df, E = pd.DataFrame(meta), pd.DataFrame(events)
-    C = pd.DataFrame(c_trades)
+    C, C_sp = pd.DataFrame(c_trades), pd.DataFrame(c_trades_sp)
     results = {}
     for var in versiones:
-        T = pd.concat([pd.DataFrame(trades[var.clave]), C], ignore_index=True).sort_values("fecha_entrada").reset_index(drop=True)
+        T = pd.concat([pd.DataFrame(trades[var.clave]), C_sp if var.spread else C], ignore_index=True).sort_values("fecha_entrada").reset_index(drop=True)
         T.insert(0, "id", np.arange(1, len(T) + 1))
         results[var.clave] = (T, T[T["resultado"].isin(["target", "stop"])], pd.DataFrame(missed[var.clave]))
 
@@ -446,6 +499,18 @@ def main() -> None:
         for key, g in cont.groupby("sesgo"):
             comp_bias.append({"versión": var.clave, "sesgo": key, **{k: v for k, v in stats(g["R"]).items()
                                                                      if k in ("operaciones", "win rate %", "R medio", "R total")}})
+    comp_c = []
+    for var in versiones:
+        _, done_v, _ = results[var.clave]
+        c_part = done_v[done_v["tipo"] == "Reversión C"].sort_values("fecha_entrada")
+        for label, sub in (("sin filtro", c_part), ("solo a favor del sesgo", c_part[c_part["sesgo"] == "a favor del sesgo"]),
+                           ("a favor o sin sesgo", c_part[c_part["sesgo"] != "contra el sesgo"])):
+            if len(sub):
+                comp_c.append({"versión": var.clave, "spread": "real" if var.spread else "sin costes", "filtro de sesgo": label,
+                               **{k: v for k, v in stats(sub["R"]).items()
+                                  if k in ("operaciones", "win rate %", "R medio", "R total", "profit factor", "max drawdown (R)",
+                                           "estadístico t")}})
+    comp_c = pd.DataFrame(comp_c)
     comp = pd.DataFrame(comp_rows)
     comp.insert(3, "dif. R medio vs anterior", comp["R medio"].diff().round(3))
     comp_tbr = pd.DataFrame(comp_tbr).pivot_table(index="TBR", columns="versión", values="R medio").round(3).reset_index()
@@ -461,14 +526,14 @@ def main() -> None:
     for var in versiones:
         T, done, M = results[var.clave]
         path = out / f"analisis_setups_{var.clave}.xlsx"
-        write_excel(path, T, done, M, E, meta_df, var, comp, comp_tbr, comp_bias, cambios)
+        write_excel(path, T, done, M, E, meta_df, var, comp, comp_tbr, comp_bias, cambios, comp_c)
         print("Excel:", path, f"({len(T)} operaciones, {len(M)} setups sin entrar)")
     print()
     print(comp.drop(columns=["ganadoras", "perdedoras", "R medio ganadora", "R medio perdedora", "mejor R", "peor R"]).to_string(index=False))
 
 
 # -- Excel --------------------------------------------------------------------------------------------
-def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambios) -> None:
+def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambios, comp_c) -> None:
     from openpyxl.chart import LineChart, Reference
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -504,9 +569,6 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
                 sub = part if allowed is None else part[part[col].isin(allowed)]
                 if len(sub):
                     bias_rows.append({"tipo": kind, "reglas del sesgo": rules, "filtro": label, **stats(sub["R"])})
-                    if kind == "Reversión C":      # la reversión se simula sin spread: estimación de primer orden (R - spread/riesgo)
-                        bias_rows.append({"tipo": kind + " con spread (aprox.)", "reglas del sesgo": rules, "filtro": label,
-                                          **stats(sub["R con spread (aprox.)"])})
     bias_value = pd.DataFrame(bias_rows)
     rule_rows = []
     for kind in kinds:
@@ -592,8 +654,9 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
         ["Versión", f"{var.clave}: {var.nombre}. {var.cambio}"],
         ["Continuación", "Toma del High/Low de la TBR, retest del 50 %, 2ª ruptura. Entrada y stop según la versión (hoja 'Cambios'); "
                          "objetivo en el nivel -1 (1 rango más allá del nivel roto)."],
-        ["Spread en la reversión C", "La reversión C se simula sin spread; la fila 'Reversión C con spread (aprox.)' de la hoja 'Aportación "
-                                     "del Bias' le resta el spread/riesgo de cada operación (aproximación de primer orden, no una simulación completa)."],
+        ["Spread en la reversión C", "En v1-v5 la reversión C se simula sin costes (como la continuación). Desde v6 se simula en precios "
+                                     "reales con el spread de cada vela: la venta límite se llena con el bid, la compra límite con el ask, y el stop "
+                                     "y el objetivo se activan por el lado correspondiente. El riesgo (1R) incluye el spread."],
         ["Reversión C", "Tras la toma y el retest del 50 %, cierre bajo el mínimo del retest sin 2ª ruptura; orden límite en ese "
                         "mínimo, stop en el High tomado, objetivo en el nivel -1 por el lado contrario. Es una propuesta: aún no está en la skill."],
         ["Supuestos", "Sin spread ni comisiones. Si en una vela caben stop y objetivo, cuenta el stop (pesimista). Ventana de "
@@ -611,7 +674,7 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         sheets = [("Cambios", cambios), ("Comparativa", comp), ("Comparativa por TBR", comp_tbr),
-                  ("Comparativa por sesgo", comp_bias), ("Costes del spread", costs), ("Aportación del Bias", bias_value),
+                  ("Comparativa por sesgo", comp_bias), ("Comparativa reversión C", comp_c), ("Costes del spread", costs), ("Aportación del Bias", bias_value),
                   ("Aportación por regla", by_rule), ("Distribución del sesgo", dist), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
                   ("Por mercado", by_sym), ("Por dirección", by_dir), ("Por sesgo", by_bias), ("Por hora entrada NY", by_hour),
                   ("Por día de la semana", by_dow), ("Por rango", by_range), ("Por riesgo-rango", by_risk),

@@ -166,23 +166,39 @@ spread: el spread medio es el 8,4 % del riesgo de la operación.
 El **Midnight es la regla más informativa**: con la operación contra el Midnight la continuación pierde −0,154R; el TDO le sigue.
 La ruptura del día anterior discrimina menos, aunque apenas da casos (el precio rara vez está fuera del rango previo).
 
-**Reversión C** (propuesta; ver arriba), con las reglas nuevas del sesgo. La simulación no incluye spread: la fila «con spread
-(aprox.)» resta a cada operación su spread/riesgo (el spread medio es 0,056R; es una estimación de primer orden):
+## Reversión C con spread real (cambio de metodología)
 
-| Filtro | Operaciones | R medio sin spread | R medio con spread (aprox.) | t (con spread) |
-|---|---:|---:|---:|---:|
-| Sin filtro | 8.051 | +0,015 | −0,041 | −2,4 |
-| **Solo a favor del sesgo** | 4.105 | **+0,058** (t 2,4, PF 1,09) | **+0,009** (PF 1,01) | 0,4 |
-| A favor o sin sesgo | 6.896 | +0,023 | −0,034 | −1,8 |
-| Solo contra el sesgo | 1.155 | −0,032 | −0,084 | −1,9 |
+**Cambio.** Hasta ahora la reversión C se simulaba **sin costes** (v1–v5) y en la versión anterior de este documento se le restó
+el spread de forma aproximada. Desde esta iteración, en v6–v8 se simula **en precios reales con el spread de cada vela**: la venta
+límite se llena con el bid y la compra límite con el ask; el stop y el objetivo se activan por el lado que corresponde (en un corto,
+por el ask) y el riesgo (1R) incluye el spread. La orden caduca si antes de llenarse el precio llega al objetivo o pasa la
+ventana de 24 h. La comparación de ambas simulaciones está en la hoja «Comparativa reversión C».
 
-- Sin costes, la reversión a favor del sesgo da la primera señal con t > 2 de todo el análisis (+0,058R, PF 1,09, drawdown −69R).
-- **Con el spread, queda en el punto de equilibrio** (+0,009R): +0,037R en la primera mitad del histórico y −0,020R en la segunda,
-  y por años oscila entre −0,034 y +0,060. No es una ventaja explotable todavía.
-- El Midnight también es la regla que más ayuda aquí: con el Midnight a favor la reversión da +0,046R (t 2,1) y con él en contra
-  −0,046R.
-- Por mercados (con spread, a favor del sesgo): XAUUSD +0,111, NAS100.r +0,056, DJ30.r +0,029, SP500.r +0,028; GBPUSD −0,109 y
-  EURUSD −0,081. Mismo patrón que en la continuación: los mercados de menor spread relativo aguantan mejor.
+**Por qué.** La aproximación (R − spread/riesgo) no capta que el spread cambia qué órdenes se llenan y cuándo saltan stop y
+objetivo. Había que comprobar si el +0,058R de la reversión a favor del sesgo sobrevivía a los costes.
+
+**Resultado** (reglas actuales del sesgo):
+
+| Filtro | Operaciones | R medio sin costes (v5) | **R medio con spread real (v6)** | Profit factor | Máx. drawdown | t |
+|---|---:|---:|---:|---:|---:|---:|
+| Sin filtro | 7.979 | +0,015 | **−0,033** | 0,95 | −338R | −1,9 |
+| **Solo a favor del sesgo** | 4.062 | **+0,058** | **+0,007** | 1,01 | −107R | 0,3 |
+| A favor o sin sesgo | 6.833 | +0,023 | −0,024 | 0,97 | −284R | −1,3 |
+
+- **Con el spread real, la reversión a favor del sesgo queda en el punto de equilibrio** (+0,007R, t = 0,3): la ventaja de +0,058R
+  desaparece. La aproximación anterior (+0,009R) era buena.
+- **No es estable en el tiempo:** +0,038R en la primera mitad del histórico y −0,025R en la segunda; por años, de −0,038 (2022) a
+  +0,069 (2023), −0,024 (2025) y −0,008 (2026).
+- **Por mercado (a favor del sesgo, con spread):** XAUUSD +0,117, NAS100.r +0,042, SP500.r +0,034, DJ30.r +0,028; EURUSD −0,109 y
+  GBPUSD −0,093. Es el mismo patrón que en la continuación: los mercados cuyo spread pesa menos frente al rango aguantan, los
+  del forex no.
+- **Por TBR:** Asia +0,029, NY-PM +0,018, NY-AM +0,014; London −0,018 y Pre-NY −0,019.
+- **Por dirección:** largos +0,022 y cortos −0,012.
+- El spread medio de la reversión es 0,056R de su riesgo. Es menor que en la continuación (0,084R) porque el stop de la reversión
+  (el High tomado) está más lejos.
+- **Una pista a verificar:** las operaciones con spread medio (entre el 2 % y el 6 % del riesgo) rinden +0,07 a +0,09R (n ≈ 2.030),
+  mientras que las de spread muy pequeño (rangos muy grandes) y las de spread alto (rangos pequeños) pierden −0,06 a −0,08R. Es un
+  cruce entre muchos y no se debe usar como regla sin confirmarlo con datos nuevos.
 
 ## Qué dicen los datos hasta ahora
 
@@ -196,7 +212,8 @@ La ruptura del día anterior discrimina menos, aunque apenas da casos (el precio
 5. **El Bias con TDO y Midnight sí aporta como filtro:** sube la continuación de −0,046R a −0,001R y recorta el drawdown a un
    tercio. El **Midnight** es la regla más informativa, seguido del TDO. Pero el mejor resultado es el equilibrio: el Bias evita
    perder, no crea ventaja por sí solo.
-6. **La reversión C a favor del sesgo es lo más prometedor** (+0,058R sin costes, t = 2,4), pero con el spread queda en +0,009R.
+6. **La reversión C a favor del sesgo era lo más prometedor** (+0,058R sin costes, t = 2,4), pero con el spread real queda en
+   **+0,007R** (t = 0,3): equilibrio, y con una mitad del histórico positiva y la otra negativa.
 7. Solo sobreviven bolsillos pequeños (DJ30.r, XAUUSD, NAS100.r, Pre-NY, largos), y mantenerlos sin datos fuera de muestra sería
    sobreajuste.
 
@@ -205,7 +222,7 @@ La ruptura del día anterior discrimina menos, aunque apenas da casos (el precio
 - **v7: filtro de coste.** Operar solo si el spread es menor que cierto porcentaje del riesgo (p. ej. 8 %): descarta los rangos
   pequeños donde el spread domina. Se mide con el spread de cada vela, sin mirar al futuro. Hay que confirmarlo en las dos mitades.
 - **Rangos más grandes o más tiempo:** probar TBR agrupadas o velas de mayor tamaño (M30/H1) para que el spread pese menos.
-- Simular la **reversión C con spread real** (hoy es una aproximación) y con el filtro de rango y las mejoras de la continuación.
+- Aplicar a la **reversión C** las mejoras de la continuación (filtro de rango y de coste) ahora que se simula con spread real.
 - **Más reglas para el Bias**, probadas una a una como se ha hecho con TDO y Midnight (p. ej. dónde cerró la sesión asiática o
   londinense respecto a su TBR, o la dirección de la última TBR cerrada). El Midnight ha sido la más informativa: otras reglas de
   tiempo y apertura podrían serlo también.
