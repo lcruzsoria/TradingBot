@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ...clock import NY
+from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
+from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_sweep
 from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
@@ -17,7 +18,7 @@ class BiasSkill(Skill):
     description = ("Evalúa las reglas del sesgo (voto x peso) y decide Bullish, Bearish o No Bias. Lo recalcula cada "
                    "3 h en los índices americanos y cada 4 h en el resto, y decide si cada setup detectado se puede "
                    "ejecutar (GO / NO GO) y por qué.")
-    subscribes = ("candles.loaded", "bias.recalc", "levels.updated", "setup.updated")
+    subscribes = ("candles.loaded", "bias.recalc", "levels.updated", "setup.updated", "clock.offset")
     publishes = ("bias.updated", "bias.schedule", "bias.execution", "feed.refresh")
     slot = 1
     interval = CHECK_SECONDS
@@ -31,6 +32,7 @@ class BiasSkill(Skill):
         self._plan: tuple | None = None          # (símbolo, timeframe, inicio del día, horas, índice USA)
         self._levels: dict | None = None         # último levels.updated (TDO y Midnight para las reglas)
         self._eval_levels: dict = {}             # niveles con los que se calculó el sesgo vigente
+        self._offset: int | None = None          # desfase del servidor (clock.offset), para formar las velas H3 / H4
         self._reason = "carga de velas"
         # tradingbot.env, bloque BIAS
         self.index_hours = self.settings.get_float("RECALC_INDEX_HOURS", DEFAULT_INDEX_HOURS)
@@ -38,6 +40,11 @@ class BiasSkill(Skill):
         for key, value in (("RECALC_INDEX_HOURS", self.index_hours), ("RECALC_HOURS", self.hours)):
             if value < 0:
                 raise ValueError(f"BIAS_{key}={value:g} debe ser 0 (sin recálculo) o más.")
+        self.sweep_index_hours = self.settings.get_int("HTF_SWEEP_INDEX_HOURS", DEFAULT_SWEEP_INDEX_HOURS)
+        self.sweep_hours = self.settings.get_int("HTF_SWEEP_HOURS", DEFAULT_SWEEP_HOURS)
+        for key, value in (("HTF_SWEEP_INDEX_HOURS", self.sweep_index_hours), ("HTF_SWEEP_HOURS", self.sweep_hours)):
+            if value < 1:
+                raise ValueError(f"BIAS_{key}={value} debe ser 1 o más.")
         self.gate = ExecutionGate(self.settings.get_bool("EXEC_ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS),
                                   self.settings.get_bool("EXEC_PREMIUM_DISCOUNT", DEFAULT_PREMIUM_DISCOUNT))
 
@@ -50,7 +57,14 @@ class BiasSkill(Skill):
             if self._last is None or self._day_levels() == self._eval_levels:
                 return
             self._reason = "niveles del día (TDO / Midnight)"     # han cambiado: hay que recalcular con ellos
-        if topic == "setup.updated":
+        if topic == "clock.offset":
+            if p.get("server_offset") == self._offset:
+                return
+            self._offset = p.get("server_offset")
+            if self._last is None:
+                return
+            self._reason = "desfase del servidor"                # las velas H3 / H4 dependen de la hora de NY
+        elif topic == "setup.updated":
             self._setup = p
             self._execution()
             return
@@ -73,13 +87,23 @@ class BiasSkill(Skill):
         if self._last is None:
             return
         self._eval_levels = self._day_levels()
-        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels)
+        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels, htf=self._htf())
         self.result_symbol = self._last["symbol"]
         self.set_caption(self.result.bias.value)
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
         self._execution()
+
+    def _htf(self):
+        """Barrido de la vela anterior (H3 en índices, H4 en el resto) con las velas del gráfico; None si la regla no está activa."""
+        if not any(getattr(r, "key", "") == "htf_sweep" for r in getattr(self.services.engine, "rules", [])):
+            return None
+        c = self._last
+        index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
+        start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
+        ahead, _ = server_minus_ny(self._offset)
+        return htf_sweep(c["df"], ahead, start, self.sweep_index_hours if index else self.sweep_hours, minutes(c["timeframe"]))
 
     def _day_levels(self) -> dict:
         """TDO y Midnight del día en curso, de la skill Levels, si corresponden a las velas con las que se evalúa."""

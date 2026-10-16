@@ -176,3 +176,86 @@ def test_la_skill_bias_recalcula_cuando_llegan_los_niveles_del_dia():
     # el TDO de hoy es el último (1,05); el Midnight válido es el posterior a él: ninguno (el de x0=12 es de ayer)
     assert votes[1].vote == 1 and "1.05" in votes[1].detail
     assert votes[2].vote == 0 and "Aún no hay Midnight" in votes[2].detail
+
+
+# -- barrido de la vela anterior (H3 / H4) ------------------------------------------------------------------------
+from tradingbot.skills.bias.htf import htf_blocks, htf_sweep, sweep_vote      # noqa: E402
+from tradingbot.skills.bias.rules import HtfSweepRule                         # noqa: E402
+
+AHEAD_H = 7 * 3600
+NY_START = int(pd.Timestamp("2026-10-06 17:00").timestamp())                  # 17:00 NY (como época ingenua)
+
+
+def htf_frame(blocks, hours=4, tf_min=15):
+    """Velas M15 de bloques de `hours` horas desde las 17:00 NY; cada bloque = (high, low, close): high y low en la primera
+    y la segunda vela, y el cierre en la última."""
+    rows, n = [], hours * 60 // tf_min
+    for b, (hi, lo, cl) in enumerate(blocks):
+        for i in range(n):
+            ts = NY_START + b * hours * 3600 + i * tf_min * 60 + AHEAD_H
+            h = hi if i == 0 else lo + 0.5 if i == 1 else cl
+            l = lo if i == 1 else hi - 0.5 if i == 0 else cl
+            rows.append((ts, cl, max(h, cl), min(l, cl), cl))
+    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])
+
+
+def test_voto_de_barrido_de_la_vela_anterior():
+    assert sweep_vote(105, 95, 107, 98, 101)[0] == -1       # barre el High y cierra dentro: bajista
+    assert sweep_vote(105, 95, 102, 93, 99)[0] == 1         # barre el Low y cierra dentro: alcista
+    assert sweep_vote(105, 95, 107, 98, 106)[0] == 0        # barre el High pero cierra fuera: ruptura
+    assert sweep_vote(105, 95, 102, 93, 94)[0] == 0         # barre el Low pero cierra fuera
+    assert sweep_vote(105, 95, 107, 93, 100)[0] == 0        # barre los dos lados
+    assert sweep_vote(105, 95, 104, 96, 100)[0] == 0        # no barre ninguno
+    assert sweep_vote(105, 95, 107, 98, 105)[0] == -1       # cerrar justo en el High anterior cuenta como dentro
+
+
+def test_el_sesgo_de_la_vela_actual_usa_la_n1_y_la_n2():
+    # n-2: 95-105; n-1: barre el High (107) y cierra en 101; vela 0 (en curso): da igual lo que haga
+    df = htf_frame([(105, 95, 100), (107, 98, 101), (120, 80, 110)])
+    r = htf_sweep(df, AHEAD_H, 17 * 60, 4, 15)
+    assert r.vote == -1 and "bajista" in r.detail and "21:00" in r.detail and "17:00" in r.detail
+    alcista = htf_sweep(htf_frame([(105, 95, 100), (102, 93, 99), (110, 90, 100)]), AHEAD_H, 17 * 60, 4, 15)
+    assert alcista.vote == 1 and "alcista" in alcista.detail
+    # la vela en curso no cuenta: con solo dos velas no hay sesgo aunque la segunda barra el High
+    assert htf_sweep(htf_frame([(105, 95, 100), (107, 98, 101)]), AHEAD_H, 17 * 60, 4, 15).vote == 0
+
+
+def test_velas_h3_en_indices_alineadas_con_las_18_ny():
+    t0, hi, lo, cl = htf_blocks(htf_frame([(105, 95, 100), (107, 98, 101)], hours=3)["ts"].to_numpy(),
+                                [1] * 24, [1] * 24, [1] * 24, AHEAD_H, 18 * 60, 3)
+    # los datos empiezan a las 17:00 NY: el primer bloque H3 es el de las 15:00 (parcial) y los siguientes empiezan a las 18:00
+    assert [pd.Timestamp(int(x), unit="s").strftime("%H:%M") for x in t0] == ["15:00", "18:00", "21:00"][:len(t0)]
+
+
+def test_el_timeframe_del_grafico_mayor_que_el_bloque_no_vota():
+    df = htf_frame([(105, 95, 100), (107, 98, 101), (110, 90, 100)], hours=4, tf_min=60)
+    assert htf_sweep(df, AHEAD_H, 17 * 60, 3, 240).vote == 0
+
+
+def test_regla_htf_sweep_vota_y_el_sesgo_la_usa():
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)
+    bajista = BiasEngine([HtfSweepRule()]).evaluate(candles, htf=htf_sweep(
+        htf_frame([(105, 95, 100), (107, 98, 101), (110, 90, 100)]), AHEAD_H, 17 * 60, 4, 15))
+    assert bajista.votes[0].vote == -1 and bajista.votes[0].weight == 2 and bajista.bias is Bias.BEARISH
+    sin = BiasEngine([HtfSweepRule()]).evaluate(candles)
+    assert sin.votes[0].vote == 0 and sin.bias is Bias.NO_BIAS
+
+
+def test_la_skill_bias_evalua_el_barrido_de_la_vela_anterior():
+    import time
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    import tradingbot.skills  # noqa: F401
+    bus, events = EventBus(), []
+    bus.subscribe("t", "bias.updated", events.append)
+    manager = SkillManager(bus, Services(None, BiasEngine([HtfSweepRule()]), {"app": {}}, EnvConfig()), [{"type": "bias"}])
+    manager.start()
+    df = htf_frame([(105, 95, 100), (107, 98, 101), (110, 90, 100)])
+    df["time"], df["tick_volume"] = pd.to_datetime(df["ts"], unit="s"), 1
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")   # no es índice: H4
+    deadline = time.time() + 3
+    while not events and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    result = events[-1].payload["result"]
+    assert result.votes[0].vote == -1 and result.bias is Bias.BEARISH and "H4" in result.votes[0].detail

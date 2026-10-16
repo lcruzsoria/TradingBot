@@ -52,7 +52,7 @@ class BiasRule(ABC):
 
 @register_rule("prev_day_break")
 class PrevDayBreak(BiasRule):
-    """EJEMPLO: el precio está fuera del rango del día anterior.
+    """Ruptura del día anterior: el precio está fuera del rango del día previo.
 
     Por encima del máximo previo -> alcista; por debajo del mínimo previo -> bajista.
     """
@@ -72,7 +72,7 @@ class PrevDayBreak(BiasRule):
 
 @register_rule("above_below_open")
 class AboveBelowOpen(BiasRule):
-    """EJEMPLO: el precio está por encima o por debajo de la apertura del día.
+    """Apertura del día (por fecha del servidor): el precio está por encima o por debajo de ella.
 
     Parámetro opcional: tolerance_pct (zona neutra alrededor de la apertura, en %).
     """
@@ -129,3 +129,21 @@ class AboveBelowMidnight(BiasRule):
     def evaluate(self, ctx: BiasContext) -> RuleVote:
         return _level_vote(self, ctx, ctx.midnight, "el Midnight",
                            "Aún no hay Midnight (antes de las 00:00 NY) o la skill Levels está apagada")
+
+
+@register_rule("htf_sweep")
+class HtfSweepRule(BiasRule):
+    """Barrido de la vela anterior: el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores.
+
+    Si la vela n-1 barrió el High de la n-2 y cerró dentro de su rango -> bajista; si barrió el Low y cerró dentro -> alcista.
+    Barrer los dos lados, cerrar fuera o no barrer no puntúa. La vela actual (0) no interviene. Ver bias/htf.py.
+    Parámetros: BIAS_HTF_SWEEP_INDEX_HOURS (3) y BIAS_HTF_SWEEP_HOURS (4): tamaño de las velas en índices / resto.
+    """
+    title = "Barrido de la vela anterior"
+    weight = 2.0
+
+    def evaluate(self, ctx: BiasContext) -> RuleVote:
+        htf = ctx.htf
+        if htf is None:
+            return self.vote(0, "Sin velas H3 / H4 para evaluar el barrido")
+        return self.vote(htf.vote, htf.detail)

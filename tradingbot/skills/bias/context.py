@@ -14,6 +14,7 @@ class BiasContext:
     today: pd.DataFrame            # velas de ese día
     prev: pd.DataFrame | None      # velas del día de trading anterior (si existe)
     levels: dict[str, float] = field(default_factory=dict)   # niveles del día que calcula la skill Levels: "tdo", "midnight"
+    htf: object | None = None      # barrido de la vela anterior en H3 / H4 (tradingbot.skills.bias.htf.HtfSweep)
 
     @property
     def tdo(self) -> float | None:
@@ -46,7 +47,8 @@ class BiasContext:
         return float(self.prev["close"].iloc[-1]) if self.prev is not None and len(self.prev) else None
 
 
-def build_context(candles: pd.DataFrame, day: date | None = None, levels: dict | None = None) -> BiasContext | None:
+def build_context(candles: pd.DataFrame, day: date | None = None, levels: dict | None = None,
+                  htf: object | None = None) -> BiasContext | None:
     """Construye el contexto del día indicado (por defecto, el de la última vela)."""
     if candles is None or len(candles) == 0:
         return None
@@ -58,4 +60,4 @@ def build_context(candles: pd.DataFrame, day: date | None = None, levels: dict |
     today = window[dates == day]
     earlier = sorted(d for d in dates.unique() if d < day)
     prev = window[dates == earlier[-1]] if earlier else None
-    return BiasContext(candles=candles, day=day, today=today, prev=prev, levels=dict(levels or {}))
+    return BiasContext(candles=candles, day=day, today=today, prev=prev, levels=dict(levels or {}), htf=htf)

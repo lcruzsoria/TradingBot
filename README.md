@@ -229,6 +229,7 @@ Reglas incluidas (cada una vota +1, -1 o 0 y tiene su peso `BIAS_<REGLA>_WEIGHT`
 | `tdo` | 1 | +1 sobre el **TDO** (True Day Open: apertura del día de trading, 18:00 NY en índices americanos y 17:00 en el resto), -1 bajo él. |
 | `midnight` | 1 | +1 sobre la apertura de las **00:00 de Nueva York**, -1 bajo ella. No vota hasta que existe esa vela. |
 | `above_below_open` | 1 | Apertura del día por fecha del servidor. La sustituye `tdo`: no las actives juntas (contaría doble). |
+| `htf_sweep` | 2 | **Barrido de la vela anterior** (opcional, aún por medir): el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores ya cerradas, la n-1 y la n-2. Si la n-1 barre el High de la n-2 y cierra dentro de su rango: -1 (bajista); si barre el Low y cierra dentro: +1 (alcista). Barrer los dos lados, cerrar fuera o no barrer ninguno no puntúa. Las velas se alinean con el inicio del día de trading en NY (18:00 índices, 17:00 resto); tamaño con `BIAS_HTF_SWEEP_INDEX_HOURS` / `BIAS_HTF_SWEEP_HOURS`. |
 
 `tdo` y `midnight` usan los niveles de la skill Levels (si está apagada o el timeframe es grande, votan 0). Con `BIAS_MIN_SCORE=2`,
 `prev_day_break` por sí sola basta para tener sesgo, y TDO y Midnight juntos en el mismo sentido también; si apuntan a lados
@@ -236,6 +237,15 @@ opuestos se anulan. El sesgo se recalcula también cuando cambian el TDO o el Mi
 
 El día se determina con la hora del servidor del broker (la que muestra MT5), que puede no coincidir con tu hora local.
 El sesgo se calcula al cargar velas y al pulsar *Recalcular sesgo*.
+
+### Panel «Reglas del sesgo»
+
+Muestra una línea por cada regla activa: su voto (▲ alcista, ▼ bajista, – sin voto), su nombre y su peso (`×2`), y debajo la
+puntuación total frente al mínimo. Los precios y el motivo de cada voto salen en la ayuda emergente al pasar el ratón.
+
+El texto **Voto de cada regla** (arriba a la derecha del panel) es un enlace que abre el editor: marca qué reglas aplican al
+sesgo, fija el peso de cada una y la puntuación mínima. Al guardar se aplica al momento (se recalcula el sesgo) y se escribe en
+`tradingbot.env` (`BIAS_RULES`, `BIAS_<REGLA>_WEIGHT` y `BIAS_MIN_SCORE`), así que se mantiene al reiniciar.
 
 ### Añadir una regla nueva
 

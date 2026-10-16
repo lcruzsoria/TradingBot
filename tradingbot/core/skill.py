@@ -190,6 +190,7 @@ class SkillManager:
 
     def __init__(self, bus: EventBus, services: Services, skill_cfgs: list[dict]):
         self.bus = bus
+        self.services = services
         self.skills: dict[str, Skill] = {}
         used: dict[int | str, str] = {}
         for cfg in skill_cfgs:

@@ -24,9 +24,10 @@ from .errors import explain_error
 from .fmt import fecha_corta, fecha_hora, miles
 from .logview import LogView
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
+from .rules_dialog import RulesDialog
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
-from .. import settings
+from .. import envconfig, settings
 from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesList, StatBlock, repolish
 
 
@@ -84,6 +85,8 @@ class MainWindow(QMainWindow):
         self.bridge.flow.connect(self.ring.flash)
 
         self.ring.set_skills(manager.infos())
+        self.engine = getattr(getattr(manager, "services", None), "engine", None)
+        self._sync_rules()
         self._handlers = {
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
@@ -287,13 +290,56 @@ class MainWindow(QMainWindow):
         skills.body.addWidget(self.skill_detail)
         col.addWidget(skills, 1)
 
-        rules = Panel("Reglas del sesgo", "Voto de cada regla")
+        rules = Panel("Reglas del sesgo")
+        self.rules_panel = rules
+        rules.note.setTextFormat(Qt.TextFormat.RichText)             # «Voto de cada regla» es un enlace al editor
+        rules.note.setCursor(Qt.CursorShape.PointingHandCursor)
+        rules.note.setToolTip("Elige qué reglas aplican al sesgo y su peso")
+        rules.note.linkActivated.connect(lambda _link: self.open_rules_editor())
+        self._refresh_rules_link()
         self.rules_list = RulesList()
         rules.body.addWidget(self.rules_list)
         self.recalc_btn = QPushButton("Recalcular sesgo")
         rules.body.addWidget(self.recalc_btn)
         col.addWidget(rules)
         return side
+
+    # -- reglas del sesgo: lista y editor --------------------------------------------------------------
+    def _refresh_rules_link(self) -> None:
+        self.rules_panel.note.setText(f"<a href='reglas' style='color: {theme.ACCENT};'>Voto de cada regla</a>")
+
+    def _engine_rules(self) -> list[tuple[str, float]]:
+        engine = self.engine
+        return [(r.title or r.key, r.weight) for r in getattr(engine, "rules", [])] if engine is not None else []
+
+    def _sync_rules(self) -> None:
+        self.rules_list.set_rules(self._engine_rules())
+
+    def open_rules_editor(self) -> None:
+        engine = self.engine
+        if engine is None:
+            return
+        dialog = RulesDialog(self, [(r.key, r.weight) for r in engine.rules], engine.min_score)
+        if dialog.exec():
+            self._apply_rules(dialog.selection(), dialog.min_score())
+
+    def _apply_rules(self, selection: list[tuple[str, float]], min_score: float) -> None:
+        """Aplica al momento las reglas elegidas, las guarda en tradingbot.env y recalcula el sesgo."""
+        self.engine.configure(selection, min_score)
+        keys = [key for key, _w in selection]
+        try:
+            envconfig.set_value(envconfig.ENV_FILE, "BIAS_RULES", ", ".join(keys) or "ninguna")
+            for key, weight in selection:
+                envconfig.set_value(envconfig.ENV_FILE, f"BIAS_{key.upper()}_WEIGHT", f"{weight:g}")
+            envconfig.set_value(envconfig.ENV_FILE, "BIAS_MIN_SCORE", f"{min_score:g}")
+            saved = f"guardadas en {envconfig.ENV_FILE.name}"
+        except OSError as exc:
+            saved = f"no se pudieron guardar ({exc})"
+        self._sync_rules()
+        listing = ", ".join(f"{key} ×{weight:g}" for key, weight in selection) or "ninguna"
+        self.log(f"bias: reglas actualizadas - {listing}; puntuación mínima {min_score:g} ({saved})", tone="info")
+        if self.candles is not None:
+            self.bus.publish("bias.recalc", {}, source="ui")
 
     # -- utilidades -----------------------------------------------------------------------------
     def _sync_top_heights(self) -> None:
@@ -419,6 +465,7 @@ class MainWindow(QMainWindow):
         theme.apply(palette)
         QApplication.instance().setStyleSheet(theme.stylesheet())
         self.chart.apply_theme()
+        self._refresh_rules_link()
         self.rules_list.refresh()
         self.ring.update()
         if self.ring.selected in self.manager.skills:

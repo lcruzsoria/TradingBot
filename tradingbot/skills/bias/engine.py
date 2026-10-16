@@ -35,9 +35,27 @@ class BiasEngine:
             rules.append(RULE_REGISTRY[key](**params))
         return cls(rules, cfg.get("min_score", 1), cfg.get("require_all", False))
 
-    def evaluate(self, candles: pd.DataFrame, day: date | None = None, levels: dict | None = None) -> BiasResult:
+    def configure(self, selection: list[tuple[str, float]], min_score: float | None = None) -> None:
+        """Cambia en caliente las reglas activas y sus pesos. `selection`: [(clave, peso)] en el orden deseado.
+
+        Las reglas que ya estaban activas conservan sus parámetros (p. ej. tolerance_pct).
+        """
+        old = {rule.key: rule for rule in self.rules}
+        rules: list[BiasRule] = []
+        for key, weight in selection:
+            if key not in RULE_REGISTRY:
+                raise ValueError(f"Regla de Bias desconocida: {key!r}. Disponibles: {', '.join(RULE_REGISTRY)}")
+            if float(weight) < 0:
+                raise ValueError(f"El peso de {key} debe ser 0 o más.")
+            rules.append(RULE_REGISTRY[key](weight=float(weight), **(dict(old[key].params) if key in old else {})))
+        self.rules = rules                                  # se sustituye entera: la evaluación en curso no ve a medias
+        if min_score is not None:
+            self.min_score = max(float(min_score), 1e-9)
+
+    def evaluate(self, candles: pd.DataFrame, day: date | None = None, levels: dict | None = None,
+                 htf: object | None = None) -> BiasResult:
         """`levels`: niveles del día de la skill Levels ("tdo", "midnight") para las reglas que los usan."""
-        ctx = build_context(candles, day, levels)
+        ctx = build_context(candles, day, levels, htf)
         if ctx is None or len(ctx.today) == 0:
             return BiasResult(Bias.NO_BIAS, day, summary="Sin velas para evaluar el día")
 

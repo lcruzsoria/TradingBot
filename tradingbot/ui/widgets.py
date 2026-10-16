@@ -276,54 +276,75 @@ class BiasCard(QFrame):
 
 
 class RulesList(QWidget):
-    """Desglose: qué votó cada regla del Bias."""
+    """Reglas activas del Bias, una línea cada una: voto, nombre y peso (los precios van en la ayuda emergente)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._rows = QVBoxLayout(self)
         self._rows.setContentsMargins(0, 0, 0, 0)
-        self._rows.setSpacing(8)
+        self._rows.setSpacing(4)
         self._result: BiasResult | None = None
-        self.set_result(None)
+        self._rules: list[tuple[str, float]] = []          # (nombre, peso) de las reglas activas
+        self._render()
+
+    def set_rules(self, rules: list[tuple[str, float]]) -> None:
+        """Reglas activas del motor (para mostrarlas antes de que haya un sesgo calculado o si cambian)."""
+        self._rules = list(rules)
+        if self._result is not None and [(v.rule, v.weight) for v in self._result.votes] != self._rules:
+            self._result = None                            # el sesgo mostrado era de otras reglas: se espera al nuevo
+        self._render()
 
     def refresh(self) -> None:
-        self.set_result(self._result)
+        self._render()
+
+    def set_result(self, result: BiasResult | None) -> None:
+        self._result = result
+        self._render()
 
     def _clear(self) -> None:
         while self._rows.count():
             item = self._rows.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)                     # sale ya de la interfaz; el borrado real llega después
+                widget.deleteLater()
 
-    def set_result(self, result: BiasResult | None) -> None:
-        self._result = result
+    def _line(self, mark: str, color: str, name: str, weight: float, tip: str) -> QWidget:
+        row = QWidget()
+        row.setToolTip(tip)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        mark_label = QLabel(mark)
+        mark_label.setFixedWidth(14)
+        mark_label.setStyleSheet(f"color: {color}; font-weight: 700;")
+        name_label = QLabel(name)
+        name_label.setStyleSheet("font-weight: 600;")
+        weight_label = QLabel(f"×{weight:g}")
+        weight_label.setObjectName("Muted")
+        h.addWidget(mark_label)
+        h.addWidget(name_label, 1)
+        h.addWidget(weight_label)
+        return row
+
+    def _render(self) -> None:
         self._clear()
-        if result is None or not result.votes:
-            empty = QLabel("Aún no hay reglas evaluadas.")
+        result = self._result
+        if result is not None and result.votes:
+            colors = {1: theme.BULL, -1: theme.BEAR, 0: theme.NEUTRAL}
+            marks = {1: "▲", -1: "▼", 0: "–"}
+            for vote in result.votes:
+                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail))
+            tone = {Bias.BULLISH: theme.BULL, Bias.BEARISH: theme.BEAR}.get(result.bias, theme.MUTED)
+            total = QLabel(f"Puntuación {result.score:+g}  ·  mínimo {result.min_score:g}  ·  {result.bias.value}")
+            total.setStyleSheet(f"color: {tone}; font-size: 11px;")
+            total.setToolTip(result.summary)
+            self._rows.addWidget(total)
+        elif self._rules:
+            for name, weight in self._rules:
+                self._rows.addWidget(self._line("·", theme.MUTED, name, weight, "Aún sin evaluar"))
+        else:
+            empty = QLabel("No hay reglas activas.")
             empty.setObjectName("Muted")
             self._rows.addWidget(empty)
-            self._rows.addStretch(1)
-            return
-        colors = {1: theme.BULL, -1: theme.BEAR, 0: theme.NEUTRAL}
-        marks = {1: "▲", -1: "▼", 0: "–"}
-        for vote in result.votes:
-            row = QWidget()
-            h = QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(8)
-            mark = QLabel(marks[vote.vote])
-            mark.setFixedWidth(14)
-            mark.setStyleSheet(f"color: {colors[vote.vote]}; font-weight: 700;")
-            text = QVBoxLayout()
-            text.setSpacing(0)
-            name = QLabel(vote.rule)
-            name.setStyleSheet("font-weight: 600;")
-            detail = QLabel(vote.detail)
-            detail.setObjectName("Muted")
-            detail.setWordWrap(True)
-            text.addWidget(name)
-            text.addWidget(detail)
-            h.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
-            h.addLayout(text, 1)
-            self._rows.addWidget(row)
         self._rows.addStretch(1)
