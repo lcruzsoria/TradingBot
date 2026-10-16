@@ -316,6 +316,12 @@ QComboBox QAbstractItemView {{ background: {PANEL}; border: 1px solid {BORDER}; 
 
 QPushButton {{ background: {PANEL_ALT}; border: 1px solid {BORDER}; border-radius: 4px; padding: 5px 12px; }}
 QPushButton:hover {{ border-color: {ACCENT}; }}
+QSpinBox, QDoubleSpinBox {{ background: {PANEL_ALT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 4px; padding: 3px 6px; selection-background-color: {ACTIVE_BG}; selection-color: {TEXT}; }}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {ACCENT}; }}
+QSpinBox:disabled, QDoubleSpinBox:disabled {{ color: {mix(BG, MUTED, 0.55)}; border-color: {mix(BG, BORDER, 0.6)}; }}
+QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {BORDER}; border-radius: 3px; background: {PANEL_ALT}; }}
+QCheckBox::indicator:hover {{ border-color: {ACCENT}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {mix(BG, MUTED, 0.55)}; border-color: {mix(BG, BORDER, 0.6)}; }}
 QPushButton#Primary {{ background: {ACTIVE_BG}; border: 1px solid {ACTIVE_BORDER}; font-weight: 600; }}
 QPushButton#Primary:hover {{ background: {mix(ACTIVE_BG, ACCENT, 0.25)}; }}
