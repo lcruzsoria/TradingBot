@@ -276,7 +276,7 @@ class BiasCard(QFrame):
 
 
 class RulesList(QWidget):
-    """Reglas activas del Bias, una línea cada una: voto, nombre y peso (los precios van en la ayuda emergente)."""
+    """Reglas activas del Bias, una línea cada una: voto, nombre, valor actual y peso (los precios van en la ayuda emergente)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -309,7 +309,7 @@ class RulesList(QWidget):
                 widget.setParent(None)                     # sale ya de la interfaz; el borrado real llega después
                 widget.deleteLater()
 
-    def _line(self, mark: str, color: str, name: str, weight: float, tip: str) -> QWidget:
+    def _line(self, mark: str, color: str, name: str, weight: float, tip: str, points: float | None = None) -> QWidget:
         row = QWidget()
         row.setToolTip(tip)
         h = QHBoxLayout(row)
@@ -320,10 +320,15 @@ class RulesList(QWidget):
         mark_label.setStyleSheet(f"color: {color}; font-weight: 700;")
         name_label = QLabel(name)
         name_label.setStyleSheet("font-weight: 600;")
-        weight_label = QLabel(f"+{weight:g}")
+        value_label = QLabel("·" if points is None else f"{points:+g}" if points else "0")     # valor actual de la regla
+        value_label.setStyleSheet(f"color: {color}; font-weight: 700;")
+        value_label.setMinimumWidth(26)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        weight_label = QLabel(f"(peso +{weight:g})")
         weight_label.setObjectName("Muted")
         h.addWidget(mark_label)
         h.addWidget(name_label, 1)
+        h.addWidget(value_label)
         h.addWidget(weight_label)
         return row
 
@@ -334,7 +339,7 @@ class RulesList(QWidget):
             colors = {1: theme.BULL, -1: theme.BEAR, 0: theme.NEUTRAL}
             marks = {1: "▲", -1: "▼", 0: "–"}
             for vote in result.votes:
-                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail))
+                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points))
             tone = {Bias.BULLISH: theme.BULL, Bias.BEARISH: theme.BEAR}.get(result.bias, theme.MUTED)
             total = QLabel(f"Puntuación {result.score:+g}  ·  mínimo {result.min_score:g}  ·  {result.bias.value}")
             total.setStyleSheet(f"color: {tone}; font-size: 11px;")
