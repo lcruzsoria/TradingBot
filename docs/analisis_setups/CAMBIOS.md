@@ -15,8 +15,9 @@ a git). Cada Excel incluye las hojas **Cambios** (qué cambia y por qué) y **Co
 - Setup: toma de liquidez del High/Low de la TBR, retest del 50 % y segunda ruptura (la skill Setup, `detect`). Se invalida si toma
   el lado contrario; ventana de 24 h para completar el setup y 48 h para resolver la operación.
 - **Sin spread ni comisiones de v1 a v5; con el spread real en v6.** Si en una misma vela caben stop y objetivo, cuenta el stop (pesimista).
-- Sesgo reconstruido con las dos reglas del bot (ruptura del día previo ×2, precio vs apertura ×1; sesgo con |puntuación| ≥ 2).
-  Es una aproximación: el 80 % de las operaciones salen «sin sesgo».
+- Sesgo reconstruido con las **reglas actuales del bot**: ruptura del día de trading anterior ×2, precio vs TDO ×1 y precio vs
+  Midnight (00:00 NY) ×1; sesgo con |puntuación| ≥ 2. Hasta la v6 inclusive el análisis usaba ruptura ×2 + apertura del día ×1 (la
+  columna «sesgo (reglas antiguas)» de los Excel la conserva). Se calcula en la vela del disparo, sin mirar al futuro.
 - R = múltiplo del riesgo inicial. Las operaciones aún abiertas al final de los datos no cuentan en las estadísticas.
 - El estadístico t del R medio sirve de guía de fiabilidad: |t| > 2 es una diferencia con cierta solidez. Al mirar muchas tablas
   (por TBR, mercado, hora...) algunas «ventajas» salen por azar.
@@ -30,7 +31,9 @@ a git). Cada Excel incluye las hojas **Cambios** (qué cambia y por qué) y **Co
 | v3 | v2 + stop en el extremo opuesto de la TBR | 10.998 | 51,2 % | +0,008 | 1,02 | −135R | 10 | 0,8 |
 | v4 | v3 + filtro de rango mínimo | 7.345 | 51,8 % | +0,022 | 1,04 | −64R | 14 | 1,8 |
 | v5 | v4 con stop en el 50 % y objetivo a 1,5 rangos | 7.299 | 27,4 % | +0,060 | 1,08 | −135R | 37 | 1,7 |
-| v6 | **v5 con el spread real** | 7.314 | 26,6 % | **−0,046** | 0,94 | −487R | 37 | **−2,3** |
+| v6 | **v5 con el spread real** | 7.313 | 26,6 % | **−0,046** | 0,94 | −487R | 37 | **−2,3** |
+| v7 | v6 + Bias Execution: solo a favor del sesgo | 4.273 | 29,8 % | **−0,001** | 1,00 | −167R | 25 | −0,03 |
+| v8 | v6 sin operar contra el sesgo | 6.443 | 27,6 % | −0,030 | 0,96 | −351R | 33 | −1,4 |
 
 La reversión C (propuesta, aún no implementada) no cambia entre versiones: 8.057 operaciones, R medio +0,013, PF 1,02,
 máx. drawdown −178R.
@@ -127,6 +130,60 @@ spread: el spread medio es el 8,4 % del riesgo de la operación.
 - **Por coste relativo:** las operaciones con spread por encima del 8,6 % del riesgo pierden −0,207R; las de coste medio
   (2,5–8,6 %) rondan +0,01 a +0,05R. Sugiere un filtro de coste (ver próximas iteraciones).
 
+## v7 y v8: el Bias como filtro (reglas TDO y Midnight)
+
+**Cambio.** Se reconstruye el sesgo con las reglas actuales del bot y se usa como filtro de Bias Execution sobre v6:
+
+- **v7:** solo operaciones **a favor del sesgo** (lo que hace el bot con `BIAS_EXEC_ALLOW_NO_BIAS=false`).
+- **v8:** se descartan solo las operaciones **contra el sesgo** (a favor o sin sesgo; equivale a `ALLOW_NO_BIAS=true`).
+
+**Por qué.** Las reglas TDO y Midnight se añadieron al Bias sin medirlas. Esto las mide como filtro y regla por regla.
+
+**Resultado (continuación, con spread real):**
+
+| Filtro | Operaciones | R medio | Profit factor | Máx. drawdown | t |
+|---|---:|---:|---:|---:|---:|
+| Sin filtro (v6) | 7.313 | −0,046 | 0,94 | −487R | −2,3 |
+| **Solo a favor del sesgo (v7)** | 4.273 | **−0,001** | 1,00 | −167R | −0,03 |
+| A favor o sin sesgo (v8) | 6.443 | −0,030 | 0,96 | −351R | −1,4 |
+| Solo contra el sesgo | 870 | **−0,169** | 0,79 | −170R | −2,6 |
+| Solo sin sesgo | 2.170 | −0,087 | 0,89 | −217R | −2,2 |
+
+- **El Bias sí aporta como filtro:** deja la continuación en el punto de equilibrio (de −0,046R a −0,001R) y recorta el drawdown a
+  un tercio. Casi todo el beneficio viene de evitar las operaciones contra el sesgo y las que no tienen sesgo.
+- **Pero no hace rentable la continuación:** el mejor resultado es cero, no positivo.
+- **Las reglas nuevas filtran mejor que las antiguas** en volumen: con ellas el 58 % de las operaciones tienen sesgo a favor, frente
+  al 20 % con la apertura del día (4.273 frente a 1.439), y con el mismo R medio (−0,001 frente a −0,012).
+
+**Aportación de cada regla** (hoja «Aportación por regla»; R medio de la continuación según el voto de la regla frente a la operación):
+
+| Regla | Apoya la operación | Neutra | Contra la operación |
+|---|---:|---:|---:|
+| Ruptura del día anterior | −0,018 (n=1.469) | −0,053 | −0,073 (n=209) |
+| **TDO** | −0,025 (n=5.537) | — | **−0,114** (n=1.771, t −2,5) |
+| **Midnight** | −0,017 (n=4.837) | −0,028 | **−0,154** (n=1.464, t −3,1) |
+
+El **Midnight es la regla más informativa**: con la operación contra el Midnight la continuación pierde −0,154R; el TDO le sigue.
+La ruptura del día anterior discrimina menos, aunque apenas da casos (el precio rara vez está fuera del rango previo).
+
+**Reversión C** (propuesta; ver arriba), con las reglas nuevas del sesgo. La simulación no incluye spread: la fila «con spread
+(aprox.)» resta a cada operación su spread/riesgo (el spread medio es 0,056R; es una estimación de primer orden):
+
+| Filtro | Operaciones | R medio sin spread | R medio con spread (aprox.) | t (con spread) |
+|---|---:|---:|---:|---:|
+| Sin filtro | 8.051 | +0,015 | −0,041 | −2,4 |
+| **Solo a favor del sesgo** | 4.105 | **+0,058** (t 2,4, PF 1,09) | **+0,009** (PF 1,01) | 0,4 |
+| A favor o sin sesgo | 6.896 | +0,023 | −0,034 | −1,8 |
+| Solo contra el sesgo | 1.155 | −0,032 | −0,084 | −1,9 |
+
+- Sin costes, la reversión a favor del sesgo da la primera señal con t > 2 de todo el análisis (+0,058R, PF 1,09, drawdown −69R).
+- **Con el spread, queda en el punto de equilibrio** (+0,009R): +0,037R en la primera mitad del histórico y −0,020R en la segunda,
+  y por años oscila entre −0,034 y +0,060. No es una ventaja explotable todavía.
+- El Midnight también es la regla que más ayuda aquí: con el Midnight a favor la reversión da +0,046R (t 2,1) y con él en contra
+  −0,046R.
+- Por mercados (con spread, a favor del sesgo): XAUUSD +0,111, NAS100.r +0,056, DJ30.r +0,029, SP500.r +0,028; GBPUSD −0,109 y
+  EURUSD −0,081. Mismo patrón que en la continuación: los mercados de menor spread relativo aguantan mejor.
+
 ## Qué dicen los datos hasta ahora
 
 1. La causa principal de la pérdida de v1 era **la orden límite** (selección adversa), no la idea de las TBR.
@@ -134,9 +191,13 @@ spread: el spread medio es el 8,4 % del riesgo de la operación.
    (drawdown, rachas) y, ligeramente, el R medio.
 3. Filtrar rangos pequeños es lo que más ayuda de forma estable (v4), y el spread explica por qué: los rangos pequeños son donde
    más pesa.
-4. **Con el spread real (v6), la mejor versión pierde 0,046R por operación.** La ventaja bruta de v5 (+0,06R) es menor que el
-   coste (0,10R). La continuación de las TBR, tal como está definida, no es rentable en estos mercados con estos costes.
-5. Solo sobreviven bolsillos pequeños (DJ30.r, XAUUSD, Pre-NY, largos), y mantenerlos sin datos fuera de muestra sería
+4. **Con el spread real (v6), la mejor versión de la continuación pierde 0,046R por operación.** La ventaja bruta de v5 (+0,06R)
+   es menor que el coste (0,10R).
+5. **El Bias con TDO y Midnight sí aporta como filtro:** sube la continuación de −0,046R a −0,001R y recorta el drawdown a un
+   tercio. El **Midnight** es la regla más informativa, seguido del TDO. Pero el mejor resultado es el equilibrio: el Bias evita
+   perder, no crea ventaja por sí solo.
+6. **La reversión C a favor del sesgo es lo más prometedor** (+0,058R sin costes, t = 2,4), pero con el spread queda en +0,009R.
+7. Solo sobreviven bolsillos pequeños (DJ30.r, XAUUSD, NAS100.r, Pre-NY, largos), y mantenerlos sin datos fuera de muestra sería
    sobreajuste.
 
 ## Próximas iteraciones propuestas
@@ -144,7 +205,9 @@ spread: el spread medio es el 8,4 % del riesgo de la operación.
 - **v7: filtro de coste.** Operar solo si el spread es menor que cierto porcentaje del riesgo (p. ej. 8 %): descarta los rangos
   pequeños donde el spread domina. Se mide con el spread de cada vela, sin mirar al futuro. Hay que confirmarlo en las dos mitades.
 - **Rangos más grandes o más tiempo:** probar TBR agrupadas o velas de mayor tamaño (M30/H1) para que el spread pese menos.
-- Evaluar por separado la **reversión C** con entrada a mercado, filtro de rango y spread real (la tabla de C todavía no incluye
-  costes).
-- Mejor reconstrucción del **Bias** (más reglas): hoy el 80 % de las operaciones salen sin sesgo.
+- Simular la **reversión C con spread real** (hoy es una aproximación) y con el filtro de rango y las mejoras de la continuación.
+- **Más reglas para el Bias**, probadas una a una como se ha hecho con TDO y Midnight (p. ej. dónde cerró la sesión asiática o
+  londinense respecto a su TBR, o la dirección de la última TBR cerrada). El Midnight ha sido la más informativa: otras reglas de
+  tiempo y apertura podrían serlo también.
+- Probar la **reversión C a favor del sesgo con un filtro de coste** (v7 propuesta) y con velas mayores, para que el spread pese menos.
 - Confirmar las **comisiones** de la cuenta real antes de decidir nada.

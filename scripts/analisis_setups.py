@@ -59,6 +59,7 @@ class Variante:
     entrada: str = "limite"      # "limite": orden límite en el nivel roto; "mercado": apertura de la vela siguiente a la 2ª ruptura
     stop: str = "retest"         # ver STOPS
     objetivo: float = 1.0        # rangos más allá del nivel roto
+    sesgo: str = "todos"          # filtro de Bias Execution: "todos", "a favor" o "no contra" (a favor o sin sesgo)
     spread: bool = False         # aplica el spread real de cada vela de entrada
     min_rango: float = 0.0       # filtro: rango de la TBR >= esta fracción de la mediana de sus últimas 20 sesiones (0 = sin filtro)
 
@@ -92,21 +93,58 @@ VARIANTES = (
              "bid; el corto vende al bid y sale al ask. El riesgo (1R) incluye el spread. Misma entrada, stop, objetivo y filtro.",
              "Hasta v5 no había costes: con una ventaja de +0,06R hay que saber si el spread se la come.",
              "mercado", "mitad", 1.5, spread=True, min_rango=0.8),
+    Variante("v7", "v6 con Bias Execution: solo operaciones a favor del sesgo",
+             "Sobre v6, solo se opera si la dirección va a favor del sesgo del día reconstruido con las reglas actuales del bot "
+             "(ruptura del día previo x2, TDO x1, Midnight x1; sesgo con |puntuación| >= 2). Es lo que haría Bias Execution con "
+             "BIAS_EXEC_ALLOW_NO_BIAS=false.",
+             "Medir si el Bias, con las reglas TDO y Midnight, mejora la estrategia como filtro.",
+             "mercado", "mitad", 1.5, sesgo="a favor", spread=True, min_rango=0.8),
+    Variante("v8", "v6 sin operar contra el sesgo",
+             "Sobre v6, solo se descartan las operaciones contra el sesgo: se opera a favor o sin sesgo (equivale a "
+             "BIAS_EXEC_ALLOW_NO_BIAS=true).",
+             "Si pedir sesgo a favor deja muy pocas operaciones, ver si basta con evitar las contrarias.",
+             "mercado", "mitad", 1.5, sesgo="no contra", spread=True, min_rango=0.8),
 )
 
 
 # -- sesgo reconstruido -------------------------------------------------------------------------------
-def bias_score(ts, o, h, l, c, start_hours: int) -> np.ndarray:
-    """Puntuación del Bias del bot en cada vela: ruptura del día previo (x2) + precio vs apertura del día (x1)."""
-    day = ((ts - AHEAD) - start_hours * 3600) // 86400
+def bias_arrays(ts, o, h, l, c, start_hours: int) -> dict:
+    """Votos y puntuación del Bias del bot en cada vela, con los datos disponibles en ella (sin mirar al futuro).
+
+    prev: ruptura del día de trading anterior (+1 sobre su máximo, -1 bajo su mínimo). tdo: precio vs la apertura del día de
+    trading (True Day Open). mid: precio vs la apertura de las 00:00 NY (0 hasta que existe esa vela).
+    nuevo = 2 prev + tdo + mid (reglas actuales del bot); viejo = 2 prev + tdo (reglas anteriores: prev + apertura del día).
+    """
+    t = ts - AHEAD
+    day = (t - start_hours * 3600) // 86400
     first = np.r_[True, day[1:] != day[:-1]]
+    starts = np.flatnonzero(first)
     ids = np.cumsum(first) - 1
     d_open = o[first][ids]
-    day_h = np.maximum.reduceat(h, np.flatnonzero(first))
-    day_l = np.minimum.reduceat(l, np.flatnonzero(first))
+    day_h, day_l = np.maximum.reduceat(h, starts), np.minimum.reduceat(l, starts)
     prev_h, prev_l = np.r_[np.nan, day_h][ids], np.r_[np.nan, day_l][ids]
-    score = np.where(c > prev_h, 2, 0) - np.where(c < prev_l, 2, 0)
-    return score + np.where(c > d_open, 1, 0) - np.where(c < d_open, 1, 0), d_open
+    prev = np.where(c > prev_h, 1, 0) - np.where(c < prev_l, 1, 0)
+    tdo = np.sign(c - d_open).astype(int)
+    idx = np.arange(len(ts))
+    after_mid = np.where(t >= (day + 1) * 86400, idx, len(ts))            # 00:00 NY del día en que termina el día de trading
+    mid_idx = np.minimum.reduceat(after_mid, starts)[ids]
+    valid = (mid_idx < len(ts)) & (idx >= mid_idx)
+    mid_open = o[np.minimum(mid_idx, len(ts) - 1)]
+    mid = np.where(valid, np.sign(c - mid_open), 0).astype(int)
+    return {"prev": prev, "tdo": tdo, "mid": mid, "nuevo": 2 * prev + tdo + mid, "viejo": 2 * prev + tdo, "d_open": d_open}
+
+
+def vote_vs_trade(vote: int, direction: int) -> str:
+    """El voto de una regla frente a la dirección de la operación."""
+    return "neutro" if vote == 0 else "apoya" if vote * direction > 0 else "contra"
+
+
+def bias_columns(bias: dict, k: int, d: int) -> dict:
+    """Columnas de sesgo de una operación, con el sesgo en la vela k del disparo."""
+    return {"puntuación sesgo": int(bias["nuevo"][k]), "sesgo": alignment(bias["nuevo"][k], d),
+            "puntuación sesgo (reglas antiguas)": int(bias["viejo"][k]), "sesgo (reglas antiguas)": alignment(bias["viejo"][k], d),
+            "voto ruptura previo": vote_vs_trade(int(bias["prev"][k]), d), "voto TDO": vote_vs_trade(int(bias["tdo"][k]), d),
+            "voto Midnight": vote_vs_trade(int(bias["mid"][k]), d)}
 
 
 def alignment(score: float, direction: int) -> str:
@@ -176,11 +214,15 @@ def spread_prices(source, sym, df) -> np.ndarray:
     return (merged.fillna(merged.median()).to_numpy().astype(float)) * point
 
 
-def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_range=float('nan'), spread=None):
+def continuation_row(var, base, st, d, rng, o, h, l, c, ny, bias, rel_range=float('nan'), spread=None):
     """Operación de la continuación según la versión `var`, o None si no hay operación (no se llena, sin recorrido...)."""
     k = st.rebreak_x
     if var.min_rango and not rel_range >= var.min_rango:      # NaN (sin historial suficiente) también se descarta
         return None
+    if var.sesgo != "todos" and k is not None:
+        mood = alignment(bias["nuevo"][k], d)
+        if mood == "contra el sesgo" or (var.sesgo == "a favor" and mood != "a favor del sesgo"):
+            return None
     if var.entrada == "limite":
         if st.status not in ("target", "stop", "filled"):
             return None
@@ -206,8 +248,8 @@ def continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel_r
            "resultado": status, "R": r if status != "abierta" else np.nan,
            "R abierta (a mercado)": r if status == "abierta" else np.nan,
            "MAE (R)": mae / risk, "MFE (R)": mfe / risk, "MAE (rangos)": mae / rng, "MFE (rangos)": mfe / rng,
-           "puntuación sesgo": int(score[k]), "sesgo": alignment(score[k], d),
-           "entrada vs apertura": "premium" if entry > d_open[m] else "descuento",
+           **bias_columns(bias, k, d),
+           "entrada vs apertura": "premium" if entry > bias["d_open"][m] else "descuento",
            "rango vs mediana 20 sesiones": rel_range, "spread (precio)": cost, "spread en R": cost / risk}
     if var.spread:                                              # mismo trade sin costes, para medir cuánto cuesta el spread
         free = sim_from_fill(h, l, c, m, entry, stop, target, d, 2 * WINDOW)
@@ -327,7 +369,7 @@ def main() -> None:
         ts = df["ts"].to_numpy().astype(np.int64)
         o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
         index = is_us_index(sym, DEFAULT_US_INDICES)
-        score, d_open = bias_score(ts, o, h, l, c, 18 if index else 17)
+        bias = bias_arrays(ts, o, h, l, c, 18 if index else 17)
         spread = spread_prices(source, sym, df)
         sessions = compute(ts, h, l, zones, AHEAD, 15, days=1_000_000)
         ny = lambda x: pd.Timestamp(int(ts[int(x)]) - AHEAD, unit="s")           # noqa: E731
@@ -350,7 +392,7 @@ def main() -> None:
                     "hora toma (NY)": ny(st.sweep_x), "hora retest (NY)": ny(st.retest_x) if st.retest_x is not None else None,
                     "hora 2ª ruptura (NY)": ny(st.rebreak_x) if st.rebreak_x is not None else None}
             for var in versiones:
-                row = continuation_row(var, base, st, d, rng, o, h, l, c, ny, score, d_open, rel.get((st.zone_key, st.day), float('nan')), spread)
+                row = continuation_row(var, base, st, d, rng, o, h, l, c, ny, bias, rel.get((st.zone_key, st.day), float('nan')), spread)
                 (trades if row is not None else missed)[var.clave].append(row if row is not None else dict(base))
 
         # ---- eventos tras el retest y reversión C ----
@@ -378,7 +420,9 @@ def main() -> None:
                     "R abierta (a mercado)": ev["r"] if ev["status"] == "abierta" else np.nan,
                     "MAE (R)": ev["mae"] / ev["risk"], "MFE (R)": ev["mfe"] / ev["risk"],
                     "MAE (rangos)": ev["mae"] / ev["rng"], "MFE (rangos)": ev["mfe"] / ev["rng"],
-                    "puntuación sesgo": int(score[ev["f"]]), "sesgo": alignment(score[ev["f"]], d),
+                    **bias_columns(bias, ev["f"], d),
+                    "spread (precio)": float(spread[ev["m"]]), "spread en R": float(spread[ev["m"]]) / ev["risk"],
+                    "R con spread (aprox.)": (ev["r"] - float(spread[ev["m"]]) / ev["risk"]) if ev["status"] != "abierta" else np.nan,
                     "R con objetivo en el Low/High opuesto": round(ev["r_low"], 2)})
     source.close()
 
@@ -448,6 +492,36 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
                                             labels=["<=0,5", "0,5-0,65", "0,65-0,8", "0,8-1", ">1"])
     by_risk = group_stats(done, ["tipo", "riesgo / rango (tramo)"])
 
+    # aportación del Bias: ¿mejora la estrategia usarlo como filtro? (con las reglas nuevas y con las antiguas)
+    regimes = (("sin filtro", None), ("solo a favor del sesgo", ["a favor del sesgo"]),
+               ("a favor o sin sesgo (excluye contra)", ["a favor del sesgo", "sin sesgo"]),
+               ("solo contra el sesgo", ["contra el sesgo"]), ("solo sin sesgo", ["sin sesgo"]))
+    bias_rows = []
+    for kind in kinds:
+        part = done[done["tipo"] == kind].sort_values("fecha_entrada")
+        for rules, col in (("nuevas (ruptura, TDO, Midnight)", "sesgo"), ("antiguas (ruptura, apertura)", "sesgo (reglas antiguas)")):
+            for label, allowed in regimes:
+                sub = part if allowed is None else part[part[col].isin(allowed)]
+                if len(sub):
+                    bias_rows.append({"tipo": kind, "reglas del sesgo": rules, "filtro": label, **stats(sub["R"])})
+                    if kind == "Reversión C":      # la reversión se simula sin spread: estimación de primer orden (R - spread/riesgo)
+                        bias_rows.append({"tipo": kind + " con spread (aprox.)", "reglas del sesgo": rules, "filtro": label,
+                                          **stats(sub["R con spread (aprox.)"])})
+    bias_value = pd.DataFrame(bias_rows)
+    rule_rows = []
+    for kind in kinds:
+        part = done[done["tipo"] == kind]
+        for col, name in (("voto ruptura previo", "ruptura del día anterior"), ("voto TDO", "TDO"), ("voto Midnight", "Midnight")):
+            for vote in ("apoya", "neutro", "contra"):
+                sub = part[part[col] == vote].sort_values("fecha_entrada")
+                if len(sub):
+                    st_ = stats(sub["R"])
+                    rule_rows.append({"tipo": kind, "regla": name, "su voto frente a la operación": vote,
+                                      **{k: st_[k] for k in ("operaciones", "win rate %", "R medio", "R total", "profit factor", "estadístico t")}})
+    by_rule = pd.DataFrame(rule_rows)
+    dist = (done.groupby(["tipo", "sesgo"]).size().rename("operaciones nuevas").reset_index()
+            .merge(done.groupby(["tipo", "sesgo (reglas antiguas)"]).size().rename("operaciones antiguas").reset_index()
+                   .rename(columns={"sesgo (reglas antiguas)": "sesgo"}), on=["tipo", "sesgo"], how="outer").fillna(0))
     costs = pd.DataFrame()
     if var.spread:                    # cuánto cuesta el spread y cuánto spread aguanta la ventaja
         cc = done[done["tipo"] == "Continuación"].copy()
@@ -518,12 +592,15 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
         ["Versión", f"{var.clave}: {var.nombre}. {var.cambio}"],
         ["Continuación", "Toma del High/Low de la TBR, retest del 50 %, 2ª ruptura. Entrada y stop según la versión (hoja 'Cambios'); "
                          "objetivo en el nivel -1 (1 rango más allá del nivel roto)."],
+        ["Spread en la reversión C", "La reversión C se simula sin spread; la fila 'Reversión C con spread (aprox.)' de la hoja 'Aportación "
+                                     "del Bias' le resta el spread/riesgo de cada operación (aproximación de primer orden, no una simulación completa)."],
         ["Reversión C", "Tras la toma y el retest del 50 %, cierre bajo el mínimo del retest sin 2ª ruptura; orden límite en ese "
                         "mínimo, stop en el High tomado, objetivo en el nivel -1 por el lado contrario. Es una propuesta: aún no está en la skill."],
         ["Supuestos", "Sin spread ni comisiones. Si en una vela caben stop y objetivo, cuenta el stop (pesimista). Ventana de "
                       "24 h para completar el setup y 48 h para resolverlo. Las operaciones abiertas al final de los datos no cuentan en las estadísticas."],
-        ["Sesgo reconstruido", "Con las dos reglas del bot (ruptura del día previo x2, precio vs apertura x1) y sesgo si |puntuación| >= 2. "
-                               "Es una aproximación del Bias real, que incluirá más reglas."],
+        ["Sesgo reconstruido", "Con las reglas actuales del bot: ruptura del día de trading anterior x2, precio vs TDO x1 y precio vs "
+                               "Midnight (00:00 NY) x1; sesgo si |puntuación| >= 2. Hasta v6 el análisis usaba ruptura x2 + apertura del día x1 "
+                               "(las columnas '... (reglas antiguas)' las conservan). Se calcula en la vela del disparo, sin mirar al futuro."],
         ["Lectura", "R = múltiplo del riesgo inicial. 'estadístico t' > 2 indica que el R medio difiere de cero con cierta fiabilidad; "
                     "con muchas pruebas cruzadas (hoja por hoja) hay que ser prudente: pueden salir ventajas por azar."],
         ["Cuidado: sesgo de selección", "Los setups que caducan 'porque el precio llegó al objetivo sin llenar la orden' son ganadores por "
@@ -534,7 +611,8 @@ def write_excel(path, T, done, M, E, meta, var, comp, comp_tbr, comp_bias, cambi
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         sheets = [("Cambios", cambios), ("Comparativa", comp), ("Comparativa por TBR", comp_tbr),
-                  ("Comparativa por sesgo", comp_bias), ("Costes del spread", costs), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
+                  ("Comparativa por sesgo", comp_bias), ("Costes del spread", costs), ("Aportación del Bias", bias_value),
+                  ("Aportación por regla", by_rule), ("Distribución del sesgo", dist), ("Resumen", None), ("Por TBR", by_tbr), ("Por TBR y dirección", by_tbr_dir), ("Por TBR y sesgo", by_tbr_bias),
                   ("Por mercado", by_sym), ("Por dirección", by_dir), ("Por sesgo", by_bias), ("Por hora entrada NY", by_hour),
                   ("Por día de la semana", by_dow), ("Por rango", by_range), ("Por riesgo-rango", by_risk),
                   ("Premium-Discount", by_pd), ("Embudo por TBR", funnel), ("Continuación vs reversión", probs),
