@@ -68,6 +68,7 @@ class BiasHistogram(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._items.append(line)
+        self.getPlotItem().getAxis("right").setTicks([[(self._min, f"+{self._min:g}"), (0.0, "0"), (-self._min, f"-{self._min:g}")]])
         top = max(float(np.max(np.abs(y))), self._min) * 1.15
         pi.getViewBox().setYRange(-top, top, padding=0)
 
