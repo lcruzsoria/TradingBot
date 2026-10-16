@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from ...clock import server_minus_ny
+from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
-                        DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_US_INDICES, SMA_STYLES, compute, days, is_us_index,
-                        parse_time)
+                        DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_US_INDICES, SMA_STYLES, compute, days, is_us_index,
+                        market_close, parse_time)
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -20,13 +21,15 @@ class LevelsSkill(Skill):
                    "PDH / PDL (máximo y mínimo del día anterior), y dónde empieza cada día: a las 18:00 de NY en los "
                    "índices americanos y a las 17:00 en el resto.")
     subscribes = ("candles.loaded", "clock.offset", "levels.sma")
-    publishes = ("levels.updated",)
+    publishes = ("levels.updated", "market.closed")
     slot = 3
+    interval = 20.0                       # cada cuánto se comprueba si ha cerrado un mercado
 
     def on_start(self) -> None:
         self.error = "Configuración LEVELS no válida"
         self.offset: int | None = None
         self._last: dict | None = None
+        self._checked = datetime.now(NY)      # los cierres anteriores al arranque no se anotan
         try:
             self._load_settings()
         except ValueError as exc:
@@ -51,6 +54,7 @@ class LevelsSkill(Skill):
             if not COLOR.match(color):
                 raise ValueError(f"LEVELS_{key}_COLOR={color!r}: usa un color #RRGGBB.")
             self.colors[key.lower()] = color.upper()
+        self.market_close = parse_time(self.settings.get("MARKET_CLOSE", DEFAULT_MARKET_CLOSE), "LEVELS_MARKET_CLOSE")
         self.sma_period = self.settings.get_int("SMA_PERIOD", DEFAULT_SMA_PERIOD)
         if self.sma_period < 1:
             raise ValueError(f"LEVELS_SMA_PERIOD={self.sma_period} debe ser 1 o más.")
@@ -78,6 +82,16 @@ class LevelsSkill(Skill):
             self._last = event.payload
         if self._last is not None:
             self.update()
+
+    def tick(self) -> None:
+        """Avisa (market.closed) cuando cierra el mercado de los futuros de índices o Forex, a la hora de cierre de NY."""
+        now, prev = datetime.now(NY), self._checked
+        self._checked = now
+        if self.error:
+            return
+        closed = market_close(prev, now, self.market_close)
+        if closed:
+            self.publish("market.closed", {**closed, "index_reopen": self.index_day_start, "reopen": self.day_start})
 
     def update(self) -> None:
         p = self._last

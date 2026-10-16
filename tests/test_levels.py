@@ -186,3 +186,39 @@ def test_el_boton_sma_dibuja_y_configura_la_media(tmp_path, monkeypatch):
     saved = envconfig.parse(env_file.read_text(encoding="utf-8"))
     assert saved["LEVELS_SMA_PERIOD"] == "50" and saved["LEVELS_SMA_COLOR"] == "#00FF00" and saved["LEVELS_SMA_STYLE"] == "punteado"
     assert published[-1].payload == {"period": 50, "color": "#00FF00", "style": "punteado"}
+
+
+def test_cierre_de_mercados_futuros_de_indices_a_diario_y_forex_el_viernes():
+    from zoneinfo import ZoneInfo
+    from tradingbot.skills.levels.daylevels import market_close
+    ny = ZoneInfo("America/New_York")
+    at = lambda day, h, m=0, s=0: datetime(2025, 3, day, h, m, s, tzinfo=ny)      # noqa: E731  (lunes 3 ... domingo 9)
+    jueves = market_close(at(6, 16, 59, 50), at(6, 17, 0, 10), 17 * 60)
+    assert jueves["weekly"] is False and jueves["markets"] == ("Futuros de índices USA",) and jueves["when"] == at(6, 17)
+    viernes = market_close(at(7, 16, 59, 50), at(7, 17, 0, 10), 17 * 60)
+    assert viernes["weekly"] is True and viernes["markets"] == ("Futuros de índices USA", "Forex")
+    assert market_close(at(6, 17, 0, 10), at(6, 17, 0, 30), 17 * 60) is None          # ya anotado en la comprobación anterior
+    assert market_close(at(6, 10), at(6, 10, 0, 20), 17 * 60) is None                 # no es la hora
+    assert market_close(at(8, 16, 59, 50), at(8, 17, 0, 10), 17 * 60) is None         # sábado: sin cierres
+    assert market_close(at(9, 16, 59, 50), at(9, 17, 0, 10), 17 * 60) is None         # domingo
+
+
+def test_el_registro_anota_el_cierre_de_mercados(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from zoneinfo import ZoneInfo
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "levels"}]), cfg, "t")
+    when = datetime(2025, 3, 7, 17, 0, tzinfo=ZoneInfo("America/New_York"))
+    win._on_market_closed({"when": when, "weekly": True, "markets": ("Futuros de índices USA", "Forex"),
+                           "index_reopen": 18 * 60, "reopen": 17 * 60})
+    text = win.log_view.toPlainText()
+    assert "cierre semanal a las 17:00 NY" in text and "Forex" in text
+    win._on_market_closed({"when": when.replace(day=6), "weekly": False, "markets": ("Futuros de índices USA",),
+                           "index_reopen": 18 * 60, "reopen": 17 * 60})
+    assert "cierre de los futuros de índices USA a las 17:00 NY" in win.log_view.toPlainText()

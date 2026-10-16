@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "setup.updated": self._on_setup,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "setup.updated": self._on_setup,
             "bias.schedule": self._on_bias_schedule, "bias.execution": self._on_execution,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
@@ -691,6 +691,20 @@ class MainWindow(QMainWindow):
         self.log_once("levels", (p["symbol"], p["timeframe"], start, tuple(sorted(today.items()))),
                       f"levels: día de trading desde las {start // 60:02d}:{start % 60:02d} NY ({kind}) - "
                       f"{levels or 'sin niveles'}")
+
+    def _on_market_closed(self, p: dict) -> None:
+        hour = p["when"].strftime("%H:%M")
+        hhmm = lambda m: f"{m // 60:02d}:{m % 60:02d}"          # noqa: E731
+        if p["weekly"]:
+            self.log(f"mercados: cierre semanal a las {hour} NY - Forex y futuros de índices USA",
+                     f"Cierre semanal (viernes {hour} NY): cierran Forex y los futuros de los índices americanos.\n"
+                     f"Reabren el domingo: Forex a las {hhmm(p['reopen'])} NY y los índices a las {hhmm(p['index_reopen'])} NY.",
+                     tone="warn")
+        else:
+            self.log(f"mercados: cierre de los futuros de índices USA a las {hour} NY",
+                     f"Cierre diario de los futuros de los índices americanos ({hour} NY): reabren a las "
+                     f"{hhmm(p['index_reopen'])} NY con un nuevo día de trading.\nForex sigue abierto: su día de trading "
+                     f"empieza a las {hhmm(p['reopen'])} NY.", tone="warn")
 
     def _on_setup(self, p: dict) -> None:
         s = p["last"]

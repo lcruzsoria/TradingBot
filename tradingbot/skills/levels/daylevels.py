@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 
@@ -28,6 +28,7 @@ DEFAULT_MAX_TF_MINUTES = 720          # hasta H12: con velas diarias "el día" e
 DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86", "SMA": "#00ACC1"}
 DEFAULT_SMA_PERIOD = 30                # velas del timeframe que se está viendo
 SMA_STYLES = ("normal", "discontinuo", "punteado")
+DEFAULT_MARKET_CLOSE = "17:00"        # cierre de los futuros de índices (diario) y de Forex (semanal), hora de NY
 DEFAULT_DAY_START = "17:00"           # inicio del día (y TDO) en hora de NY: forex, metales, cripto...
 DEFAULT_INDEX_DAY_START = "18:00"     # ...y en los índices americanos
 DEFAULT_US_INDICES = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")
@@ -118,3 +119,20 @@ def compute(ts, open_, high, low, server_ahead: int, start_minutes: int,
 
 def _date(day: int) -> date:
     return date.fromordinal(date(1970, 1, 1).toordinal() + day)
+
+
+def market_close(prev: datetime, now: datetime, close_minutes: int) -> dict | None:
+    """Cierre de mercado ocurrido entre `prev` y `now` (hora de NY), o None.
+
+    Los futuros de los índices americanos cierran cada día laborable a la hora de cierre (17:00 NY) y reabren una hora
+    después. Forex, metales y cripto cierran solo el viernes (cierre semanal, a la misma hora) y reabren el domingo.
+    Sábados y domingos no hay cierres.
+    """
+    if prev >= now or now.weekday() > 4:
+        return None
+    closing = now.replace(hour=close_minutes // 60, minute=close_minutes % 60, second=0, microsecond=0)
+    if not prev < closing <= now:
+        return None
+    weekly = now.weekday() == 4
+    return {"when": closing, "weekly": weekly,
+            "markets": ("Futuros de índices USA", "Forex") if weekly else ("Futuros de índices USA",)}
