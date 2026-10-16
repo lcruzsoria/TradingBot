@@ -32,14 +32,69 @@ def _htf_votes(t, h, l, c, anchor: int, hours: int, kind: str) -> np.ndarray:
     return votes[ids]
 
 
-def score_history(ts, o, h, l, c, rules: list[tuple[str, float]], ahead: int, anchor_minutes: int, recalc_hours: float,
-                  htf_hours: int, sma_period: int) -> np.ndarray:
-    """Puntuación (suma de voto x peso) de cada vela. `rules`: (clave, peso) de las reglas activas."""
+def efficiency(c, k: int) -> np.ndarray:
+    """Eficiencia del movimiento de las k velas anteriores a cada vela: |cierre final - inicial| / suma de |cambios|.
+
+    0 = el precio fue y volvió (lateral); 1 = fue en línea recta (tendencia).
+    """
+    c = np.asarray(c, dtype=float)
+    n = len(c)
+    csum = np.r_[0.0, np.cumsum(np.abs(np.diff(c, prepend=c[0])))]
+    i = np.arange(n)
+    lo = np.maximum(i - k, 0)
+    path = csum[i] - csum[lo + 1]                                           # suma de |cambios| entre lo e i-1
+    net = np.abs(c[np.maximum(i - 1, 0)] - c[lo])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = np.where(path > 0, net / path, 0.0)
+    out[:k] = 0.0
+    return out
+
+
+def recent_efficiency(ts, c, hours: float) -> float | None:
+    """Eficiencia del precio en las últimas `hours` horas hasta la última vela, o None si no hay velas suficientes."""
+    ts = np.asarray(ts, dtype=np.int64)
+    c = np.asarray(c, dtype=float)
+    if len(c) < 3:
+        return None
+    first = int(np.searchsorted(ts, ts[-1] - int(hours * 3600)))
+    if first >= len(c) - 2 or ts[0] > ts[-1] - int(hours * 3600):
+        return None                                                          # el histórico no llega a cubrir la ventana
+    window = c[first:]
+    path = float(np.abs(np.diff(window)).sum())
+    return abs(float(window[-1] - window[0])) / path if path > 0 else 0.0
+
+
+def lateral_flags(ts, c, hours: float, min_efficiency: float, ids) -> np.ndarray:
+    """True en las velas cuyo bloque empezó con el mercado lateral (eficiencia de las últimas `hours` horas < mínimo)."""
+    ts = np.asarray(ts, dtype=np.int64)
+    if len(ts) < 3 or min_efficiency <= 0:
+        return np.zeros(len(ts), dtype=bool)
+    step = max(int(np.median(np.diff(ts))), 1)
+    k = max(int(round(hours * 3600 / step)), 1)
+    return (efficiency(c, k) < min_efficiency)[ids]
+
+
+def sma_vote(px, c, period: int) -> np.ndarray:
+    """+1 / -1 según el precio `px` de cada vela esté sobre o bajo la media de los `period` cierres anteriores (0 si faltan velas)."""
+    n = len(c)
+    csum = np.r_[0.0, np.cumsum(c)]
+    sma = np.full(n, np.nan)
+    if n > period:
+        sma[period:] = (csum[period:n] - csum[:n - period]) / period
+    return np.where(np.isnan(sma), 0.0, np.sign(px - sma))
+
+
+def block_ids(t, anchor_seconds: int, hours: float) -> np.ndarray:
+    """Primera vela de cada bloque de `hours` horas, repetida para todas las velas del bloque (el sesgo se congela ahí)."""
+    block = _first((t - anchor_seconds) // int(hours * 3600))
+    return np.flatnonzero(block)[np.cumsum(block) - 1]
+
+
+def rule_votes(ts, o, h, l, c, keys, ahead: int, anchor_minutes: int, htf_hours: int, sma_period: int) -> dict[str, np.ndarray]:
+    """Voto (+1 / -1 / 0) de cada regla en cada vela, con el precio de apertura de la vela (sin mirar al futuro)."""
     ts = np.asarray(ts, dtype=np.int64)
     o, h, l, c = (np.asarray(a, dtype=float) for a in (o, h, l, c))
     n = len(ts)
-    if n == 0:
-        return np.zeros(0)
     t, anchor = ts - int(ahead), anchor_minutes * 60
     day = (t - anchor) // DAY
     first = _first(day)
@@ -57,22 +112,27 @@ def score_history(ts, o, h, l, c, rules: list[tuple[str, float]], ahead: int, an
     mid_idx = np.minimum.reduceat(after_mid, starts)[ids]
     valid = (mid_idx < n) & (idx >= mid_idx)
     votes["midnight"] = np.where(valid, np.sign(px - o[np.minimum(mid_idx, n - 1)]), 0.0)
-    wanted = {key for key, _w in rules}
+    wanted = set(keys)
     if "htf_sweep" in wanted:
         votes["htf_sweep"] = _htf_votes(t, h, l, c, anchor, htf_hours, "sweep")
     if "htf_break" in wanted:
         votes["htf_break"] = _htf_votes(t, h, l, c, anchor, htf_hours, "break")
     if "sma" in wanted:
-        csum = np.r_[0.0, np.cumsum(c)]
-        sma = np.full(n, np.nan)
-        if n > sma_period:
-            sma[sma_period:] = (csum[sma_period:n] - csum[:n - sma_period]) / sma_period      # cierres de las velas anteriores
-        votes["sma"] = np.where(np.isnan(sma), 0.0, np.sign(px - sma))
-    total = np.zeros(n)
+        votes["sma"] = sma_vote(px, c, sma_period)
+    return votes
+
+
+def score_history(ts, o, h, l, c, rules: list[tuple[str, float]], ahead: int, anchor_minutes: int, recalc_hours: float,
+                  htf_hours: int, sma_period: int) -> np.ndarray:
+    """Puntuación (suma de voto x peso) de cada vela. `rules`: (clave, peso) de las reglas activas."""
+    ts = np.asarray(ts, dtype=np.int64)
+    if len(ts) == 0:
+        return np.zeros(0)
+    votes = rule_votes(ts, o, h, l, c, [key for key, _w in rules], ahead, anchor_minutes, htf_hours, sma_period)
+    total = np.zeros(len(ts))
     for key, weight in rules:
         if key in votes:
             total += np.nan_to_num(votes[key]) * float(weight)
     if recalc_hours and recalc_hours > 0:                              # congelado: solo cambia al crearse la vela 0
-        block = _first((t - anchor) // int(recalc_hours * 3600))
-        total = total[np.flatnonzero(block)[np.cumsum(block) - 1]]
+        total = total[block_ids(ts - int(ahead), anchor_minutes * 60, recalc_hours)]
     return total

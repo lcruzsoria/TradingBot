@@ -342,7 +342,8 @@ class RulesList(QWidget):
                 self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points, vote.vote))
             tone = {Bias.BULLISH: theme.BULL, Bias.BEARISH: theme.BEAR}.get(result.bias, theme.MUTED)
             threshold = {Bias.BULLISH: f"+{result.min_score:g}", Bias.BEARISH: f"-{result.min_score:g}"}.get(result.bias, f"±{result.min_score:g}")
-            total = QLabel(f"Puntuación {result.score:+g}  ·  umbral {threshold}  ·  {result.bias.value}")
+            lateral = "  ·  lateral" if getattr(result, "lateral", False) else ""
+            total = QLabel(f"Puntuación {result.score:+g}  ·  umbral {threshold}  ·  {result.bias.value}{lateral}")
             total.setStyleSheet(f"color: {tone}; font-size: 11px;")
             total.setToolTip(result.summary)
             self._rows.addWidget(total)

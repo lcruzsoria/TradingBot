@@ -81,7 +81,7 @@ def test_el_enlace_voto_de_cada_regla_abre_el_editor_y_aplica_y_guarda(qapp, tmp
     env_file.write_text("BIAS_RULES=prev_day_break, tdo, midnight\nBIAS_MIN_SCORE=2\n", encoding="utf-8")
     monkeypatch.setattr(envconfig, "ENV_FILE", env_file)
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
-    engine = BiasEngine([PrevDayBreak(), AboveBelowTdo()], min_score=2)
+    engine = BiasEngine([PrevDayBreak(), AboveBelowTdo(weight=1)], min_score=2)
     bus = EventBus()
     win = MainWindow(bus, SkillManager(bus, Services(None, engine, cfg, EnvConfig()), []), cfg, "t")
     assert "Voto de cada regla" in win.rules_panel.note.text() and "href" in win.rules_panel.note.text()
@@ -95,3 +95,11 @@ def test_el_enlace_voto_de_cada_regla_abre_el_editor_y_aplica_y_guarda(qapp, tmp
     assert "reglas actualizadas" in win.log_view.toPlainText()
     win._apply_rules([], 2.0)                                           # sin reglas: BIAS_RULES=ninguna
     assert envconfig.parse(env_file.read_text(encoding="utf-8"))["BIAS_RULES"] == "ninguna"
+
+
+def test_el_editor_incluye_el_filtro_de_lateralidad(qapp):
+    dialog = RulesDialog(None, [("tdo", 2.0)], 3.0, 0.15)
+    assert dialog.lateral_min() == 0.15
+    dialog.lateral_spin.setValue(0.25)
+    assert dialog.lateral_min() == 0.25
+    assert RulesDialog(None, [("tdo", 2.0)], 3.0).lateral_min() is None          # sin motor con filtro: el campo no aparece

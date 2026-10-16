@@ -23,7 +23,8 @@ def test_sin_tradingbot_env_se_usan_los_valores_del_codigo(tmp_path):
     assert cfg["app"]["max_bars"] == DEFAULT_MAX_BARS
     assert cfg["app"]["profile"] is None and cfg["app"]["demo"] is False
     assert [r["type"] for r in cfg["bias"]["rules"]] == list(DEFAULT_BIAS_RULES)
-    assert cfg["bias"]["min_score"] == 2 and cfg["bias"]["require_all"] is False
+    assert cfg["bias"]["min_score"] == 3 and cfg["bias"]["require_all"] is False
+    assert cfg["bias"]["lateral_hours"] == 6 and cfg["bias"]["lateral_min_efficiency"] == 0.15      # filtro de lateralidad
 
 
 def test_los_valores_de_tradingbot_env_mandan(tmp_path):
@@ -42,7 +43,7 @@ BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0,25
     assert (app["profile"], app["demo"], app["symbol"], app["timeframe"], app["max_bars"]) == \
         ("real", True, "NAS100FT.r", "4h", 5000)                   # el símbolo conserva sus mayúsculas
     assert cfg["bias"] == {"rules": [{"type": "above_below_open", "tolerance_pct": 0.25}],
-                           "min_score": 2, "require_all": True}
+                           "min_score": 2, "require_all": True, "lateral_hours": 6.0, "lateral_min_efficiency": 0.15}
     engine = BiasEngine.from_config(cfg["bias"])
     assert engine.min_score == 2 and engine.require_all and engine.rules[0].params == {"tolerance_pct": 0.25}
 
@@ -61,6 +62,8 @@ def test_claves_vacias_usan_el_valor_por_defecto_y_ninguna_apaga_las_reglas(tmp_
     ("BIAS_MIN_SCORE=0", "BIAS_MIN_SCORE"),
     ("BIAS_MIN_VOTES=2", "BIAS_MIN_SCORE"),
     ("BIAS_PREV_DAY_BREAK_WEIGHT=-1", "BIAS_PREV_DAY_BREAK_WEIGHT"),
+    ("BIAS_LATERAL_MIN_EFFICIENCY=1,5", "BIAS_LATERAL_MIN_EFFICIENCY"),
+    ("BIAS_LATERAL_HOURS=-1", "BIAS_LATERAL_HOURS"),
     ("APP_DEMO=quizás", "true o false"),
 ])
 def test_valores_no_validos(tmp_path, text, match):
@@ -120,9 +123,9 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
             assert lines[j].startswith("#"), f"{line} no tiene comentario"
     # tal como se sube al repositorio, el fichero equivale a los valores por defecto del código
     from tradingbot.config import DEFAULT_CONFIG_FILE
-    # (se usa la versión subida a git: el fichero local lo cambian el editor de reglas y el de temas)
+    # (se usa la versión preparada para subir a git, no la local: la cambian el editor de reglas y el de temas)
     import subprocess
-    shipped = subprocess.run(["git", "show", "HEAD:tradingbot.env"], cwd=envconfig.ENV_FILE.parent, capture_output=True)
+    shipped = subprocess.run(["git", "show", ":tradingbot.env"], cwd=envconfig.ENV_FILE.parent, capture_output=True)
     path = envconfig.ENV_FILE
     if shipped.returncode == 0:
         path = tmp_path / "tradingbot.env"
@@ -131,8 +134,8 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
     assert project["app"] == defaults["app"]
     rules = lambda cfg: [(r["type"], float(r.get("tolerance_pct", 0))) for r in cfg["bias"]["rules"]]  # noqa: E731
     assert rules(project) == rules(defaults)
-    assert {k: project["bias"][k] for k in ("min_score", "require_all")} == \
-        {k: defaults["bias"][k] for k in ("min_score", "require_all")}
+    keys = ("min_score", "require_all", "lateral_hours", "lateral_min_efficiency")
+    assert {k: project["bias"][k] for k in keys} == {k: defaults["bias"][k] for k in keys}
 
 
 def test_las_opciones_de_la_linea_de_comandos_mandan(monkeypatch):

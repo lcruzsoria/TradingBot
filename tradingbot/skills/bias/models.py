@@ -40,6 +40,8 @@ class BiasResult:
     summary: str = ""
     score: float = 0.0          # suma de voto x peso de todas las reglas
     min_score: float = 1.0      # puntuación mínima (en valor absoluto) para que haya sesgo
+    lateral: bool = False       # mercado lateral: el filtro de lateralidad dejó el sesgo en No Bias
+    efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia)
 
     def allows(self, direction: Direction) -> bool:
         """Filtro de operativa: Bullish solo Long, Bearish solo Short, No Bias ambas."""

@@ -144,7 +144,7 @@ def test_tdo_y_midnight_juntos_dan_sesgo_y_opuestos_se_anulan():
     assert eng.evaluate(candles, levels={"tdo": 1.09, "midnight": 1.08}).bias is Bias.BEARISH     # -1 -1
     # con la ruptura del día anterior (peso 2) por delante de ambos
     full = BiasEngine([PrevDayBreak(), AboveBelowTdo(), AboveBelowMidnight()], min_score=2)
-    assert full.evaluate(make_candles((1.0, 1.1), 1.10, 1.12), levels={"tdo": 1.0, "midnight": 1.11}).score == 4        # +2 +1 +1
+    assert full.evaluate(make_candles((1.0, 1.1), 1.10, 1.12), levels={"tdo": 1.0, "midnight": 1.11}).score == 5        # +2 +2 (TDO) +1
 
 
 def test_la_skill_bias_recalcula_cuando_llegan_los_niveles_del_dia():
@@ -396,3 +396,29 @@ def test_el_boton_sesgo_muestra_el_histograma_bajo_el_grafico(tmp_path, monkeypa
     assert [label for _value, label in win.bias_hist.getPlotItem().getAxis("right")._tickLevels[0]] == ["+2", "0", "-2"]
     win._on_bias_history({"symbol": "GBPUSD", "timeframe": "1h", "scores": [1.0], "min_score": 2.0})      # otro activo: se ignora
     assert win.bias_hist.bar_count == 3
+
+
+def test_filtro_de_lateralidad_deja_sin_sesgo_un_mercado_que_fue_y_volvio():
+    from tradingbot.skills.bias.history import efficiency, lateral_flags, recent_efficiency
+    ts = np.arange(40) * 900 + 1_700_000_000
+    lateral = np.array([1.0, 1.1] * 20)                           # sube y baja: no avanza
+    tendencia = np.linspace(1.0, 1.4, 40)                         # línea recta
+    assert recent_efficiency(ts, lateral, 3) < 0.15 and recent_efficiency(ts, tendencia, 3) == pytest.approx(1.0)
+    assert recent_efficiency(ts, tendencia, 24) is None           # el histórico no cubre la ventana
+    eff = efficiency(tendencia, 12)
+    assert eff[12] == pytest.approx(1.0) and eff[5] == 0.0        # sin velas suficientes: 0
+    ids = np.arange(40)
+    assert lateral_flags(ts, lateral, 3, 0.15, ids)[20:].all() and not lateral_flags(ts, tendencia, 3, 0.15, ids)[20:].any()
+    assert not lateral_flags(ts, lateral, 3, 0.0, ids).any()      # filtro apagado
+
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)
+    candles["ts"] = np.arange(len(candles)) * 900 + 1_700_000_000
+    candles["close"] = [1.04, 1.06] * (len(candles) // 2) + [1.06] * (len(candles) % 2)      # sube y baja y acaba en 1.06
+    sin_filtro = BiasEngine([AboveBelowTdo()], min_score=2)
+    con_filtro = BiasEngine([AboveBelowTdo()], min_score=2, lateral_hours=1, lateral_min=0.5)
+    niveles = {"tdo": 1.0}
+    assert sin_filtro.evaluate(candles, levels=niveles).bias is Bias.BULLISH
+    res = con_filtro.evaluate(candles, levels=niveles)
+    assert res.bias is Bias.NO_BIAS and res.lateral and "lateral" in res.summary.lower() and res.score == 2
+    con_filtro.configure([("tdo", 2.0)], lateral_min=0.0)         # el editor lo apaga en caliente
+    assert con_filtro.evaluate(candles, levels=niveles).bias is Bias.BULLISH

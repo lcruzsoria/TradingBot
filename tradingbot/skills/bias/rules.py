@@ -112,6 +112,7 @@ class AboveBelowTdo(BiasRule):
     Parámetro opcional: tolerance_pct (zona neutra alrededor del nivel, en %).
     """
     title = "Precio vs TDO"
+    weight = 2.0      # el backtest en M5 (docs/analisis_sesgo) lo da como la regla de dirección más estable
 
     def evaluate(self, ctx: BiasContext) -> RuleVote:
         return _level_vote(self, ctx, ctx.tdo, "el TDO", "Sin TDO del día (skill Levels apagada o timeframe grande)")

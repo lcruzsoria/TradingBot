@@ -26,8 +26,10 @@ DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type
 # Valores por defecto de tradingbot.env
 DEFAULT_SYMBOL = "EURUSD"                                     # FEED_SYMBOL
 DEFAULT_MAX_BARS = 2_000_000                                  # FEED_MAX_BARS
-DEFAULT_BIAS_RULES = ("prev_day_break", "tdo", "midnight")   # BIAS_RULES
-DEFAULT_MIN_SCORE = 2                                         # BIAS_MIN_SCORE
+DEFAULT_BIAS_RULES = ("prev_day_break", "tdo", "midnight", "htf_break")   # BIAS_RULES
+DEFAULT_MIN_SCORE = 3                                         # BIAS_MIN_SCORE
+DEFAULT_LATERAL_HOURS = 6.0                                   # BIAS_LATERAL_HOURS
+DEFAULT_LATERAL_MIN = 0.15                                    # BIAS_LATERAL_MIN_EFFICIENCY
 DEFAULT_REQUIRE_ALL = False                                   # BIAS_REQUIRE_ALL
 
 # Ajustes que estaban en config.toml y ahora van en tradingbot.env: (sección, clave) -> clave nueva
@@ -171,7 +173,14 @@ def bias_settings(bias) -> dict:
         weight = rule.get("weight", 1)
         if not isinstance(weight, (int, float)) or weight < 0:
             raise ConfigError(f"BIAS_{rule['type'].upper()}_WEIGHT={weight}: el peso debe ser un número de 0 o más.")
-    return {"rules": rules, "min_score": min_score, "require_all": bias.get_bool("REQUIRE_ALL", DEFAULT_REQUIRE_ALL)}
+    lateral_hours = bias.get_float("LATERAL_HOURS", DEFAULT_LATERAL_HOURS)
+    lateral_min = bias.get_float("LATERAL_MIN_EFFICIENCY", DEFAULT_LATERAL_MIN)
+    if lateral_hours < 0:
+        raise ConfigError(f"BIAS_LATERAL_HOURS={lateral_hours:g} debe ser 0 (sin filtro) o más.")
+    if not 0 <= lateral_min <= 1:
+        raise ConfigError(f"BIAS_LATERAL_MIN_EFFICIENCY={lateral_min:g} debe estar entre 0 y 1.")
+    return {"rules": rules, "min_score": min_score, "require_all": bias.get_bool("REQUIRE_ALL", DEFAULT_REQUIRE_ALL),
+            "lateral_hours": lateral_hours, "lateral_min_efficiency": lateral_min}
 
 
 def _scalar(text: str):

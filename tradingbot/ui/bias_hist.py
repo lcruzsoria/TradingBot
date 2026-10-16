@@ -26,6 +26,7 @@ class BiasHistogram(pg.PlotWidget):
         pi.getViewBox().setMouseEnabled(x=False, y=False)
         self.setFixedHeight(110)
         self._scores = np.zeros(0)
+        self._lateral = None
         self._min = 1.0
         self._items: list = []
         self.style()
@@ -41,8 +42,10 @@ class BiasHistogram(pg.PlotWidget):
         """El eje de tiempo sigue al del gráfico de precio."""
         self.getPlotItem().setXLink(chart.getPlotItem())
 
-    def set_scores(self, scores, min_score: float) -> None:
+    def set_scores(self, scores, min_score: float, lateral=None) -> None:
+        """lateral: velas con el mercado lateral (sin sesgo aunque la puntuación llegue al umbral): se pintan en gris."""
         self._scores, self._min = np.asarray(scores, dtype=float), float(min_score)
+        self._lateral = None if lateral is None else np.asarray(lateral, dtype=bool)
         self._draw()
 
     def _draw(self) -> None:
@@ -59,7 +62,8 @@ class BiasHistogram(pg.PlotWidget):
         bull, bear, flat = QColor(theme.BULL), QColor(theme.BEAR), QColor(theme.MUTED)
         for color in (bull, bear, flat):
             color.setAlphaF(0.85)
-        brushes = [bull if v >= self._min else bear if v <= -self._min else flat for v in y]
+        side = np.zeros(len(y), dtype=bool) if self._lateral is None or len(self._lateral) != len(scores) else self._lateral[first:]
+        brushes = [flat if lat else bull if v >= self._min else bear if v <= -self._min else flat for v, lat in zip(y, side)]
         bars = pg.BarGraphItem(x=x, height=y, width=0.8, brushes=brushes, pens=[pg.mkPen(None)] * len(y))
         pi.addItem(bars)
         self._items.append(bars)

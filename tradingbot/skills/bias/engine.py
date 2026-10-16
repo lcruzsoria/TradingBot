@@ -12,15 +12,19 @@ from datetime import date
 import pandas as pd
 
 from .context import build_context
+from .history import recent_efficiency
 from .models import Bias, BiasResult, RuleVote
 from .rules import RULE_REGISTRY, BiasRule
 
 
 class BiasEngine:
-    def __init__(self, rules: list[BiasRule], min_score: float = 1, require_all: bool = False):
+    def __init__(self, rules: list[BiasRule], min_score: float = 1, require_all: bool = False,
+                 lateral_hours: float = 0.0, lateral_min: float = 0.0):
         self.rules = rules
         self.min_score = max(float(min_score), 1e-9)
         self.require_all = require_all
+        self.lateral_hours = float(lateral_hours)       # ventana del filtro de lateralidad (0: sin filtro)
+        self.lateral_min = float(lateral_min)           # eficiencia mínima del precio en esa ventana para tener sesgo
 
     @classmethod
     def from_config(cls, cfg: dict) -> "BiasEngine":
@@ -33,9 +37,11 @@ class BiasEngine:
                 raise ValueError(f"Regla de Bias desconocida: {key!r}. Disponibles: {', '.join(RULE_REGISTRY)}")
             params = {k: v for k, v in entry.items() if k not in ("type", "enabled")}
             rules.append(RULE_REGISTRY[key](**params))
-        return cls(rules, cfg.get("min_score", 1), cfg.get("require_all", False))
+        return cls(rules, cfg.get("min_score", 1), cfg.get("require_all", False), cfg.get("lateral_hours", 0.0),
+                   cfg.get("lateral_min_efficiency", 0.0))
 
-    def configure(self, selection: list[tuple[str, float]], min_score: float | None = None) -> None:
+    def configure(self, selection: list[tuple[str, float]], min_score: float | None = None,
+                  lateral_min: float | None = None) -> None:
         """Cambia en caliente las reglas activas y sus pesos. `selection`: [(clave, peso)] en el orden deseado.
 
         Las reglas que ya estaban activas conservan sus parámetros (p. ej. tolerance_pct).
@@ -51,6 +57,12 @@ class BiasEngine:
         self.rules = rules                                  # se sustituye entera: la evaluación en curso no ve a medias
         if min_score is not None:
             self.min_score = max(float(min_score), 1e-9)
+        if lateral_min is not None:
+            self.lateral_min = max(float(lateral_min), 0.0)
+
+    @property
+    def lateral_enabled(self) -> bool:
+        return self.lateral_hours > 0 and self.lateral_min > 0
 
     def evaluate(self, candles: pd.DataFrame, day: date | None = None, levels: dict | None = None,
                  htf: object | None = None, htf_break: object | None = None) -> BiasResult:
@@ -68,6 +80,14 @@ class BiasEngine:
 
         bias, summary = self._aggregate(votes)
         score = sum(v.points for v in votes)
+        lateral, efficiency = False, None
+        if self.lateral_enabled and "ts" in candles.columns:
+            efficiency = recent_efficiency(candles["ts"].to_numpy(), candles["close"].to_numpy(), self.lateral_hours)
+            if efficiency is not None and efficiency < self.lateral_min:
+                lateral = True
+                summary = (f"Mercado lateral: eficiencia {efficiency:.2f} < {self.lateral_min:g} en las últimas "
+                           f"{self.lateral_hours:g} h, sin sesgo ({summary})")
+                bias = Bias.NO_BIAS
         levels = {}
         if ctx.prev_high is not None:
             levels["Máx. previo"] = ctx.prev_high
@@ -78,7 +98,7 @@ class BiasEngine:
             levels["TDO"] = ctx.tdo
         if ctx.midnight is not None:
             levels["Midnight"] = ctx.midnight
-        return BiasResult(bias, ctx.day, tuple(votes), levels, summary, score, self.min_score)
+        return BiasResult(bias, ctx.day, tuple(votes), levels, summary, score, self.min_score, lateral, efficiency)
 
     def _aggregate(self, votes: list[RuleVote]) -> tuple[Bias, str]:
         if not votes:

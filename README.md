@@ -152,8 +152,9 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Quotes y de las cifras de la cuenta (admite decimales). |
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
 | **BIAS** — sesgo del día | | |
-| `BIAS_RULES` | `prev_day_break, tdo, midnight` | Reglas activas, separadas por comas (`prev_day_break`, `tdo`, `midnight`, `above_below_open`). `ninguna`: sin reglas (siempre No Bias). |
-| `BIAS_MIN_SCORE` | `2` | Puntuación mínima (suma de voto x peso) para que haya sesgo. |
+| `BIAS_RULES` | `prev_day_break, tdo, midnight, htf_break` | Reglas activas, separadas por comas (`prev_day_break`, `tdo`, `midnight`, `htf_break`, `htf_sweep`, `sma`, `above_below_open`). `ninguna`: sin reglas (siempre No Bias). |
+| `BIAS_MIN_SCORE` | `3` | Umbral: puntuación mínima (suma de voto x peso) para que haya sesgo (`+3` Bullish, `-3` Bearish). |
+| `BIAS_LATERAL_HOURS` / `BIAS_LATERAL_MIN_EFFICIENCY` | `6` / `0.15` | Filtro de lateralidad: sin sesgo si en las últimas horas el precio avanzó menos de esa fracción de su recorrido (`0`: sin filtro). |
 | `BIAS_RECALC_INDEX_HOURS` / `BIAS_RECALC_HOURS` | `3` / `4` | Cada cuántas horas se recalcula el sesgo solo, alineado con el inicio del día de trading: índices USA / resto. `0`: desactivado. |
 | `BIAS_EXEC_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO a los setups. |
 | `BIAS_EXEC_PREMIUM_DISCOUNT` | `true` | Las reversiones solo compran bajo la apertura del día y venden sobre ella. |
@@ -227,8 +228,9 @@ ponlo en **Ilimitado** y reinicia el terminal. El historial disponible depende t
 Cada regla vota +1 (alcista), -1 (bajista) o 0 (sin opinión). Se configura en el bloque BIAS de `tradingbot.env`:
 
 ```ini
-BIAS_RULES=prev_day_break, tdo, midnight       # reglas activas
-BIAS_MIN_SCORE=2                              # puntuación mínima (voto x peso)
+BIAS_RULES=prev_day_break, tdo, midnight, htf_break   # reglas activas
+BIAS_MIN_SCORE=3                              # umbral de puntuación (voto x peso)
+BIAS_LATERAL_MIN_EFFICIENCY=0.15              # sin sesgo si el mercado va lateral (0: sin filtro)
 BIAS_PREV_DAY_BREAK_WEIGHT=2                  # peso de cada regla
 BIAS_REQUIRE_ALL=false                        # true: todas las reglas activas deben coincidir
 BIAS_TDO_TOLERANCE_PCT=0                      # parámetro tolerance_pct de la regla tdo
@@ -243,16 +245,22 @@ Reglas incluidas (cada una vota +1, -1 o 0 y tiene su peso `BIAS_<REGLA>_WEIGHT`
 | Regla | Peso | Vota |
 |---|---:|---|
 | `prev_day_break` | 2 | +1 si el precio supera el máximo del día anterior, -1 si cae bajo el mínimo. |
-| `tdo` | 1 | +1 sobre el **TDO** (True Day Open: apertura del día de trading, 18:00 NY en índices americanos y 17:00 en el resto), -1 bajo él. |
+| `tdo` | 2 | +1 sobre el **TDO** (True Day Open: apertura del día de trading, 18:00 NY en índices americanos y 17:00 en el resto), -1 bajo él. |
 | `midnight` | 1 | +1 sobre la apertura de las **00:00 de Nueva York**, -1 bajo ella. No vota hasta que existe esa vela. |
 | `above_below_open` | 1 | Apertura del día por fecha del servidor. La sustituye `tdo`: no las actives juntas (contaría doble). |
 | `sma` | 2 | **Precio vs SMA** (opcional): media móvil simple de los cierres (botón SMA del gráfico: 30 periodos por defecto, con las velas del timeframe visible). Precio **por encima** de la SMA: +peso (alcista); **por debajo**: -peso (bajista). Los periodos se cambian con el botón de la rueda junto al botón SMA. |
 | `htf_break` | 2 | **Continuación de la vela anterior** (opcional, aún por medir): mismas velas que `htf_sweep` (H3 en índices, H4 en el resto); el sesgo de la vela actual sale de la n-1 y la n-2. Si la n-1 **cierra por encima del High** de la n-2: +1 (continuación alcista); si **cierra por debajo del Low**: -1 (continuación bajista); si cierra dentro, no puntúa; si la n-1 barre con mecha los dos lados de la n-2 tampoco puntúa. Es la complementaria del barrido: nunca puntúan a la vez. |
 | `htf_sweep` | 2 | **Sweep mecha de la vela anterior** (opcional, aún por medir): el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores ya cerradas, la n-1 y la n-2. Si la n-1 barre el High de la n-2 y cierra dentro de su rango: -1 (bajista); si barre el Low y cierra dentro: +1 (alcista). Barrer los dos lados, cerrar fuera o no barrer ninguno no puntúa. Las velas se alinean con el inicio del día de trading en NY (18:00 índices, 17:00 resto); tamaño con `BIAS_HTF_SWEEP_INDEX_HOURS` / `BIAS_HTF_SWEEP_HOURS`. |
 
-`tdo` y `midnight` usan los niveles de la skill Levels (si está apagada o el timeframe es grande, votan 0). Con `BIAS_MIN_SCORE=2`,
-`prev_day_break` por sí sola basta para tener sesgo, y TDO y Midnight juntos en el mismo sentido también; si apuntan a lados
-opuestos se anulan. El sesgo se recalcula también cuando cambian el TDO o el Midnight (por ejemplo, al llegar las 00:00 NY).
+`tdo` y `midnight` usan los niveles de la skill Levels (si está apagada o el timeframe es grande, votan 0). Con el umbral por
+defecto (3), una regla de peso 2 sola no basta: hacen falta dos reglas que coincidan (por ejemplo ruptura del día anterior y TDO);
+si apuntan a lados opuestos se anulan.
+
+**Filtro de lateralidad.** Antes de dar un sesgo, el motor mide la *eficiencia* del precio en las últimas 6 horas
+(|cierre final - cierre inicial| / suma de |cambios|): si es menor que 0,15, el mercado va lateral y el resultado es **No Bias**
+aunque la puntuación llegue al umbral (el panel lo marca como «lateral» y el histograma pinta esas velas en gris). El umbral se
+cambia en la ventana «Voto de cada regla» o con `BIAS_LATERAL_MIN_EFFICIENCY` (`0` lo apaga). Los pesos, el umbral y el filtro por
+defecto salen del backtest en M5 de `docs/analisis_sesgo/RESULTADOS.md` (`scripts/analisis_sesgo.py`). El sesgo se recalcula también cuando cambian el TDO o el Midnight (por ejemplo, al llegar las 00:00 NY).
 
 El día se determina con la hora del servidor del broker (la que muestra MT5), que puede no coincidir con tu hora local.
 El sesgo se calcula al cargar velas y al pulsar *Recalcular sesgo*.

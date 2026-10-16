@@ -362,19 +362,22 @@ class MainWindow(QMainWindow):
         engine = self.engine
         if engine is None:
             return
-        dialog = RulesDialog(self, [(r.key, r.weight) for r in engine.rules], engine.min_score)
+        dialog = RulesDialog(self, [(r.key, r.weight) for r in engine.rules], engine.min_score,
+                             getattr(engine, "lateral_min", 0.0))
         if dialog.exec():
-            self._apply_rules(dialog.selection(), dialog.min_score())
+            self._apply_rules(dialog.selection(), dialog.min_score(), dialog.lateral_min())
 
-    def _apply_rules(self, selection: list[tuple[str, float]], min_score: float) -> None:
+    def _apply_rules(self, selection: list[tuple[str, float]], min_score: float, lateral_min: float | None = None) -> None:
         """Aplica al momento las reglas elegidas, las guarda en tradingbot.env y recalcula el sesgo."""
-        self.engine.configure(selection, min_score)
+        self.engine.configure(selection, min_score, lateral_min)
         keys = [key for key, _w in selection]
         try:
             envconfig.set_value(envconfig.ENV_FILE, "BIAS_RULES", ", ".join(keys) or "ninguna")
             for key, weight in selection:
                 envconfig.set_value(envconfig.ENV_FILE, f"BIAS_{key.upper()}_WEIGHT", f"{weight:g}")
             envconfig.set_value(envconfig.ENV_FILE, "BIAS_MIN_SCORE", f"{min_score:g}")
+            if lateral_min is not None:
+                envconfig.set_value(envconfig.ENV_FILE, "BIAS_LATERAL_MIN_EFFICIENCY", f"{lateral_min:g}")
             saved = f"guardadas en {envconfig.ENV_FILE.name}"
         except OSError as exc:
             saved = f"no se pudieron guardar ({exc})"
@@ -726,7 +729,7 @@ class MainWindow(QMainWindow):
     def _on_bias_history(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return
-        self.bias_hist.set_scores(p["scores"], p["min_score"])
+        self.bias_hist.set_scores(p["scores"], p["min_score"], p.get("lateral"))
 
     def _on_market_closed(self, p: dict) -> None:
         hour = p["when"].strftime("%H:%M")

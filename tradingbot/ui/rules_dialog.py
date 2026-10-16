@@ -20,7 +20,7 @@ def rule_choices() -> list[tuple[str, str, str, float]]:
 class RulesDialog(QDialog):
     """Marca las reglas que aplican y fija el peso de cada una; el sesgo es la suma de voto x peso."""
 
-    def __init__(self, parent, active: list[tuple[str, float]], min_score: float) -> None:
+    def __init__(self, parent, active: list[tuple[str, float]], min_score: float, lateral_min: float | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Reglas del sesgo")
         self.setMinimumWidth(560)
@@ -85,6 +85,23 @@ class RulesDialog(QDialog):
         minimum.addWidget(self.min_spin)
         root.addLayout(minimum)
 
+        self.lateral_spin: QDoubleSpinBox | None = None
+        if lateral_min is not None:
+            lateral = QHBoxLayout()
+            label = QLabel("Filtro de lateralidad: eficiencia mínima del precio (0 = sin filtro)")
+            label.setToolTip("Sin sesgo si el precio apenas avanzó en las últimas horas (BIAS_LATERAL_HOURS): |cierre final - "
+                             "inicial| / recorrido total por debajo de este valor.")
+            lateral.addWidget(label)
+            self.lateral_spin = QDoubleSpinBox()
+            self.lateral_spin.setRange(0.0, 1.0)
+            self.lateral_spin.setSingleStep(0.05)
+            self.lateral_spin.setDecimals(2)
+            self.lateral_spin.setValue(lateral_min)
+            self.lateral_spin.setFixedWidth(84)
+            lateral.addStretch(1)
+            lateral.addWidget(self.lateral_spin)
+            root.addLayout(lateral)
+
         self.note = QLabel("")
         self.note.setWordWrap(True)
         self.note.setObjectName("Muted")
@@ -111,3 +128,6 @@ class RulesDialog(QDialog):
 
     def min_score(self) -> float:
         return round(self.min_spin.value(), 3)
+
+    def lateral_min(self) -> float | None:
+        return None if self.lateral_spin is None else round(self.lateral_spin.value(), 3)
