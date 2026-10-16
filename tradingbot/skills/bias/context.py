@@ -13,7 +13,7 @@ class BiasContext:
     day: date                      # día de trading evaluado (hora del servidor del broker)
     today: pd.DataFrame            # velas de ese día
     prev: pd.DataFrame | None      # velas del día de trading anterior (si existe)
-    levels: dict[str, float] = field(default_factory=dict)   # niveles del día que calcula la skill Levels: "tdo", "midnight"
+    levels: dict[str, float] = field(default_factory=dict)   # niveles del día que calcula la skill Levels: "tdo", "midnight", "sma"
     htf: object | None = None      # barrido de la vela anterior en H3 / H4 (tradingbot.skills.bias.htf.HtfSweep)
     htf_break: object | None = None   # continuación: la n-1 cierra fuera del rango de la n-2 (HtfSweep)
 
@@ -21,6 +21,11 @@ class BiasContext:
     def tdo(self) -> float | None:
         """True Day Open: apertura del día de trading (18:00 NY en índices americanos, 17:00 en el resto)."""
         return self.levels.get("tdo")
+
+    @property
+    def sma(self) -> float | None:
+        """Última media móvil simple de los cierres (botón SMA del gráfico), con las velas del timeframe visible."""
+        return self.levels.get("sma")
 
     @property
     def midnight(self) -> float | None:

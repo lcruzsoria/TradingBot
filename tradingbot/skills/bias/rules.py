@@ -165,3 +165,19 @@ class HtfBreakRule(BiasRule):
         if brk is None:
             return self.vote(0, "Sin velas H3 / H4 para evaluar la continuación")
         return self.vote(brk.vote, brk.detail)
+
+
+@register_rule("sma")
+class AboveBelowSma(BiasRule):
+    """Relación del precio con la SMA (media móvil simple de los cierres, 30 periodos por defecto).
+
+    Con las velas del timeframe que se está viendo. Precio por encima de la SMA -> alcista (+peso); por debajo -> bajista
+    (-peso). Periodos, color y trazo se cambian con el botón SMA (LEVELS_SMA_PERIOD). Parámetro opcional: tolerance_pct.
+    """
+    title = "Precio vs SMA"
+    weight = 2.0
+
+    def evaluate(self, ctx: BiasContext) -> RuleVote:
+        sma = ctx.sma
+        name = f"la SMA {int(ctx.levels['sma_period'])}" if "sma_period" in ctx.levels else "la SMA"
+        return _level_vote(self, ctx, sma, name, "Sin SMA: faltan velas para la media")

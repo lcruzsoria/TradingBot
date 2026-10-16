@@ -323,3 +323,37 @@ def test_hexagono_muestra_sesgo_y_puntuacion():
     r = BiasResult(Bias.BULLISH, None, score=4.0, min_score=2.0)
     assert f"{r.bias.value} ({r.score:+g})" == "Bullish (+4)"
     assert f"{Bias.BEARISH.value} ({-3.0:+g})" == "Bearish (-3)"
+
+
+def test_regla_sma_precio_sobre_o_bajo_la_media():
+    from tradingbot.skills.bias.rules import RULE_REGISTRY, AboveBelowSma
+    assert RULE_REGISTRY["sma"] is AboveBelowSma and AboveBelowSma.weight == 2.0       # peso por defecto 2
+    candles = make_candles((1.0, 1.1), 1.04, 1.06)                                    # último precio 1.06
+    motor = BiasEngine([AboveBelowSma()])
+    arriba = motor.evaluate(candles, levels={"sma": 1.05, "sma_period": 30})
+    assert arriba.votes[0].vote == 1 and arriba.votes[0].points == 2 and "SMA 30" in arriba.votes[0].detail
+    assert arriba.bias is Bias.BULLISH
+    abajo = motor.evaluate(candles, levels={"sma": 1.07, "sma_period": 30})
+    assert abajo.votes[0].vote == -1 and abajo.votes[0].points == -2 and abajo.bias is Bias.BEARISH
+    assert motor.evaluate(candles).votes[0].vote == 0                                  # sin SMA (faltan velas): no vota
+
+
+def test_la_skill_calcula_la_sma_con_las_velas_y_los_periodos_de_levels():
+    import time
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.skills.bias.rules import AboveBelowSma
+    import tradingbot.skills  # noqa: F401
+    df = htf_frame([(105, 95, 100)] * 4 + [(130, 120, 125)])             # el último bloque cierra muy por encima de la media
+    df["time"], df["tick_volume"] = pd.to_datetime(df["ts"], unit="s"), 1
+    bus, events = EventBus(), []
+    bus.subscribe("t", "bias.updated", events.append)
+    manager = SkillManager(bus, Services(None, BiasEngine([AboveBelowSma()]), {"app": {}}, EnvConfig()), [{"type": "bias"}])
+    manager.start()
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not events and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    vote = events[-1].payload["result"].votes[0]
+    assert vote.vote == 1 and "SMA 30" in vote.detail and vote.points == 2

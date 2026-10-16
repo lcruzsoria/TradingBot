@@ -8,6 +8,7 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
+from ..levels.daylevels import DEFAULT_SMA_PERIOD
 from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
@@ -34,6 +35,7 @@ class BiasSkill(Skill):
         self._eval_levels: dict = {}             # niveles con los que se calculó el sesgo vigente
         self._offset: int | None = None          # desfase del servidor (clock.offset), para formar las velas H3 / H4
         self._reason = "carga de velas"
+        self._sma_period: int | None = None      # periodos de la SMA con los que se calculó el sesgo vigente
         # tradingbot.env, bloque BIAS
         self.index_hours = self.settings.get_float("RECALC_INDEX_HOURS", DEFAULT_INDEX_HOURS)
         self.hours = self.settings.get_float("RECALC_HOURS", DEFAULT_HOURS)
@@ -59,9 +61,10 @@ class BiasSkill(Skill):
             # El sesgo se congela al abrirse cada vela HTF: los niveles solo lo recalculan si falta el TDO o es de otro día
             # (carga inicial o cambio de día); el Midnight que aparece a mitad de vela esperará al siguiente recálculo.
             now, old = self._day_levels(), self._eval_levels
-            if now == old or ("tdo" in old and now.get("tdo") == old["tdo"]):
+            sma_changed = self._sma_active() and p.get("sma_period") != self._sma_period
+            if not sma_changed and (now == old or ("tdo" in old and now.get("tdo") == old["tdo"])):
                 return
-            self._reason = "niveles del día (TDO)"
+            self._reason = "periodos de la SMA" if sma_changed else "niveles del día (TDO)"
         if topic == "clock.offset":
             if p.get("server_offset") == self._offset:
                 return
@@ -93,13 +96,27 @@ class BiasSkill(Skill):
             return
         self._eval_levels = self._day_levels()
         htf, brk = self._htf()
-        self.result = self.services.engine.evaluate(self._last["df"], levels=self._eval_levels, htf=htf, htf_break=brk)
+        self.result = self.services.engine.evaluate(self._last["df"], levels={**self._eval_levels, **self._sma_level()},
+                                                    htf=htf, htf_break=brk)
         self.result_symbol = self._last["symbol"]
         self.set_caption(f"{self.result.bias.value} ({self.result.score:+g})")      # sesgo y puntuación que lo define
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
         self._execution()
+
+    def _sma_active(self) -> bool:
+        return any(getattr(r, "key", "") == "sma" for r in getattr(self.services.engine, "rules", []))
+
+    def _sma_level(self) -> dict:
+        """Última SMA de las velas con las que se evalúa, con los periodos que fija el botón SMA (skill Levels)."""
+        if not self._sma_active() or self._last is None:
+            return {}
+        self._sma_period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD))
+        close = self._last["df"]["close"]
+        if len(close) < self._sma_period:
+            return {"sma_period": self._sma_period}
+        return {"sma": float(close.tail(self._sma_period).mean()), "sma_period": self._sma_period}
 
     def _htf(self):
         """(barrido, continuación) de la vela anterior en H3 (índices) / H4 (resto); None en la que no esté activa."""

@@ -246,8 +246,8 @@ class MainWindow(QMainWindow):
         grid.setVerticalSpacing(6)
         for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
                                  self.level_btns["pdhl"], self.tbr_btn)):
-            grid.addWidget(btn, i // 2, i % 2)
-        grid.addWidget(self.sma_btn, 2, 0)                   # bajo PDH/PDL
+            grid.addWidget(btn, i // 2, i % 2 + 1)
+        grid.addWidget(self.sma_btn, 0, 0)                   # a la izquierda de TDO (así el panel no crece en altura)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
