@@ -4,7 +4,8 @@ La **TBR activa** es la última TBR (Asia, London o NY Open) que ya cerró: nos 
 patrón es una clase que se registra con `@register_pattern("clave")` y mira las velas posteriores al cierre de esa TBR, hasta
 que empieza la TBR siguiente (ver `window_for`): Asia hasta London, London hasta NY Open y NY Open hasta NY PM.
 
-Para definir un patrón nuevo (los patrones viven en esta carpeta y se importan al final de este módulo):
+Para definir un patrón nuevo (un módulo en esta carpeta, importado al final de este módulo para que se registre). De momento no
+hay ninguno definido:
 
     @register_pattern("mi_patron")
     class MiPatron(Pattern):
@@ -172,5 +173,3 @@ def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
                      "" if best is None else best[1].name, "" if best is None else _hhmm(best[1].start),
                      session_end, _hhmm((last.start + last.minutes) % 1440))
 
-
-from . import continuation, continuation50  # noqa: E402,F401  (registran los patrones definidos)

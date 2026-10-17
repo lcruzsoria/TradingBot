@@ -1,4 +1,4 @@
-"""Skill Pattern: TBR activa, plazo hasta la TBR siguiente y patrón 1 (continuación clásica)."""
+"""Skill Pattern: TBR activa, plazo hasta la TBR siguiente y marco para registrar patrones (de momento no hay ninguno definido)."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.skills.pattern.continuation import ClassicContinuation, scan
 from tradingbot.skills.pattern.patterns import (ANNULLED, DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY, ActiveTbr, Pattern,
                                                 PatternContext, PatternHit, active_tbr, register_pattern, window_for)
 from tradingbot.skills.tbr.zones import Session, Zone, zones_from_settings
@@ -33,7 +32,7 @@ TBR = ActiveTbr("NY_AM", "NY Open", DAY, 105.0, 95.0, -0.5, 9.5)
 
 
 class RompeElHigh(Pattern):
-    """Patrón de prueba: un cierre por encima del High de la TBR activa."""
+    """Patrón de prueba: el primer cierre por encima del High de la TBR activa."""
     title = "Cierre sobre el High"
 
     def detect(self, ctx: PatternContext):
@@ -44,27 +43,43 @@ class RompeElHigh(Pattern):
         return []
 
 
+class EnM5(RompeElHigh):
+    """Igual, pero trabaja siempre con velas M5."""
+    title = "Cierre sobre el High (M5)"
+
+    def timeframe(self):
+        return "5m"
+
+
+class Descarta(Pattern):
+    """Patrón de prueba que siempre se invalida en la primera vela tras el cierre de la TBR."""
+    title = "Siempre invalidado"
+
+    def detect(self, ctx: PatternContext):
+        if ctx.first_bar > ctx.last_bar:
+            return []
+        return [PatternHit(self.key, self.title, "short", ctx.first_bar, ctx.tbr.mid, "motivo de prueba", {}, int(ctx.ts[ctx.first_bar]),
+                           INVALIDATED)]
+
+
 @pytest.fixture
 def registry(monkeypatch):
-    """Solo el patrón de prueba (la continuación clásica sale del registro durante el test)."""
-    monkeypatch.delitem(PATTERN_REGISTRY, "continuacion_clasica")
-    monkeypatch.setitem(PATTERN_REGISTRY, "rompe_high", RompeElHigh)
-    monkeypatch.setattr(RompeElHigh, "key", "rompe_high", raising=False)
+    for key, cls in (("rompe_high", RompeElHigh), ("en_m5", EnM5), ("descarta", Descarta)):
+        monkeypatch.setitem(PATTERN_REGISTRY, key, cls)
+        monkeypatch.setattr(cls, "key", key, raising=False)
     return PATTERN_REGISTRY
 
 
-def test_el_decorador_registra_un_patron_con_su_clave(registry):
+def test_de_momento_no_hay_patrones_definidos():
+    assert PATTERN_REGISTRY == {}
+
+
+def test_el_decorador_registra_un_patron_con_su_clave():
     try:
         register_pattern("temporal")(RompeElHigh)
         assert PATTERN_REGISTRY["temporal"] is RompeElHigh and RompeElHigh.key == "temporal"
     finally:
         PATTERN_REGISTRY.pop("temporal", None)
-    from tradingbot.skills.pattern.patterns import PATTERN_REGISTRY as real
-    assert "continuacion_clasica" not in real                                              # (fuera solo durante el test)
-
-
-def test_el_patron_1_esta_registrado():
-    assert PATTERN_REGISTRY["continuacion_clasica"] is ClassicContinuation
 
 
 def test_la_tbr_activa_es_la_ultima_cerrada():
@@ -102,141 +117,24 @@ def test_las_zonas_del_ciclo_se_leen_de_tradingbot_env_aunque_no_esten_activas()
     assert [z.name for z in zones_from_settings(env)] == ["Asia", "London", "NY Open"]      # las activas siguen siendo tres
 
 
-# ---- patrón 1, sobre velas sintéticas (open, high, low, close) ----------------------------------------------------------------
-def ctx_for(rows, closed=False, tbr=TBR):
-    o, h, l, c = (np.array(x, dtype=float) for x in zip(*rows))
-    n = len(rows)
-    return PatternContext("EURUSD", "5m", 5, np.arange(n) * 300 + ny(DAY, 12), o, h, l, c, tbr, 0, n - 1, closed, "NY-PM", "13:30", AHEAD)
-
-
-def mirror(rows):
-    return [(200 - o, 200 - l, 200 - h, 200 - c) for o, h, l, c in rows]
-
-
-SWEEP = (97, 98, 94, 95)                      # bajista: el mínimo (94) toma el Low (95)
-REVERSAL = (95, 99, 94.5, 98)                 # alcista: máximo 99, bajo el 50 % (100)
-TRIGGER = (97, 97, 92, 93)                    # bajista sin mecha superior (máximo = apertura), fuera de la TBR
-WICKED = (97, 98.5, 93, 96)                   # bajista con mecha superior
-
-
-def hit_of(rows, wick=0.0, candles=10, closed=False):
-    return scan(ctx_for(rows, closed), wick, candles)
-
-
-def test_patron_1_bajista_detecta_la_primera_vela_sin_mecha_tras_el_retroceso():
-    hits = hit_of([SWEEP, REVERSAL, TRIGGER])
-    assert len(hits) == 1
-    h = hits[0]
-    assert (h.status, h.direction, h.x, h.price) == (DETECTED, "short", 2, 93.0)             # al cierre de la vela de disparo
-    assert h.levels == {"toma": 94.0, "retroceso máx.": 99.0} and "nº 2 de 10" in h.detail and "NY" in h.detail
-    assert h.ts == int(ctx_for([SWEEP, REVERSAL, TRIGGER]).ts[2])
-
-
-def test_patron_1_largo_es_el_espejo_exacto():
-    hits = scan(ctx_for(mirror([SWEEP, REVERSAL, TRIGGER])), 0.0, 10)
-    assert [(h.status, h.direction, h.x) for h in hits] == [(DETECTED, "long", 2)]
-    assert hits[0].price == 107.0 and hits[0].levels == {"toma": 106.0, "retroceso máx.": 101.0}
-    inv = scan(ctx_for(mirror([SWEEP, (95, 99, 94.5, 96)])), 0.0, 10)
-    assert inv == [] or inv[0].status == DETECTED or True                                      # (la invalidación del largo, abajo)
-    hits = scan(ctx_for(mirror([SWEEP, (95, 100.5, 94, 96)])), 0.0, 10)
-    assert hits[0].status == INVALIDATED and hits[0].direction == "long"
-
-
-def test_el_retroceso_se_mide_con_la_mecha_y_llegar_al_50_invalida():
-    for reversal in ((95, 100, 94.5, 96), (95, 103, 94.5, 96)):                                # mecha justo en el 50 % o por encima
-        h = hit_of([SWEEP, reversal, TRIGGER])[0]
-        assert h.status == INVALIDATED and h.x == 1 and "50 %" in h.detail
-    h = hit_of([SWEEP, (97, 100.5, 94, 95), TRIGGER])[0]                                         # aunque el cuerpo cierre bajo el 50 %
-    assert h.status == INVALIDATED
-    h = hit_of([SWEEP, (95, 106, 94.5, 96)])[0]                                                  # llega hasta el High
-    assert h.status == INVALIDATED and "lado contrario" in h.detail
-    assert hit_of([SWEEP, REVERSAL, TRIGGER])[0].status == DETECTED                              # 99 < 100: no llega
-
-
-def test_la_cuenta_de_10_velas_incluye_la_de_reversion():
-    nine = [WICKED] * 8
-    ok = hit_of([SWEEP, REVERSAL] + nine + [TRIGGER])                                            # disparo en la vela nº 10
-    assert [(h.status, h.x) for h in ok] == [(DETECTED, 10)] and "nº 10 de 10" in ok[0].detail
-    late = hit_of([SWEEP, REVERSAL] + nine + [WICKED, TRIGGER])                                  # sería la nº 11
-    assert [(h.status, h.x) for h in late] == [(ANNULLED, 10)] and "10 velas" in late[0].detail
-    pending = hit_of([SWEEP, REVERSAL] + [WICKED] * 5)                                           # aún quedan velas por mirar
-    assert pending == []
-    assert [(h.status, h.x) for h in hit_of([SWEEP, REVERSAL] + [WICKED] * 8, candles=3)] == [(ANNULLED, 3)]   # plazo propio de 3
-
-
-def test_basta_una_vela_de_retroceso_y_la_primera_alcista_es_la_reversion():
-    assert hit_of([SWEEP, REVERSAL, TRIGGER])[0].status == DETECTED                              # una sola vela de rebote
-    h = hit_of([SWEEP, (96, 96, 91, 92), (92, 92, 90, 91), REVERSAL, TRIGGER])[0]                # caídas sin mecha antes del rebote: no disparan
-    assert (h.status, h.x) == (DETECTED, 4) and "reversión en" in h.detail and "nº 2 de 10" in h.detail
-
-
-def test_sin_retroceso_no_hay_disparo_aunque_haya_velas_sin_mecha():
-    falling = [SWEEP, (96, 96, 91, 92), (92, 92, 88, 89), (89, 89, 85, 86)]
-    assert hit_of(falling) == []                                                                 # se sigue esperando el retroceso
-    h = hit_of(falling, closed=True)[0]
-    assert h.status == EXPIRED and "sin retroceso" in h.detail and "NY-PM (13:30 NY)" in h.detail
-
-
-def test_la_vela_de_disparo_puede_formarse_fuera_de_la_tbr():
-    far = (90, 90, 80, 82)                                                                       # muy por debajo del Low
-    assert hit_of([SWEEP, REVERSAL, WICKED, far])[0].status == DETECTED
-
-
-def test_primera_vela_sin_mecha_tras_la_reversion_ignora_las_que_tienen_mecha():
-    h = hit_of([SWEEP, REVERSAL, WICKED, WICKED, TRIGGER])[0]
-    assert (h.status, h.x) == (DETECTED, 4) and "nº 4 de 10" in h.detail
-
-
-def test_mecha_superior_maxima_ajustable_de_0_a_5_por_ciento():
-    small = (97, 97.15, 92, 93)                  # mecha del 2,9 % de la vela
-    big = (97, 97.35, 92, 93)                    # 6,5 %
-    assert hit_of([SWEEP, REVERSAL, small]) == []                                                # con 0 % no vale
-    h = hit_of([SWEEP, REVERSAL, small], wick=5.0)[0]
-    assert h.status == DETECTED and "2.9 %" in h.detail
-    assert hit_of([SWEEP, REVERSAL, big], wick=5.0) == []                                        # ni con el máximo del 5 %
-    assert hit_of([SWEEP, REVERSAL, TRIGGER], wick=5.0)[0].status == DETECTED                    # la que no tiene mecha siempre
-
-
-def test_una_vela_que_toma_los_dos_lados_no_da_patron():
-    h = hit_of([(100, 106, 94, 100), REVERSAL, TRIGGER])[0]
-    assert h.status == INVALIDATED and h.direction == "" and "High y el Low" in h.detail
-
-
-def test_si_acaba_el_plazo_de_la_tbr_el_patron_vence_y_se_dice_por_que():
-    assert hit_of([(100, 101, 99, 100)] * 3) == []                                               # sin toma, plazo abierto
-    h = hit_of([(100, 101, 99, 100)] * 3, closed=True)[0]
-    assert h.status == EXPIRED and "no hubo toma de un extremo ni del 50 %" in h.detail and "NY-PM" in h.detail
-    h = hit_of([SWEEP, REVERSAL, WICKED], closed=True)[0]
-    assert h.status == EXPIRED and "reversión en" in h.detail and "sin vela de disparo" in h.detail
-    assert hit_of([SWEEP, REVERSAL, TRIGGER], closed=True)[0].status == DETECTED                 # si disparó a tiempo, es válido
-
-
-def test_ajustes_del_patron_1():
-    p = ClassicContinuation(EnvConfig(parse("PATTERN_CONTINUATION_MAX_WICK_PCT=3,5\nPATTERN_CONTINUATION_TF=M1\n"
-                                            "PATTERN_CONTINUATION_MAX_CANDLES=7\n")).section("PATTERN"))
-    assert (p.max_wick_pct, p.tf, p.max_candles) == (3.5, "1m", 7) and p.timeframe() == "1m"
-    d = ClassicContinuation()
-    assert (d.max_wick_pct, d.tf, d.max_candles) == (0.0, "5m", 10)                              # valores iniciales
-    for text, key in (("PATTERN_CONTINUATION_MAX_WICK_PCT=6\n", "MAX_WICK_PCT"), ("PATTERN_CONTINUATION_MAX_WICK_PCT=-1\n", "MAX_WICK_PCT"),
-                      ("PATTERN_CONTINUATION_MAX_CANDLES=0\n", "MAX_CANDLES"), ("PATTERN_CONTINUATION_TF=2h\n", "Timeframe")):
-        with pytest.raises(ValueError, match=key):
-            ClassicContinuation(EnvConfig(parse(text)).section("PATTERN"))
-
-
 # ---- la skill ----------------------------------------------------------------------------------------------------------------
 def m5_frame(rows, start_ny=(11, 0)):
-    """Velas M5 desde la hora de NY dada (por defecto 11:00); las dos primeras horas caen dentro de NY Open (10-12)."""
+    """Velas M5 (open, high, low, close) desde la hora de NY dada (por defecto 11:00; hasta las 12:00 es NY Open)."""
     o, h, l, c = zip(*rows)
     ts = ny(DAY, *start_ny) + np.arange(len(rows)) * 300
     return pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": c, "tick_volume": 1})
 
 
+FLAT = (100, 101, 99, 100)
+BREAK = (101, 107, 100, 106)                                   # cierra sobre el High (105)
+
+
 def candles_after_close(pattern_rows, tail=1, extra=None):
-    inside = [(100, 101, 99, 100)] * 12                         # 11:00-12:00: dentro de la TBR
-    return inside + list(pattern_rows) + (extra or []) + [(100, 101, 99, 100)] * tail     # la última vela sigue formándose
+    inside = [FLAT] * 12                                       # 11:00-12:00: dentro de la TBR
+    return inside + list(pattern_rows) + (extra or []) + [FLAT] * tail     # la última vela sigue formándose
 
 
-def run_skill(env_text="", df=None, timeframe="5m", chart=None, types=None):
+def run_skill(env_text="", df=None, timeframe="5m"):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus, found, dropped, session_events, updated = EventBus(), [], [], [], []
@@ -244,12 +142,11 @@ def run_skill(env_text="", df=None, timeframe="5m", chart=None, types=None):
     bus.subscribe("t", "pattern.discarded", dropped.append)
     bus.subscribe("t", "pattern.session", session_events.append)
     bus.subscribe("t", "pattern.updated", updated.append)
-    text = env_text if types is None else env_text + f"PATTERN_TYPES={types}\n"
-    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(text))), [{"type": "pattern"}])
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), [{"type": "pattern"}])
     manager.start()
     if df is None:
-        df = m5_frame(candles_after_close([SWEEP, REVERSAL, TRIGGER]))
-    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": timeframe, "df": df if chart is None else chart}, source="feed")
+        df = m5_frame(candles_after_close([FLAT, FLAT, BREAK]))
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": timeframe, "df": df}, source="feed")
     bus.publish("tbr.updated", {"symbol": "EURUSD", "timeframe": timeframe, "sessions": [session(NY, DAY, 9.5)], "available": True},
                 source="tbr")
     deadline = time.time() + 3
@@ -259,67 +156,58 @@ def run_skill(env_text="", df=None, timeframe="5m", chart=None, types=None):
     return manager, bus, found, dropped, session_events, updated
 
 
-def test_la_skill_avisa_del_patron_1_en_la_tbr_activa():
+def test_sin_patrones_definidos_la_skill_lo_dice():
     manager, _bus, found, dropped, _s, updated = run_skill()
     manager.stop()
-    assert updated[-1].payload["tbr"].zone == "NY Open"
+    assert manager.skills["pattern"].caption == "sin patrones definidos" and found == [] and dropped == []
+    assert updated[-1].payload["tbr"].zone == "NY Open"                                    # aun así conoce la TBR activa
+
+
+def test_la_skill_avisa_del_patron_identificado_en_la_tbr_activa(registry):
+    manager, _bus, found, dropped, _s, updated = run_skill("PATTERN_TYPES=rompe_high\n")
+    manager.stop()
     assert len(found) == 1 and dropped == []
     p = found[0].payload
-    assert p["hit"].key == "continuacion_clasica" and p["hit"].direction == "short" and p["timeframe"] == "5m"
-    assert p["hit"].ts == ny(DAY, 12, 10) and "decision" not in p                          # la decisión la toma Cortex
+    assert p["hit"].key == "rompe_high" and p["hit"].direction == "long" and p["timeframe"] == "5m"
+    assert p["hit"].ts == ny(DAY, 12, 10) and p["tbr"].zone == "NY Open" and "decision" not in p   # la decisión la toma Cortex
     assert manager.skills["pattern"].caption == "1 patrón(es) en NY Open"
 
 
-def test_solo_usa_velas_cerradas_la_ultima_se_esta_formando():
-    rows = candles_after_close([SWEEP, REVERSAL], tail=0, extra=[TRIGGER])                 # la vela de disparo es la última (en curso)
-    manager, _bus, found, *_ = run_skill(df=m5_frame(rows))
+def test_solo_usa_velas_cerradas_la_ultima_se_esta_formando(registry):
+    rows = candles_after_close([FLAT, FLAT], tail=0, extra=[BREAK])                        # el cierre sobre el High es la última vela
+    manager, _bus, found, *_ = run_skill("PATTERN_TYPES=rompe_high\n", df=m5_frame(rows))
     manager.stop()
     assert found == []                                                                      # no se identifica hasta que cierre
 
 
-def test_con_el_grafico_en_m1_se_agrupa_en_m5():
-    rows = candles_after_close([SWEEP, REVERSAL, TRIGGER])
+def test_un_patron_puede_pedir_su_timeframe_y_m1_se_agrupa(registry):
+    rows = candles_after_close([FLAT, FLAT, BREAK])
     m1 = []
-    for k, (o, h, l, c) in enumerate(rows):                                                 # cada M5 son cinco M1 con los mismos extremos
-        m1 += [(o, o, o, o), (o, h, o, o), (o, h, l, l), (l, h, l, c), (c, c, c, c)] if k < len(rows) else []
-    base = ny(DAY, 11, 0)
-    df = pd.DataFrame({"ts": base + np.arange(len(m1)) * 60, "open": [r[0] for r in m1], "high": [r[1] for r in m1],
+    for o, h, l, c in rows:                                                                 # cada M5 son cinco M1 con los mismos extremos
+        m1 += [(o, o, o, o), (o, h, o, o), (o, h, l, l), (l, h, l, c), (c, c, c, c)]
+    df = pd.DataFrame({"ts": ny(DAY, 11, 0) + np.arange(len(m1)) * 60, "open": [r[0] for r in m1], "high": [r[1] for r in m1],
                        "low": [r[2] for r in m1], "close": [r[3] for r in m1], "tick_volume": 1})
-    manager, _bus, found, *_ = run_skill(df=df, timeframe="1m")
+    manager, _bus, found, *_ = run_skill("PATTERN_TYPES=en_m5\n", df=df, timeframe="1m")
     manager.stop()
     assert len(found) == 1 and found[0].payload["timeframe"] == "5m" and found[0].payload["hit"].ts == ny(DAY, 12, 10)
 
 
-def test_con_otro_timeframe_avisa_de_que_falta_m5():
-    manager, _bus, found, _d, _s, updated = run_skill(df=m5_frame(candles_after_close([SWEEP, REVERSAL, TRIGGER])), timeframe="15m")
+def test_con_otro_timeframe_avisa_de_que_falta_el_del_patron(registry):
+    manager, _bus, found, _d, _s, updated = run_skill("PATTERN_TYPES=en_m5\n", timeframe="15m")
     manager.stop()
     assert found == [] and "necesita velas M5" in updated[-1].payload["unavailable"][0]
     assert "M15" in updated[-1].payload["unavailable"][0] and manager.skills["pattern"].caption == "necesita M5"
 
 
-def test_invalidado_y_anulado_se_publican_para_el_registro_sin_pasar_a_cortex():
-    inv = candles_after_close([SWEEP, (95, 100.5, 94.5, 96), TRIGGER])
-    manager, _bus, found, dropped, *_ = run_skill(df=m5_frame(inv))
+def test_los_resultados_que_no_son_identificacion_van_al_registro_sin_pasar_a_cortex(registry):
+    manager, _bus, found, dropped, *_ = run_skill("PATTERN_TYPES=descarta\n")
     manager.stop()
     assert found == [] and [d.payload["hit"].status for d in dropped] == [INVALIDATED]
-    ann = candles_after_close([SWEEP, REVERSAL] + [WICKED] * 9)
-    manager, _bus, found, dropped, *_ = run_skill(df=m5_frame(ann))
-    manager.stop()
-    assert found == [] and [d.payload["hit"].status for d in dropped] == [ANNULLED]
 
 
-def test_al_empezar_la_tbr_siguiente_el_patron_vence_y_se_indica():
-    filler = [(97, 98, 96, 97)] * 12                                        # 12:00-13:00 sin toma
-    rows = candles_after_close(filler + [SWEEP, REVERSAL] + [WICKED] * 3, tail=1, extra=[(97, 98, 96, 97)] * 10)   # toma a las 13:00, hasta pasadas las 13:30
-    manager, _bus, found, dropped, *_ = run_skill(df=m5_frame(rows))
-    manager.stop()
-    assert found == [] and [d.payload["hit"].status for d in dropped] == [EXPIRED]
-    assert "NY-PM (13:30 NY)" in dropped[0].payload["hit"].detail
-
-
-def test_tras_ny_pm_no_se_evaluan_mas_setups_y_se_anota_una_sola_vez():
-    rows = candles_after_close([SWEEP, REVERSAL, TRIGGER], tail=1, extra=[(100, 101, 99, 100)] * 60)            # pasadas las 16:30
-    manager, bus, found, dropped, session_events, updated = run_skill(df=m5_frame(rows))
+def test_tras_ny_pm_no_se_evaluan_mas_setups_y_se_anota_una_sola_vez(registry):
+    rows = candles_after_close([FLAT, FLAT, BREAK], tail=1, extra=[FLAT] * 60)              # pasadas las 16:30
+    manager, bus, found, dropped, session_events, updated = run_skill("PATTERN_TYPES=rompe_high\n", df=m5_frame(rows))
     assert len(found) == 1 and len(session_events) == 1 and session_events[0].payload["session_end"] == "16:30"
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "5m", "df": m5_frame(rows)}, source="feed")
     time.sleep(0.3)
@@ -329,24 +217,22 @@ def test_tras_ny_pm_no_se_evaluan_mas_setups_y_se_anota_una_sola_vez():
 
 
 def test_no_repite_avisos(registry):
-    df = m5_frame(candles_after_close([(100, 101, 99, 100)] * 2 + [(101, 107, 100, 106)]))
-    manager, bus, found, _d, _s, updated = run_skill(df=df)
+    manager, bus, found, _d, _s, updated = run_skill("PATTERN_TYPES=rompe_high\n")
+    df = m5_frame(candles_after_close([FLAT, FLAT, BREAK]))
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "5m", "df": df}, source="feed")   # recarga de las mismas velas
     bus.publish("tbr.updated", {"symbol": "EURUSD", "timeframe": "5m", "sessions": [session(NY, DAY, 9.5)], "available": True},
                 source="tbr")
     time.sleep(0.3)
     manager.stop()
     assert len(found) == 1                                                                  # el mismo patrón no se avisa dos veces
-    assert found[0].payload["hit"].key == "rompe_high"
 
 
-def test_ajustes_de_pattern_incluidos_los_del_patron_1():
-    for text, key in (("PATTERN_TYPES=no_existe\n", "no_existe"), ("PATTERN_CONTINUATION_MAX_WICK_PCT=6\n", "MAX_WICK_PCT"),
-                      ("PATTERN_ZONE_ORDER=ASIA, NO_EXISTE\n", "NO_EXISTE")):
-        manager, _bus, found, *_ = run_skill(text, types="" if "TYPES" not in text else None)
+def test_ajustes_de_pattern(registry):
+    for text, key in (("PATTERN_TYPES=no_existe\n", "no_existe"), ("PATTERN_ZONE_ORDER=ASIA, NO_EXISTE\n", "NO_EXISTE")):
+        manager, _bus, found, *_ = run_skill(text)
         manager.stop()
         assert manager.skills["pattern"].state.value == "error" and key in manager.skills["pattern"].note and not found
-    manager, _bus, found, *_ = run_skill("PATTERN_ZONES=ASIA\n")                         # la TBR activa es NY Open: no es de Asia
+    manager, _bus, found, *_ = run_skill("PATTERN_TYPES=rompe_high\nPATTERN_ZONES=ASIA\n")   # la TBR activa es NY Open: no es de Asia
     manager.stop()
     assert found == []
 
@@ -363,96 +249,15 @@ def test_el_registro_anota_tbr_activa_patron_y_descartes(tmp_path, monkeypatch):
     win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
     tbr = active_tbr([session(NY, DAY, 9.5)])
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hits": [], "errors": [],
-                             "unavailable": ["Continuación clásica necesita velas M5 y el gráfico está en M15"]})
-    hit = PatternHit("continuacion_clasica", "Continuación clásica", "short", 2, 93.0, "detalle", {"toma": 94.0}, ny(DAY, 12, 10))
+                             "unavailable": ["Mi patrón necesita velas M5 y el gráfico está en M15"]})
+    hit = PatternHit("mi_patron", "Mi patrón", "short", 2, 93.0, "detalle", {"toma": 94.0}, ny(DAY, 12, 10))
     win._on_pattern_detected({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hit": hit})
-    drop = PatternHit("continuacion_clasica", "Continuación clásica", "short", 1, 100.0, "el retroceso llegó al 50 % de la TBR",
-                      {}, ny(DAY, 12, 5), INVALIDATED)
-    win._on_pattern_discarded({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hit": drop})
+    for status, state in ((INVALIDATED, "invalidado"), (ANNULLED, "anulado"), (EXPIRED, "vencido")):
+        drop = PatternHit("mi_patron", "Mi patrón", "short", 1, 100.0, f"motivo {state}", {}, ny(DAY, 12, 5), status)
+        win._on_pattern_discarded({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hit": drop})
     win._on_pattern_session({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "session_end": "16:30"})
     text = win.log_view.toPlainText()
     assert "pattern: TBR activa NY Open" in text and "necesita velas M5" in text
-    assert "pattern: Continuación clásica Short identificado en NY Open" in text
-    assert "Continuación clásica Short invalidado en NY Open" in text and "llegó al 50 %" in text
+    assert "pattern: Mi patrón Short identificado en NY Open" in text
+    assert all(f"Mi patrón Short {s} en NY Open" in text and f"motivo {s}" in text for s in ("invalidado", "anulado", "vencido"))
     assert "fin de la jornada de setups" in text and "16:30 NY" in text
-
-
-def test_el_grafico_marca_las_velas_sin_mecha():
-    from tradingbot.ui.chart import ChartView
-    o = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
-    h = np.array([100.0, 100.1, 102.0, 100.0, 101.0])           # 0: bajista sin mecha sup.; 1: bajista con mecha; 2: alcista con mecha
-    l = np.array([97.0, 97.0, 99.0, 100.0, 100.0])               # 3: doji (sin tamaño: no cuenta); 4: alcista sin mecha inferior
-    c = np.array([98.0, 98.0, 101.5, 100.0, 101.0])
-    bear, bull = ChartView.wickless_masks(o, h, l, c, 0.0)
-    assert list(bear) == [True, False, False, False, False] and list(bull) == [False, False, False, False, True]
-    bear, bull = ChartView.wickless_masks(o, h, l, c, 5.0)       # mecha de hasta el 5 % de la vela: la vela 1 mide 3,1 de alto, mecha 0,1 (3,2 %)
-    assert list(bear) == [True, True, False, False, False]
-
-
-def test_el_boton_sin_mecha_dibuja_los_marcadores(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication
-    from tradingbot import settings
-    from tradingbot.core import EventBus, Services, SkillManager
-    from tradingbot.ui.main_window import MainWindow
-    import tradingbot.skills  # noqa: F401
-    QApplication.instance() or QApplication([])
-    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
-    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
-    manager = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig(parse("PATTERN_CONTINUATION_MAX_WICK_PCT=0\n"))),
-                           [{"type": "pattern"}])
-    win = MainWindow(EventBus(), manager, cfg, "t")
-    assert win.wick_btn.text() == "Sin mecha" and not win.wick_btn.isChecked() and win.chart.wickless_count == 0
-    df = m5_frame([(100, 100, 97, 98), (100, 100.1, 97, 98), (100, 102, 99, 101.5), (100, 101, 100, 101)] * 3, (11, 0))
-    df["time"] = pd.to_datetime(df["ts"], unit="s")
-    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
-    assert win.chart.wickless_count == 0                                                  # botón apagado
-    win.wick_btn.setChecked(True)
-    assert win.chart.wickless_count == 6                                                  # 3 bajistas sin mecha superior + 3 alcistas sin mecha inferior
-    win.wick_btn.setChecked(False)
-    assert win.chart.wickless_count == 0
-    manager2 = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig(parse("PATTERN_CONTINUATION_MAX_WICK_PCT=3\n"))),
-                            [{"type": "pattern"}])
-    win2 = MainWindow(EventBus(), manager2, cfg, "t")                                     # la mecha máxima sale del ajuste, sin arrancar la skill
-    assert win2._wick_pct() == 3.0 and "3 %" in win2.wick_btn.toolTip()
-
-
-def test_las_velas_de_disparo_se_marcan_con_un_cuadrado_amarillo_y_se_colorean(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication
-    from tradingbot import settings
-    from tradingbot.core import EventBus, Services, SkillManager
-    from tradingbot.ui.main_window import MainWindow
-    import tradingbot.skills  # noqa: F401
-    QApplication.instance() or QApplication([])
-    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
-    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD", "GBPUSD"]}}
-    manager = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}])
-    win = MainWindow(EventBus(), manager, cfg, "t")
-    assert win.trigger_btn.text() == "Disparos" and win.trigger_btn.isChecked()               # encendido por defecto
-    df = m5_frame(candles_after_close([SWEEP, REVERSAL, TRIGGER]))
-    df["time"] = pd.to_datetime(df["ts"], unit="s")
-    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
-    assert win.chart.trigger_count == 0 and win.chart.highlighted == frozenset()
-    tbr = active_tbr([session(NY, DAY, 9.5)])
-    trigger_ts = ny(DAY, 12, 10)                                                              # la vela de disparo (índice 14 de las velas)
-    hit = PatternHit("continuacion_clasica", "Continuación clásica", "short", 2, 93.0, "", {}, trigger_ts)
-    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hits": [hit], "errors": [], "unavailable": [],
-                             "tfs": {"continuacion_clasica": "5m"}})
-    index = int(np.flatnonzero(df["ts"].to_numpy() == trigger_ts)[0])
-    assert win.chart.trigger_count == 1 and win.chart.highlighted == frozenset({index})       # cuadrado amarillo y vela amarilla
-    drop = PatternHit("continuacion_clasica", "x", "short", 1, 1.0, "", {}, ny(DAY, 12, 5), INVALIDATED)
-    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hits": [drop], "errors": [], "unavailable": [],
-                             "tfs": {}})
-    assert win.chart.trigger_count == 1                                                      # solo cuentan los patrones identificados
-    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": []})  # cambia la TBR activa: se mantienen
-    assert win.chart.trigger_count == 1
-    win.trigger_btn.setChecked(False)
-    assert win.chart.trigger_count == 0 and win.chart.highlighted == frozenset()              # la capa se apaga
-    win.trigger_btn.setChecked(True)
-    assert win.chart.trigger_count == 1
-    m1 = pd.DataFrame({"ts": ny(DAY, 12, 0) + np.arange(30) * 60, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
-                       "tick_volume": 1})
-    m1["time"] = pd.to_datetime(m1["ts"], unit="s")
-    win._on_candles({"df": m1, "symbol": "EURUSD", "timeframe": "1m", "seconds": 0.1})         # gráfico en M1: se colorean las 5 velas de esa M5
-    assert win.chart.highlighted == frozenset(range(10, 15))
-    win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})         # otro activo: se olvidan
-    assert win.chart.trigger_count == 0
