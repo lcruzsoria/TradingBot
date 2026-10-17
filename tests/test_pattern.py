@@ -64,17 +64,20 @@ class Descarta(Pattern):
 
 @pytest.fixture
 def registry(monkeypatch):
+    """Solo los patrones de prueba (el patrón real «continuacion» sale del registro durante el test)."""
+    monkeypatch.delitem(PATTERN_REGISTRY, "continuacion")
     for key, cls in (("rompe_high", RompeElHigh), ("en_m5", EnM5), ("descarta", Descarta)):
         monkeypatch.setitem(PATTERN_REGISTRY, key, cls)
         monkeypatch.setattr(cls, "key", key, raising=False)
     return PATTERN_REGISTRY
 
 
-def test_de_momento_no_hay_patrones_definidos():
-    assert PATTERN_REGISTRY == {}
+def test_el_patron_continuacion_esta_registrado():
+    from tradingbot.skills.pattern.continuacion import Continuacion
+    assert PATTERN_REGISTRY["continuacion"] is Continuacion
 
 
-def test_el_decorador_registra_un_patron_con_su_clave():
+def test_el_decorador_registra_un_patron_con_su_clave(registry):
     try:
         register_pattern("temporal")(RompeElHigh)
         assert PATTERN_REGISTRY["temporal"] is RompeElHigh and RompeElHigh.key == "temporal"
@@ -156,7 +159,8 @@ def run_skill(env_text="", df=None, timeframe="5m"):
     return manager, bus, found, dropped, session_events, updated
 
 
-def test_sin_patrones_definidos_la_skill_lo_dice():
+def test_sin_patrones_definidos_la_skill_lo_dice(monkeypatch):
+    monkeypatch.delitem(PATTERN_REGISTRY, "continuacion")
     manager, _bus, found, dropped, _s, updated = run_skill()
     manager.stop()
     assert manager.skills["pattern"].caption == "sin patrones definidos" and found == [] and dropped == []

@@ -4,8 +4,8 @@ La **TBR activa** es la última TBR (Asia, London o NY Open) que ya cerró: nos 
 patrón es una clase que se registra con `@register_pattern("clave")` y mira las velas posteriores al cierre de esa TBR, hasta
 que empieza la TBR siguiente (ver `window_for`): Asia hasta London, London hasta NY Open y NY Open hasta NY PM.
 
-Para definir un patrón nuevo (un módulo en esta carpeta, importado al final de este módulo para que se registre). De momento no
-hay ninguno definido:
+Para definir un patrón nuevo (un módulo en esta carpeta, importado al final de este módulo para que se registre; ver
+`continuacion.py`):
 
     @register_pattern("mi_patron")
     class MiPatron(Pattern):
@@ -80,6 +80,7 @@ class TbrWindow:
     next_hours: str          # su hora de inicio en NY, HH:MM
     session_end_ts: int | None   # fin de la última zona del ciclo (NY PM): a partir de ahí no se evalúa más
     session_end_hours: str
+    start_ts: int = 0        # inicio de la propia TBR (hora del servidor, segundos)
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class PatternContext:
     next_zone: str = ""
     next_hours: str = ""
     ahead: int = 0           # segundos que el servidor va por delante de Nueva York (para mostrar horas de NY)
+    start_bar: int = 0       # primera vela de la propia TBR
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,20 @@ class PatternHit:
     levels: dict[str, float] = field(default_factory=dict)   # otros precios del patrón (stop, objetivo...) para mostrarlos
     ts: int = 0              # hora (servidor) de esa vela, para mostrarla aunque el gráfico tenga otro timeframe
     status: str = DETECTED   # detected / invalidated / annulled / expired
+
+
+@dataclass(frozen=True)
+class Figure:
+    """Algo que el patrón quiere dibujar en el gráfico: de momento, un fibonacci con los niveles 0, 0,5 y 1."""
+    kind: str                # "fib"
+    key: str                 # patrón
+    zone: str                # TBR a la que pertenece
+    direction: str           # "long" o "short"
+    x0_ts: int               # desde esta vela (hora del servidor)...
+    x1_ts: int               # ...hasta esta
+    levels: dict[str, float]    # {"0": precio, "0,5": precio, "1": precio}
+    state: str = ""          # "en curso", "entrada"
+    label: str = ""
 
 
 class Pattern(ABC):
@@ -130,6 +146,10 @@ class Pattern(ABC):
     def detect(self, ctx: PatternContext) -> list[PatternHit]:
         ...
 
+    def figures(self, ctx: PatternContext) -> list[Figure]:
+        """Dibujos del patrón para el gráfico (por defecto, ninguno)."""
+        return []
+
 
 def active_tbr(sessions, zones: list[str] | None = None) -> ActiveTbr | None:
     """La última TBR ya cerrada (opcionalmente solo de las zonas `zones`, por clave), o None."""
@@ -139,6 +159,19 @@ def active_tbr(sessions, zones: list[str] | None = None) -> ActiveTbr | None:
         return None
     s = max(closed, key=lambda s: s.x1)
     return ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1)
+
+
+def recent_tbrs(sessions, zones: list[str] | None = None) -> list[ActiveTbr]:
+    """La última TBR cerrada de cada zona (opcionalmente solo de las zonas `zones`), de la más antigua a la más reciente."""
+    wanted = {z.upper() for z in zones} if zones else None
+    latest: dict[str, object] = {}
+    for s in sessions:
+        if not (s.complete and s.high > s.low) or (wanted is not None and s.zone.key not in wanted):
+            continue
+        if s.zone.key not in latest or s.x1 > latest[s.zone.key].x1:
+            latest[s.zone.key] = s
+    ordered = sorted(latest.values(), key=lambda s: s.x1)
+    return [ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1) for s in ordered]
 
 
 def _hhmm(minutes: int) -> str:
@@ -171,5 +204,7 @@ def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
         session_end = best[0] + last.minutes * 60 + ahead          # la siguiente zona es la última: su final cierra la jornada
     return TbrWindow(close_ny + ahead, None if best is None else best[0] + ahead,
                      "" if best is None else best[1].name, "" if best is None else _hhmm(best[1].start),
-                     session_end, _hhmm((last.start + last.minutes) % 1440))
+                     session_end, _hhmm((last.start + last.minutes) % 1440), close_ny - zone.minutes * 60 + ahead)
 
+
+from . import continuacion  # noqa: E402,F401  (registra los patrones definidos)

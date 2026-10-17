@@ -263,6 +263,9 @@ class ChartView(pg.PlotWidget):
         self._sma: tuple | None = None            # (valores, color, trazo) de la última SMA recibida
         self._sma_visible = False
         self._sma_item = None
+        self._fibs: list[dict] = []               # fibonacci de los patrones: {x0, x1, levels, label, state, direction}
+        self._fib_visible = True
+        self._fib_items: list = []
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
@@ -484,6 +487,47 @@ class ChartView(pg.PlotWidget):
             pi.addItem(marker, ignoreBounds=True)
         marker.setPos(float(index))
         marker.show()
+
+    # -- fibonacci de los patrones ---------------------------------------------------------------------------
+    def set_fibs(self, fibs: list[dict]) -> None:
+        """fibs: dibujos {x0, x1 (índices de vela), levels {"0", "0,5", "1": precio}, label, state, direction}."""
+        self._fibs = list(fibs)
+        self._draw_fibs()
+
+    def show_fibs(self, visible: bool) -> None:
+        self._fib_visible = visible
+        self._draw_fibs()
+
+    def _draw_fibs(self) -> None:
+        pi = self.getPlotItem()
+        for item in self._fib_items:
+            pi.removeItem(item)
+        self._fib_items.clear()
+        if not self._fib_visible:
+            return
+        for fib in self._fibs:
+            x0, x1 = float(fib["x0"]), float(fib["x1"])
+            for name, price in fib["levels"].items():
+                half = name == "0,5"
+                color = "#BA7517" if half else "#E24B4A" if name == "-0,5" else theme.MUTED
+                pen = pg.mkPen(color, width=2 if half else 1.2, style=Qt.PenStyle.DashLine if half else Qt.PenStyle.SolidLine)
+                line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([price, price]), pen=pen)
+                line.setZValue(-2)
+                pi.addItem(line, ignoreBounds=True)
+                text = pg.TextItem(f"{name}  {fmt_price(price)}", color=color, anchor=(0, 0.5))
+                text.setPos(x1, price)
+                pi.addItem(text, ignoreBounds=True)
+                self._fib_items += [line, text]
+            top = max(fib["levels"].values())
+            tag = pg.TextItem(f"{fib['label']} fibo ({fib['state']})", color=theme.TEXT, anchor=(0, 1))
+            tag.setPos(x0, top)
+            pi.addItem(tag, ignoreBounds=True)
+            self._fib_items.append(tag)
+
+    @property
+    def fib_count(self) -> int:
+        """Fibonacci dibujados (cada uno son tres niveles)."""
+        return 0 if not self._fib_visible else len(self._fibs)
 
     # -- media móvil simple ----------------------------------------------------------------------------
     def set_sma(self, values, color: str = "#00ACC1", style: str = "normal") -> None:

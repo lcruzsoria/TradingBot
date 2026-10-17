@@ -19,7 +19,7 @@ Low y su 50 %. Cada skill tiene un papel:
 - **Pattern** se conecta a TBR, toma la TBR activa y busca en ella los **patrones de entrada** (`@register_pattern`), hasta
   que empieza la TBR siguiente: Asia hasta London, London hasta NY Open y NY Open hasta NY PM (que solo marca el límite).
   Cada patrón identificado se anota en el Registro, igual que los que se invalidan, se anulan o vencen, con su motivo. Tras
-  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
+  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay un patrón (ver abajo).
 - **Cortex** (el coordinador) reúne el activo, la temporalidad, el sesgo, la TBR y el patrón. Contrasta el patrón con las reglas
   del Bias: a favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
   **NO GO**. El Registro anota los dos resultados con su motivo. Con GO, Cortex le pasa a Setup la orden completa (activo,
@@ -33,6 +33,25 @@ Se configuran en los bloques **PATTERN** (`PATTERN_TYPES`, `PATTERN_ZONES`, `PAT
 (`CORTEX_ALLOW_NO_BIAS`) y **SETUP** (`SETUP_SEND_ORDERS`) de `tradingbot.env`. El antiguo setup de continuación (toma de
 liquidez, retest del 50 %, segunda ruptura) se retiró de la skill Setup; su código y sus resultados se conservan solo para el
 análisis histórico (`scripts/setups_continuacion.py`, `docs/analisis_setups`).
+
+#### Patrón «Continuación» (`continuacion`)
+
+Ejemplo alcista; el bajista es el espejo exacto. Trabaja siempre con velas de `PATTERN_CONTINUACION_TF` (M15 al inicio): el gráfico
+puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan en M15); si no, el Registro lo avisa.
+
+1. **Rotura con cuerpo:** una vela de M15 **cierra** por encima del High de la TBR (o por debajo del Low). Una mecha sola no activa
+   la TBR. Se evalúa la última TBR cerrada de cada zona (Asia, London, NY Open) mientras dura su plazo; las que no se han activado
+   no dejan nada, y no se usan TBR de hace más de un día.
+2. **Swing previo:** el último pivote bajo (más bajo que `PATTERN_CONTINUACION_SWING_BARS` velas de cada lado) anterior a la rotura,
+   desde el inicio de la TBR; si no hay ninguno, el mínimo más bajo desde su inicio. En la rotura bajista, el pivote alto.
+3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): el **1** es el swing, el **0** el extremo que va alcanzando
+   el precio desde la rotura (se actualiza mientras no haya reversión), el **0,5** el punto medio y el **-0,5** (en rojo) media
+   vuelta del tramo más allá del 0.
+4. **Entrada:** la primera vela que revierte hasta el 0,5 (su mínimo lo toca): se identifica en ese momento y el 0 queda fijo.
+   **Stop** en el swing (el 1) y **objetivo** en el -0,5: con entrada en el 0,5 son **2R**. Si el plazo de la TBR termina sin
+   reversión al 0,5, el patrón vence y el Registro lo indica.
+
+Solo se trata el fibonacci en curso; stop y objetivo viajan en la orden que Cortex le pasa a Setup (en simulación).
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
@@ -194,8 +213,11 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
 | **PATTERN** — patrones dentro de la TBR activa | | |
-| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento ninguno). |
+| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento `continuacion`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `PATTERN_SHOW_FIBO` | `true` | Botón «Fibo» del gráfico activado al arrancar. |
+| `PATTERN_CONTINUACION_TF` | `15m` | Timeframe del patrón Continuación (el gráfico, en ese timeframe o uno menor que lo divida). |
+| `PATTERN_CONTINUACION_SWING_BARS` | `2` | Velas a cada lado que definen un swing (pivote). |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |

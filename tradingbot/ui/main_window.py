@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
@@ -228,6 +229,16 @@ class MainWindow(QMainWindow):
         self.sma_cfg_btn.setVisible(levels_skill is not None)
         self.sma_cfg_btn.clicked.connect(self.open_sma_config)
         self._sma_cfg = (30, "#00ACC1", "normal")
+        # Fibonacci de los patrones (0, 0,5 y 1 del tramo): lo dibuja la skill Pattern
+        pattern_skill = self.manager.skills.get("pattern")
+        self.fibo_btn = QPushButton("Fibo")
+        self.fibo_btn.setProperty("chip", "true")
+        self.fibo_btn.setCheckable(True)
+        self.fibo_btn.setToolTip("Dibuja el fibonacci (niveles 0, 0,5 y 1) del tramo que da la rotura con cuerpo de las TBR "
+                                 "recientes, con el patrón Continuación. La entrada es la reversión al 0,5.")
+        self.fibo_btn.setVisible(pattern_skill is not None)
+        self.fibo_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_FIBO", True))
+        self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -268,6 +279,7 @@ class MainWindow(QMainWindow):
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
+        grid.addWidget(self.fibo_btn, 0, 3)
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)
@@ -295,6 +307,8 @@ class MainWindow(QMainWindow):
         for group, btn in self.level_btns.items():
             self.chart.show_level(group, btn.isChecked())
             btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
+        self.chart.show_fibs(self.fibo_btn.isChecked())
+        self.fibo_btn.toggled.connect(self.chart.show_fibs)
         self.chart.show_sma(self.sma_btn.isChecked())
         self.sma_btn.toggled.connect(self.chart.show_sma)
         self._refresh_sma_tip()
@@ -595,6 +609,10 @@ class MainWindow(QMainWindow):
         refresh = bool(p.get("refresh")) and self.candles is not None
         self.candles = df
         self.chart.set_candles(df, keep_view=refresh)
+        if symbol != getattr(self, "_fib_symbol", symbol):
+            self._fibs = []                                      # otro activo: se olvidan los fibonacci anteriores
+        self._fib_symbol = symbol
+        self._apply_fibs()
         self.chart.set_ny_shift(self.ny_shift)
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self._update_chart_stats()
@@ -804,7 +822,24 @@ class MainWindow(QMainWindow):
                  f"Empieza el día de trading del {p['day']} para {group} ({hour} NY).\nActivos de tu lista: {names}.\n"
                  "Los niveles TDO, PDH/PDL y los separadores del gráfico se renuevan con este día.", tone="info")
 
+    def _apply_fibs(self) -> None:
+        """Pinta los fibonacci del activo del gráfico, buscando sus horas en las velas actuales (valen para cualquier timeframe)."""
+        df = self.candles
+        if df is None or not len(df):
+            self.chart.set_fibs([])
+            return
+        ts = df["ts"].to_numpy()
+        n = len(ts)
+        fibs = []
+        for f in self._fibs:
+            fibs.append({"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
+                         "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction})
+        self.chart.set_fibs(fibs)
+
     def _on_pattern_updated(self, p: dict) -> None:
+        if p["symbol"] == self.charted_symbol:
+            self._fibs = [f for f in p.get("figures", []) if f.kind == "fib"]
+            self._apply_fibs()
         for error in p.get("errors", []):
             self.log_once("pattern_error", (p["symbol"], error), f"pattern: error en un patrón - {error}", tone="warn")
         for text in p.get("unavailable", []):
@@ -834,7 +869,8 @@ class MainWindow(QMainWindow):
                  f"TBR:      {tbr.zone} del {tbr.day:%d/%m/%Y} (High {fmt_price(tbr.high)}, Low {fmt_price(tbr.low)}, "
                  f"50 % {fmt_price(tbr.mid)})", f"Mercado:  {p['symbol']} {display_label(p['timeframe'])}", f"Vela:     {when}",
                  f"Precio:   {fmt_price(hit.price)}"]
-        lines += [f"{name.capitalize()}: {fmt_price(price)}" for name, price in hit.levels.items()]
+        names = {"stop": "Stop", "target": "Objetivo"}
+        lines += [f"{names.get(name, name.capitalize())}: {fmt_price(price)}" for name, price in hit.levels.items()]
         if hit.detail:
             lines += ["", hit.detail]
         return side, when, lines
