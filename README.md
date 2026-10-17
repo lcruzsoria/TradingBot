@@ -143,6 +143,12 @@ Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al f
 pasan un poco de la última vela. Además, una **línea vertical punteada** marca el inicio de cada día de trading, y el
 nombre del día (LUNES, MARTES...) va abajo, centrado entre su separador y el siguiente. Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
 colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
+**Velas de disparo** (botón **Disparos**, bajo Sin mecha; encendido por defecto): cada vela de disparo de un patrón identificado se
+marca con un **cuadrado amarillo** (sobre la vela en los cortos, bajo ella en los largos) y la vela se colora de **amarillo**. Es una
+capa aparte de «Sin mecha»: solo salen los patrones identificados, no los invalidados, anulados ni vencidos. Se conservan aunque cambie
+la TBR activa y valen para cualquier timeframe del gráfico (con M1, se colorean las velas de esa M5); al cambiar de activo se
+olvidan. `PATTERN_SHOW_TRIGGERS=false` lo deja apagado al arrancar.
+
 **Velas sin mecha** (botón **Sin mecha**, en la primera fila a la derecha): marca en el gráfico un triángulo rojo sobre cada vela
 bajista sin mecha superior y uno verde bajo cada vela alcista sin mecha inferior, que son las velas de disparo de los patrones. La
 mecha máxima que se tolera sale de `PATTERN_CONTINUATION_MAX_WICK_PCT` (0 al inicio). Se marcan las últimas velas del timeframe que
@@ -241,6 +247,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **PATTERN** — patrones dentro de la TBR activa | | |
 | `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (`continuacion_clasica` y `continuacion_50`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `PATTERN_SHOW_TRIGGERS` | `true` | Botón «Disparos» del gráfico activado al arrancar. |
 | `PATTERN_SHOW_WICKLESS` | `false` | Botón «Sin mecha» del gráfico activado al arrancar. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | `PATTERN_CONTINUATION_TF` | `5m` | Timeframe del patrón 1 (con el gráfico en ese timeframe o en uno menor que lo divida). |

@@ -15,6 +15,7 @@ from ..skills.bias.rules import fmt_price
 from . import theme
 from .fmt import fecha_hora
 
+TRIGGER_FILL, TRIGGER_LINE = "#FFD60A", "#B8860B"   # vela de disparo de un patrón: amarilla
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
 LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
@@ -155,7 +156,12 @@ class CandlestickItem(pg.GraphicsObject):
         empty = np.empty(0)
         self._o = self._h = self._l = self._c = empty
         self._rect = QRectF()
+        self._highlight: frozenset[int] = frozenset()      # velas coloreadas de amarillo (disparo de un patrón)
         self.set_colors()
+
+    def set_highlight(self, indices) -> None:
+        self._highlight = frozenset(int(i) for i in indices)
+        self.update()
 
     def set_colors(self) -> None:
         self._up_fill, self._up_line = QColor(theme.CANDLE_UP_FILL), QColor(theme.CANDLE_UP_LINE)
@@ -213,11 +219,14 @@ class CandlestickItem(pg.GraphicsObject):
         up_pen = QPen(self._up_line); up_pen.setCosmetic(True); up_pen.setWidthF(1.2)
         down_pen = QPen(self._down_line); down_pen.setCosmetic(True); down_pen.setWidthF(1.2)
         body_w = 0.34
+        hl_pen = QPen(QColor(TRIGGER_LINE)); hl_pen.setCosmetic(True); hl_pen.setWidthF(1.6)
+        hl_brush = QColor(TRIGGER_FILL)
         for i in range(i0, i1):
             o, h, l, c = self._o[i], self._h[i], self._l[i], self._c[i]
             up = c >= o
-            p.setPen(up_pen if up else down_pen)
-            p.setBrush(self._up_fill if up else self._down_fill)
+            marked = i in self._highlight
+            p.setPen(hl_pen if marked else up_pen if up else down_pen)
+            p.setBrush(hl_brush if marked else self._up_fill if up else self._down_fill)
             p.drawLine(QPointF(i, l), QPointF(i, h))
             top, bottom = (c, o) if up else (o, c)
             if top - bottom <= 0:
@@ -267,6 +276,9 @@ class ChartView(pg.PlotWidget):
         self._wick_visible = False
         self._wick_pct = 0.0
         self._wick_item = None
+        self._triggers: list[tuple[int, str]] = []    # (vela, dirección) de las velas de disparo marcadas
+        self._trigger_visible = True
+        self._trigger_item = None
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
@@ -304,6 +316,7 @@ class ChartView(pg.PlotWidget):
         self.item.set_data(o, h, l, c)
         self._ohlc = (o, h, l, c)
         self._draw_wickless()
+        self._draw_triggers()
         self.clear_levels()
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
@@ -490,6 +503,42 @@ class ChartView(pg.PlotWidget):
             pi.addItem(marker, ignoreBounds=True)
         marker.setPos(float(index))
         marker.show()
+
+    # -- velas de disparo de los patrones ------------------------------------------------------------------
+    def set_triggers(self, marks: list[tuple[int, str]]) -> None:
+        """marks: (índice de vela, "long" o "short") de las velas de disparo de los patrones identificados."""
+        self._triggers = list(marks)
+        self._draw_triggers()
+
+    def show_triggers(self, visible: bool) -> None:
+        self._trigger_visible = visible
+        self._draw_triggers()
+
+    def _draw_triggers(self) -> None:
+        pi = self.getPlotItem()
+        if self._trigger_item is not None:
+            pi.removeItem(self._trigger_item)
+            self._trigger_item = None
+        shown = [(i, d) for i, d in self._triggers if self._ohlc is not None and 0 <= i < len(self._ohlc[0])]
+        self.item.set_highlight([i for i, _d in shown] if self._trigger_visible else [])
+        if not self._trigger_visible or not shown:
+            return
+        _o, h, l, _c = self._ohlc
+        pad = float(np.median(h - l)) * 1.3
+        spots = [{"pos": (float(i), (h[i] + pad) if d == "short" else (l[i] - pad)), "symbol": "s",
+                  "brush": pg.mkBrush(TRIGGER_FILL), "pen": pg.mkPen(TRIGGER_LINE, width=1.5), "size": 11} for i, d in shown]
+        item = pg.ScatterPlotItem(spots=spots)
+        item.setZValue(7)
+        pi.addItem(item, ignoreBounds=True)
+        self._trigger_item = item
+
+    @property
+    def trigger_count(self) -> int:
+        return 0 if self._trigger_item is None else len(self._trigger_item.data)
+
+    @property
+    def highlighted(self) -> frozenset:
+        return self.item._highlight
 
     # -- velas sin mecha -------------------------------------------------------------------------------
     def show_wickless(self, visible: bool) -> None:

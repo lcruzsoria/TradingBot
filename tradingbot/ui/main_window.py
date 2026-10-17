@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
@@ -17,7 +18,7 @@ from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
-from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
+from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
 from . import theme
 from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
@@ -235,6 +236,15 @@ class MainWindow(QMainWindow):
         pattern_skill = self.manager.skills.get("pattern")
         self.wick_btn.setVisible(pattern_skill is not None)
         self.wick_btn.setChecked(pattern_skill is not None and pattern_skill.settings.get_bool("SHOW_WICKLESS", False))
+        # Velas de disparo de los patrones identificados: cuadrado amarillo y vela amarilla
+        self.trigger_btn = QPushButton("Disparos")
+        self.trigger_btn.setProperty("chip", "true")
+        self.trigger_btn.setCheckable(True)
+        self.trigger_btn.setToolTip("Marca con un cuadrado amarillo, y colorea de amarillo, las velas de disparo de los patrones "
+                                    "identificados en el activo del gráfico.")
+        self.trigger_btn.setVisible(pattern_skill is not None)
+        self.trigger_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_TRIGGERS", True))
+        self._triggers: dict = {}                              # velas de disparo ya identificadas: (símbolo, patrón, vela, lado) -> datos
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -276,6 +286,7 @@ class MainWindow(QMainWindow):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.wick_btn, 0, 3)
+        grid.addWidget(self.trigger_btn, 1, 3)
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)
@@ -303,6 +314,8 @@ class MainWindow(QMainWindow):
         for group, btn in self.level_btns.items():
             self.chart.show_level(group, btn.isChecked())
             btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
+        self.chart.show_triggers(self.trigger_btn.isChecked())
+        self.trigger_btn.toggled.connect(self.chart.show_triggers)
         self.chart.show_wickless(self.wick_btn.isChecked())
         self.wick_btn.toggled.connect(self.chart.show_wickless)
         self._refresh_wick_tip()
@@ -613,6 +626,8 @@ class MainWindow(QMainWindow):
 
     def _on_candles(self, p: dict) -> None:
         df, symbol, tf = p["df"], p["symbol"], p["timeframe"]
+        if symbol != self.charted_symbol:
+            self._triggers.clear()                               # otro activo: se olvidan las velas de disparo anteriores
         self.charted_symbol = symbol
         if not p.get("refresh"):
             self.bias_hist.select(None)                              # otro activo o timeframe: se pierde la vela marcada
@@ -624,6 +639,7 @@ class MainWindow(QMainWindow):
         refresh = bool(p.get("refresh")) and self.candles is not None
         self.candles = df
         self.chart.set_candles(df, keep_view=refresh)
+        self._apply_triggers()
         self.chart.set_ny_shift(self.ny_shift)
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self._update_chart_stats()
@@ -833,7 +849,31 @@ class MainWindow(QMainWindow):
                  f"Empieza el día de trading del {p['day']} para {group} ({hour} NY).\nActivos de tu lista: {names}.\n"
                  "Los niveles TDO, PDH/PDL y los separadores del gráfico se renuevan con este día.", tone="info")
 
+    def _remember_triggers(self, p: dict) -> None:
+        """Guarda las velas de disparo de los patrones identificados (aunque luego cambie la TBR activa)."""
+        for hit in p.get("hits", []):
+            if hit.status == "detected" and hit.ts:
+                tf = p.get("tfs", {}).get(hit.key, p["timeframe"])
+                self._triggers[(p["symbol"], hit.key, hit.ts, hit.direction)] = (hit.ts, tf)
+        self._apply_triggers()
+
+    def _apply_triggers(self) -> None:
+        """Pinta las velas de disparo del activo del gráfico, buscando su hora en las velas actuales (valen para cualquier timeframe)."""
+        df = self.candles
+        if df is None or not len(df):
+            self.chart.set_triggers([])
+            return
+        ts = df["ts"].to_numpy()
+        marks = []
+        for (symbol, _key, start, direction), (_ts, tf) in self._triggers.items():
+            if symbol != self.charted_symbol:
+                continue
+            seconds = minutes(tf) * 60
+            marks += [(int(i), direction) for i in np.flatnonzero((ts >= start) & (ts < start + seconds))]
+        self.chart.set_triggers(marks)
+
     def _on_pattern_updated(self, p: dict) -> None:
+        self._remember_triggers(p)
         for error in p.get("errors", []):
             self.log_once("pattern_error", (p["symbol"], error), f"pattern: error en un patrón - {error}", tone="warn")
         for text in p.get("unavailable", []):

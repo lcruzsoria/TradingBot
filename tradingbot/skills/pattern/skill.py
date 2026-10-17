@@ -122,7 +122,7 @@ class PatternSkill(Skill):
             except Exception as exc:                    # un patrón con error no debe tumbar a los demás
                 errors.append(f"{pattern.title or key}: {exc}")
         self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": tbr, "hits": hits, "errors": errors,
-                                         "unavailable": unavailable})
+                                         "unavailable": unavailable, "tfs": tfs})
         found = [h for h in hits if h.status == DETECTED]
         ended = window is not None and window.session_end_ts is not None and int(chart_ts[-1]) >= window.session_end_ts
         if errors:

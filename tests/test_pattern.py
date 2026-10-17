@@ -414,3 +414,45 @@ def test_el_boton_sin_mecha_dibuja_los_marcadores(tmp_path, monkeypatch):
                             [{"type": "pattern"}])
     win2 = MainWindow(EventBus(), manager2, cfg, "t")                                     # la mecha máxima sale del ajuste, sin arrancar la skill
     assert win2._wick_pct() == 3.0 and "3 %" in win2.wick_btn.toolTip()
+
+
+def test_las_velas_de_disparo_se_marcan_con_un_cuadrado_amarillo_y_se_colorean(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD", "GBPUSD"]}}
+    manager = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}])
+    win = MainWindow(EventBus(), manager, cfg, "t")
+    assert win.trigger_btn.text() == "Disparos" and win.trigger_btn.isChecked()               # encendido por defecto
+    df = m5_frame(candles_after_close([SWEEP, REVERSAL, TRIGGER]))
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    assert win.chart.trigger_count == 0 and win.chart.highlighted == frozenset()
+    tbr = active_tbr([session(NY, DAY, 9.5)])
+    trigger_ts = ny(DAY, 12, 10)                                                              # la vela de disparo (índice 14 de las velas)
+    hit = PatternHit("continuacion_clasica", "Continuación clásica", "short", 2, 93.0, "", {}, trigger_ts)
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hits": [hit], "errors": [], "unavailable": [],
+                             "tfs": {"continuacion_clasica": "5m"}})
+    index = int(np.flatnonzero(df["ts"].to_numpy() == trigger_ts)[0])
+    assert win.chart.trigger_count == 1 and win.chart.highlighted == frozenset({index})       # cuadrado amarillo y vela amarilla
+    drop = PatternHit("continuacion_clasica", "x", "short", 1, 1.0, "", {}, ny(DAY, 12, 5), INVALIDATED)
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": tbr, "hits": [drop], "errors": [], "unavailable": [],
+                             "tfs": {}})
+    assert win.chart.trigger_count == 1                                                      # solo cuentan los patrones identificados
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": []})  # cambia la TBR activa: se mantienen
+    assert win.chart.trigger_count == 1
+    win.trigger_btn.setChecked(False)
+    assert win.chart.trigger_count == 0 and win.chart.highlighted == frozenset()              # la capa se apaga
+    win.trigger_btn.setChecked(True)
+    assert win.chart.trigger_count == 1
+    m1 = pd.DataFrame({"ts": ny(DAY, 12, 0) + np.arange(30) * 60, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+                       "tick_volume": 1})
+    m1["time"] = pd.to_datetime(m1["ts"], unit="s")
+    win._on_candles({"df": m1, "symbol": "EURUSD", "timeframe": "1m", "seconds": 0.1})         # gráfico en M1: se colorean las 5 velas de esa M5
+    assert win.chart.highlighted == frozenset(range(10, 15))
+    win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})         # otro activo: se olvidan
+    assert win.chart.trigger_count == 0
