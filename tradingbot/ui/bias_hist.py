@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QBrush, QColor
 
 from . import theme
 
@@ -13,7 +13,8 @@ PRICE_AXIS_WIDTH = 74    # igual que el eje de precio, para que las velas queden
 
 
 class BiasHistogram(pg.PlotWidget):
-    """Puntuación del Bias en cada vela: verde con sesgo alcista, rojo con sesgo bajista y gris sin sesgo."""
+    """Puntuación del Bias en cada vela: verde con sesgo alcista, rojo con sesgo bajista y gris liso sin sesgo; con trama gris
+    (rayas y contorno) las velas de un mercado lateral, donde el filtro anula el sesgo aunque la puntuación llegue al umbral."""
 
     bar_selected = Signal(object)        # índice de la vela marcada, o None si se desmarca
 
@@ -37,7 +38,8 @@ class BiasHistogram(pg.PlotWidget):
         self._marker.hide()
         pi.addItem(self._marker, ignoreBounds=True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Pulsa una barra para ver el voto de cada regla en esa vela (clic derecho o la misma barra: vuelve a la actual)")
+        self.setToolTip("Pulsa una barra para ver el voto de cada regla en esa vela (clic derecho o la misma barra: vuelve a la actual). "
+                        "Barras con rayas: mercado lateral, sesgo anulado")
         pi.scene().sigMouseClicked.connect(self._clicked)
         self.style()
 
@@ -82,7 +84,7 @@ class BiasHistogram(pg.PlotWidget):
         self.getPlotItem().setXLink(chart.getPlotItem())
 
     def set_scores(self, scores, min_score: float, lateral=None) -> None:
-        """lateral: velas con el mercado lateral (sin sesgo aunque la puntuación llegue al umbral): se pintan en gris."""
+        """lateral: velas con el mercado lateral (sin sesgo aunque la puntuación llegue al umbral): se pintan con trama gris."""
         self._scores, self._min = np.asarray(scores, dtype=float), float(min_score)
         self._lateral = None if lateral is None else np.asarray(lateral, dtype=bool)
         self._draw()
@@ -102,8 +104,11 @@ class BiasHistogram(pg.PlotWidget):
         for color in (bull, bear, flat):
             color.setAlphaF(0.85)
         side = np.zeros(len(y), dtype=bool) if self._lateral is None or len(self._lateral) != len(scores) else self._lateral[first:]
-        brushes = [flat if lat else bull if v >= self._min else bear if v <= -self._min else flat for v, lat in zip(y, side)]
-        bars = pg.BarGraphItem(x=x, height=y, width=0.8, brushes=brushes, pens=[pg.mkPen(None)] * len(y))
+        hatch = QBrush(QColor(theme.MUTED), Qt.BrushStyle.BDiagPattern)           # rayas: sesgo anulado por la lateralidad
+        outline = pg.mkPen(theme.MUTED, width=1)
+        brushes = [hatch if lat else bull if v >= self._min else bear if v <= -self._min else flat for v, lat in zip(y, side)]
+        pens = [outline if lat else pg.mkPen(None) for lat in side]
+        bars = pg.BarGraphItem(x=x, height=y, width=0.8, brushes=brushes, pens=pens)
         pi.addItem(bars)
         self._items.append(bars)
         for level, style in ((0.0, Qt.PenStyle.SolidLine), (self._min, Qt.PenStyle.DashLine), (-self._min, Qt.PenStyle.DashLine)):
