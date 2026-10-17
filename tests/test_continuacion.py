@@ -41,7 +41,7 @@ def test_alcista_rotura_con_cuerpo_swing_previo_fibo_y_entrada_en_el_05():
     assert (h.key, h.status, h.direction, h.x, h.price) == ("continuacion", DETECTED, "long", 12, 103.5)    # entrada en el 0,5
     assert h.levels["stop"] == 97.0 and h.levels["target"] == 116.5                                       # swing y -0,5: 2R
     assert (110 - 103.5) * 2 == pytest.approx(116.5 - 103.5) and (103.5 - 97) * 2 == pytest.approx(13.0)
-    assert len(figs) == 1
+    assert [f.kind for f in figs] == ["fib", "pos"]                                                       # el fibonacci y la posición
     f = figs[0]
     assert (f.kind, f.zone, f.direction, f.state) == ("fib", "NY Open", "long", "entrada")
     assert f.levels == {"-0,5": 116.5, "0": 110.0, "0,5": 103.5, "1": 97.0}
@@ -123,7 +123,7 @@ def test_la_skill_con_el_grafico_en_m5_agrupa_en_m15_y_publica_el_fibo():
     p = found[0].payload
     assert p["timeframe"] == "15m" and p["hit"].direction == "long" and p["hit"].price == 103.5 and p["tbr"].zone == "NY Open"
     assert p["hit"].ts == ny(DAY, 10, 0) + 12 * 900
-    figs = updated[-1].payload["figures"]
+    figs = [f for f in updated[-1].payload["figures"] if f.kind == "fib"]
     assert len(figs) == 1 and figs[0].levels["1"] == 97.0 and updated[-1].payload["tfs"] == {"continuacion": "15m"}
     assert manager.skills["pattern"].caption == "1 patrón(es) en NY Open"
 
@@ -209,3 +209,49 @@ def test_la_vela_que_confirma_el_pivote_puede_ser_la_que_toca_el_05():
     rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 110, 106, 109), (109, 109.5, 103, 103.5)]
     hits, figs = analyze(ctx_for(rows), 1)
     assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 11, 103.5)] and figs[0].levels["0"] == 110.0
+
+
+def test_la_posicion_se_dibuja_con_entrada_stop_y_objetivo_y_su_resultado():
+    from tradingbot.skills.pattern.trade import outcome
+    pos = analyze(ctx_for(PIVOTS[:15]), 1)[1][1]
+    assert (pos.kind, pos.direction, pos.state) == ("pos", "long", "abierta")                              # aún no llega a 118 ni a 97
+    assert pos.levels == {"entrada": 104.0, "stop": 97.0, "objetivo": 118.0} and pos.x0_ts == int(ctx_for(PIVOTS).ts[14])
+    assert analyze(ctx_for(PIVOTS), 1)[1][1].state == "objetivo"                                           # la vela 15 (máx. 120) lo alcanza
+    hits, figs = analyze(ctx_for(PIVOTS[:15] + [(103.5, 118.5, 103, 118)]), 1)                              # la vela siguiente llega al objetivo
+    assert figs[1].state == "objetivo" and figs[1].x1_ts == int(ctx_for(PIVOTS[:15] + [(0, 0, 0, 0)]).ts[15]) + 900
+    stop_first = PIVOTS[:15] + [(103.5, 119, 96, 100)]                                                      # caben objetivo y stop: cuenta el stop
+    assert analyze(ctx_for(stop_first), 1)[1][1].state == "stop"
+    h = np.array([105.0, 108.0, 120.0]); l = np.array([100.0, 99.0, 101.0])
+    assert outcome(h, l, 0, "long", 98.0, 118.0) == ("target", 2) and outcome(h, l, 0, "short", 121.0, 99.5) == ("target", 1)
+    assert outcome(h, l, 0, "long", 99.5, 150.0) == ("stop", 1) and outcome(h, l, 0, "long", 90.0, 150.0) == (None, 2)
+    short = analyze(ctx_for(mirror(PIVOTS)), 1)[1][1]
+    assert short.direction == "short" and short.levels == {"entrada": 96.0, "stop": 103.0, "objetivo": 82.0}
+
+
+def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.pattern.patterns import Figure
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD", "GBPUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}]), cfg, "t")
+    assert win.pos_btn.text() == "Entradas" and win.pos_btn.isChecked() and win.chart.position_count == 0
+    df = m5_from_m15(ROWS)
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    pos = Figure("pos", "continuacion", "NY Open", "long", ny(DAY, 11, 0), ny(DAY, 12, 30),
+                 {"entrada": 103.5, "stop": 97.0, "objetivo": 116.5}, "objetivo", "NY Open ▲")
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [pos]})
+    assert win.chart.position_count == 1 and win.chart.fib_count == 0
+    assert len(win.chart._pos_items) == 2 + 1 + 3                                                           # dos zonas, la línea de entrada y tres etiquetas
+    assert win.chart._positions[0]["x0"] == 12 and win.chart._positions[0]["x1"] > 12                      # 11:00 es la vela M5 número 12
+    win.pos_btn.setChecked(False)
+    assert win.chart.position_count == 0 and win.chart._pos_items == []
+    win.pos_btn.setChecked(True)
+    assert win.chart.position_count == 1
+    win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})                    # otro activo: se olvidan
+    assert win.chart.position_count == 0

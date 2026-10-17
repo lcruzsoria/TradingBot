@@ -113,7 +113,7 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
                 "LEVELS_DAYS", "LEVELS_MAX_TF_MINUTES", "LEVELS_TDO_COLOR", "LEVELS_SEPARATOR_COLOR",
                 "LEVELS_DAY_START", "LEVELS_INDEX_DAY_START", "LEVELS_US_INDICES",
                 "CORTEX_ALLOW_NO_BIAS", "SETUP_SEND_ORDERS", "BIAS_RECALC_INDEX_HOURS", "BIAS_RECALC_HOURS",
-                "PATTERN_TYPES", "PATTERN_ZONES", "PATTERN_ZONE_ORDER", "PATTERN_SHOW_FIBO", "PATTERN_CONTINUACION_TF",
+                "PATTERN_TYPES", "PATTERN_ZONES", "PATTERN_ZONE_ORDER", "PATTERN_SHOW_FIBO", "PATTERN_SHOW_POSITIONS", "PATTERN_CONTINUACION_TF",
                 "PATTERN_CONTINUACION_SWING_BARS", "PATTERN_REVERSION_TF", "PATTERN_REVERSION_SWING_BARS"):
         assert key in keys, f"falta {key} en tradingbot.env"
     for i, line in enumerate(lines):                       # cada grupo de claves, con su comentario encima

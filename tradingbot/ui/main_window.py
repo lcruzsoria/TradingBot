@@ -238,7 +238,15 @@ class MainWindow(QMainWindow):
                                  "recientes, con el patrón Continuación. La entrada es la reversión al 0,5.")
         self.fibo_btn.setVisible(pattern_skill is not None)
         self.fibo_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_FIBO", True))
+        self.pos_btn = QPushButton("Entradas")
+        self.pos_btn.setProperty("chip", "true")
+        self.pos_btn.setCheckable(True)
+        self.pos_btn.setToolTip("Dibuja las entradas de los patrones como la herramienta de posición de TradingView: zona verde hasta el "
+                                "objetivo, zona roja hasta el stop, con el R:R.")
+        self.pos_btn.setVisible(pattern_skill is not None)
+        self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
+        self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -280,6 +288,7 @@ class MainWindow(QMainWindow):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.fibo_btn, 0, 3)
+        grid.addWidget(self.pos_btn, 1, 3)
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)
@@ -307,6 +316,8 @@ class MainWindow(QMainWindow):
         for group, btn in self.level_btns.items():
             self.chart.show_level(group, btn.isChecked())
             btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
+        self.chart.show_positions(self.pos_btn.isChecked())
+        self.pos_btn.toggled.connect(self.chart.show_positions)
         self.chart.show_fibs(self.fibo_btn.isChecked())
         self.fibo_btn.toggled.connect(self.chart.show_fibs)
         self.chart.show_sma(self.sma_btn.isChecked())
@@ -610,7 +621,7 @@ class MainWindow(QMainWindow):
         self.candles = df
         self.chart.set_candles(df, keep_view=refresh)
         if symbol != getattr(self, "_fib_symbol", symbol):
-            self._fibs = []                                      # otro activo: se olvidan los fibonacci anteriores
+            self._fibs, self._positions = [], []                 # otro activo: se olvidan los dibujos anteriores
         self._fib_symbol = symbol
         self._apply_fibs()
         self.chart.set_ny_shift(self.ny_shift)
@@ -827,6 +838,7 @@ class MainWindow(QMainWindow):
         df = self.candles
         if df is None or not len(df):
             self.chart.set_fibs([])
+            self.chart.set_positions([])
             return
         ts = df["ts"].to_numpy()
         n = len(ts)
@@ -835,10 +847,15 @@ class MainWindow(QMainWindow):
             fibs.append({"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                          "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction})
         self.chart.set_fibs(fibs)
+        self.chart.set_positions([
+            {"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
+             "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"], "direction": f.direction,
+             "state": f.state, "label": f.label} for f in self._positions])
 
     def _on_pattern_updated(self, p: dict) -> None:
         if p["symbol"] == self.charted_symbol:
             self._fibs = [f for f in p.get("figures", []) if f.kind == "fib"]
+            self._positions = [f for f in p.get("figures", []) if f.kind == "pos"]
             self._apply_fibs()
         for error in p.get("errors", []):
             self.log_once("pattern_error", (p["symbol"], error), f"pattern: error en un patrón - {error}", tone="warn")

@@ -263,6 +263,9 @@ class ChartView(pg.PlotWidget):
         self._sma: tuple | None = None            # (valores, color, trazo) de la última SMA recibida
         self._sma_visible = False
         self._sma_item = None
+        self._positions: list[dict] = []          # posiciones de los patrones: {x0, x1, entry, stop, target, label, state, direction}
+        self._pos_visible = True
+        self._pos_items: list = []
         self._fibs: list[dict] = []               # fibonacci de los patrones: {x0, x1, levels, label, state, direction}
         self._fib_visible = True
         self._fib_items: list = []
@@ -487,6 +490,57 @@ class ChartView(pg.PlotWidget):
             pi.addItem(marker, ignoreBounds=True)
         marker.setPos(float(index))
         marker.show()
+
+    # -- posiciones de los patrones (como la herramienta de posición de TradingView) ---------------------------------------
+    def set_positions(self, positions: list[dict]) -> None:
+        """positions: {x0, x1 (índices de vela), entry, stop, target (precios), direction, state, label}."""
+        self._positions = list(positions)
+        self._draw_positions()
+
+    def show_positions(self, visible: bool) -> None:
+        self._pos_visible = visible
+        self._draw_positions()
+
+    def _draw_positions(self) -> None:
+        pi = self.getPlotItem()
+        for item in self._pos_items:
+            pi.removeItem(item)
+        self._pos_items.clear()
+        if not self._pos_visible:
+            return
+        for pos in self._positions:
+            x0, x1 = float(pos["x0"]), float(pos["x1"])
+            entry, stop, target = float(pos["entry"]), float(pos["stop"]), float(pos["target"])
+            risk = abs(entry - stop)
+            reward = abs(target - entry)
+            for lo, hi, color in ((min(entry, target), max(entry, target), QColor(38, 166, 154, 70)),
+                                  (min(entry, stop), max(entry, stop), QColor(239, 83, 80, 70))):
+                box = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
+                box.setBrush(color)
+                box.setPen(QPen(Qt.PenStyle.NoPen))
+                box.setZValue(-6)
+                pi.addItem(box, ignoreBounds=True)
+                self._pos_items.append(box)
+            line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.MUTED, width=1.2))
+            line.setZValue(-5)
+            pi.addItem(line, ignoreBounds=True)
+            self._pos_items.append(line)
+            ratio = reward / risk if risk > 0 else 0.0
+            long = pos["direction"] == "long"
+            tags = ((target, f"Objetivo {fmt_price(target)}  ({ratio:.2f}R)", QColor(38, 166, 154, 230), 0.0 if long else 1.0),
+                    (stop, f"Stop {fmt_price(stop)}", QColor(239, 83, 80, 230), 1.0 if long else 0.0),
+                    (entry, f"{pos['label']}  {'Largo' if long else 'Corto'} {fmt_price(entry)}  R:R {ratio:.2f}  ({pos['state']})",
+                     QColor(66, 133, 244, 230), 0.5))
+            for price, text, fill, anchor_y in tags:
+                tag = pg.TextItem(text, color="#FFFFFF", fill=pg.mkBrush(fill), anchor=(0, anchor_y))
+                tag.setPos(x0, price)
+                tag.setZValue(8)
+                pi.addItem(tag, ignoreBounds=True)
+                self._pos_items.append(tag)
+
+    @property
+    def position_count(self) -> int:
+        return 0 if not self._pos_visible else len(self._positions)
 
     # -- fibonacci de los patrones ---------------------------------------------------------------------------
     def set_fibs(self, fibs: list[dict]) -> None:

@@ -21,6 +21,7 @@ import numpy as np
 from ...timeframes import parse_timeframe
 from .continuacion import _when
 from .fibo import run_fibo
+from .trade import position_figure
 from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "15m"
@@ -120,7 +121,8 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
                   f"el -0,5 (2R)")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * origin_price, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label)]
+        pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * origin_price, sign * target, label)
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label), pos]
     if ctx.window_closed:
         return expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero sin retroceso al 0,5")
     return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label)]

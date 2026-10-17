@@ -57,6 +57,12 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
 
 Solo se trata el fibonacci en curso; stop y objetivo viajan en la orden que Cortex le pasa a Setup (en simulación).
 
+**Entradas** (botón **Entradas**, bajo Fibo; activo por defecto): cada entrada de un patrón se dibuja como la herramienta de posición
+de TradingView: zona **verde** desde la entrada hasta el objetivo, zona **roja** hasta el stop, línea de entrada y etiquetas con el
+precio del objetivo y del stop, el R:R y el estado (objetivo, stop o abierta). La zona llega hasta la vela en que se alcanzó el
+objetivo o el stop (si caben los dos en la misma vela, cuenta el stop) o hasta la última vela si sigue abierta. Valen para largos y
+cortos. `PATTERN_SHOW_POSITIONS=false` lo deja apagado al arrancar.
+
 #### Patrón «Reversión» (`reversion`)
 
 Ejemplo bajista; el alcista es el espejo exacto. También trabaja siempre con velas de M15 (`PATTERN_REVERSION_TF`).
@@ -233,6 +239,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **PATTERN** — patrones dentro de la TBR activa | | |
 | `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (`continuacion` y `reversion`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `PATTERN_SHOW_POSITIONS` | `true` | Botón «Entradas» del gráfico activado al arrancar. |
 | `PATTERN_SHOW_FIBO` | `true` | Botón «Fibo» del gráfico activado al arrancar. |
 | `PATTERN_CONTINUACION_TF` | `15m` | Timeframe del patrón Continuación (el gráfico, en ese timeframe o uno menor que lo divida). |
 | `PATTERN_CONTINUACION_SWING_BARS` | `1` | Velas a cada lado que definen un swing (pivote): 1 = patrón de tres velas. |

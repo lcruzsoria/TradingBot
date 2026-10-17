@@ -25,6 +25,7 @@ import numpy as np
 
 from ...timeframes import parse_timeframe
 from .fibo import run_fibo
+from .trade import position_figure
 from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "15m"
@@ -120,7 +121,8 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
                   f"({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el swing y objetivo en el -0,5 (2R)")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * swing, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "entrada", label)]
+        pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * swing, sign * target, label)
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "entrada", label), pos]
     if ctx.window_closed:
         x = min(max(end, 0), len(ts) - 1)
         return [hit(EXPIRED, direction, x, sign * half, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin reversión al 0,5 "
