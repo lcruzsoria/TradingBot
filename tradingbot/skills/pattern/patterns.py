@@ -201,8 +201,8 @@ def window_for(tbr: ActiveTbr, order, ahead: int, extend=(), until=None) -> TbrW
     Termina cuando empieza la TBR siguiente del ciclo: Asia -> London, London -> NY Open y NY Open -> NY PM. Tras la última
     zona del ciclo (NY PM) no se evalúan más setups. Si la zona de la TBR no está en el ciclo, devuelve None (sin límite).
     `extend`: claves de zona cuyo plazo se amplía hasta el final de la última zona del ciclo (p. ej. NY_AM hasta el fin de
-    NY PM, en vez de hasta el inicio de NY PM). `until`: {clave de zona: clave de otra zona} para que el plazo llegue hasta el inicio
-    de esa otra zona (p. ej. ASIA -> NY_AM: Asia hasta el inicio de NY Open, en vez de hasta London). `ahead`: segundos que el servidor va por delante de Nueva York.
+    NY PM, en vez de hasta el inicio de NY PM). `until`: {clave de zona: clave de otra zona, o 'CLAVE:FIN'} para que el plazo llegue hasta el inicio
+    (o el final, con ':FIN') de esa otra zona, o 'ZONA@HH:MM' para que llegue hasta esa hora de NY (p. ej. ASIA -> NY_AM: Asia hasta el inicio de NY Open, en vez de hasta London). `ahead`: segundos que el servidor va por delante de Nueva York.
     """
     zone = next((z for z in order if z.key == tbr.key), None)
     if zone is None:
@@ -223,9 +223,20 @@ def window_for(tbr: ActiveTbr, order, ahead: int, extend=(), until=None) -> TbrW
         session_end = best[0] + last.minutes * 60 + ahead          # la siguiente zona es la última: su final cierra la jornada
     start_ts = close_ny - zone.minutes * 60 + ahead
     last_hours = _hhmm((last.start + last.minutes) % 1440)
-    target = next((z for z in order if z.key == (until or {}).get(tbr.key)), None)
+    spec = (until or {}).get(tbr.key, "")
+    if "@" in spec:                                                       # "NY_AM@18:00": hasta una hora fija de NY
+        h, m = (int(x) for x in spec.split("@", 1)[1].split(":"))
+        wall = h * 60 + m
+        end = min(s for s in ((day + k) * DAY + wall * 60 for k in range(0, 3)) if s >= close_ny) + ahead
+        return TbrWindow(close_ny + ahead, end, "el plazo", _hhmm(wall), end, _hhmm(wall), start_ts, "terminara")
+    to_end = spec.upper().endswith(":FIN")                               # "NY_AM:FIN": hasta el final de esa zona
+    target = next((z for z in order if z.key == spec.upper().removesuffix(":FIN")), None)
     if target is not None and target.key != tbr.key:
         begin = min(s for s in ((day + k) * DAY + target.start * 60 for k in range(0, 3)) if s >= close_ny)
+        if to_end:
+            end = begin + target.minutes * 60 + ahead
+            return TbrWindow(close_ny + ahead, end, target.name, _hhmm((target.start + target.minutes) % 1440),
+                             end if target.key == last.key else None, last_hours, start_ts, "terminara")
         ends_session = begin + target.minutes * 60 + ahead if target.key == last.key else None
         return TbrWindow(close_ny + ahead, begin + ahead, target.name, _hhmm(target.start), ends_session, last_hours, start_ts)
     if tbr.key in {k.upper() for k in extend} and last.key != tbr.key:

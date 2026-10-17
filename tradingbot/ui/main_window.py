@@ -933,7 +933,7 @@ class MainWindow(QMainWindow):
     def _on_pattern_session(self, p: dict) -> None:
         tbr = p["tbr"]
         self.log_once("pattern_session", (p["symbol"], tbr.key, tbr.day),
-                      f"pattern: fin de la jornada de setups en {p['symbol']} ({p['session_end']} NY, fin de NY PM): no se "
+                      f"pattern: fin de la jornada de setups en {p['symbol']} ({p['session_end']} NY): no se "
                       f"evalúan más hasta que cierre la próxima TBR", None, "warn")
 
     def _on_cortex_decision(self, p: dict) -> None:

@@ -20,6 +20,7 @@ Salida: analisis/backtest_patrones.xlsx (carpeta ignorada por git).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -42,8 +43,12 @@ TF_MIN = 15
 SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "US2000.r")
 PATTERNS = {"Continuación": continuacion, "Reversión": reversion}
 ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
-UNTIL = {"ASIA": "NY_AM"}                    # el plazo de Asia llega hasta el inicio de NY Open (como el bot)
-EXTEND = ("NY_AM",)                           # el plazo de NY Open llega hasta el final de NY PM (como el bot)
+UNTIL = {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}   # Asia hasta NY Open, London hasta su final y NY Open hasta las 18:00 (como el bot)
+if os.environ.get("BT_PLAZOS") == "anterior":         # variantes para comparar los plazos
+    UNTIL = {"NY_AM": "@16:30"}                       # el plazo anterior: NY Open hasta el final de NY PM
+elif os.environ.get("BT_PLAZOS") == "asia_london":
+    UNTIL = {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@16:30"}
+EXTEND = ()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
 MAX_HOLD = 96                                 # velas M15 (24 h)

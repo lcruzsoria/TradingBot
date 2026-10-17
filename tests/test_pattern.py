@@ -213,7 +213,8 @@ def test_los_resultados_que_no_son_identificacion_van_al_registro_sin_pasar_a_co
 
 def test_tras_ny_pm_no_se_evaluan_mas_setups_y_se_anota_una_sola_vez(registry):
     rows = candles_after_close([FLAT, FLAT, BREAK], tail=1, extra=[FLAT] * 60)              # pasadas las 16:30
-    manager, bus, found, dropped, session_events, updated = run_skill("PATTERN_TYPES=rompe_high\n", df=m5_frame(rows))
+    manager, bus, found, dropped, session_events, updated = run_skill("PATTERN_TYPES=rompe_high\nPATTERN_UNTIL=NY_AM@16:30\n",
+                                                                      df=m5_frame(rows))
     assert len(found) == 1 and len(session_events) == 1 and session_events[0].payload["session_end"] == "16:30"
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "5m", "df": m5_frame(rows)}, source="feed")
     time.sleep(0.3)
@@ -307,7 +308,8 @@ def test_plazo_de_asia_hasta_el_inicio_de_ny_open():
 def test_pattern_until_por_defecto_y_validacion():
     manager, _bus, _found, *_ = run_skill("")
     manager.stop()
-    assert manager.skills["pattern"].until == {"ASIA": "NY_AM"} and manager.skills["pattern"].extend == ["NY_AM"]
+    assert manager.skills["pattern"].until == {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}
+    assert manager.skills["pattern"].extend == []
     for text in ("PATTERN_UNTIL=ASIA\n", "PATTERN_UNTIL=ASIA:NO_EXISTE\n"):
         manager, _bus, found, *_ = run_skill(text)
         manager.stop()
@@ -336,3 +338,21 @@ def test_cada_entrada_dibujada_lleva_su_go_o_no_go_con_el_sesgo_de_su_vela(tmp_p
     assert win._entry_decision(3, "long") == ("NO GO", "No Bias -1")        # sin sesgo: NO GO (CORTEX_ALLOW_NO_BIAS=false)
     win._hist_data = None
     assert win._entry_decision(0, "long") == ("", "")                       # sin historial de sesgo no se marca nada
+
+
+def test_plazo_de_london_hasta_el_final_de_ny_open():
+    london = ActiveTbr("LONDON", "London", DAY, 105, 95, 0, 1)
+    normal = window_for(london, ORDER, AHEAD)
+    largo = window_for(london, ORDER, AHEAD, (), {"LONDON": "NY_AM:FIN"})
+    assert normal.end_ts == ny(DAY, 10, 0)
+    assert largo.end_ts == ny(DAY, 12, 0) and largo.next_zone == "NY Open" and largo.next_hours == "12:00"
+    assert largo.limit_verb == "terminara" and largo.session_end_ts is None and largo.close_ts == normal.close_ts
+
+
+def test_plazo_de_ny_open_hasta_las_1800():
+    largo = window_for(TBR, ORDER, AHEAD, (), {"NY_AM": "@18:00"})
+    assert largo.end_ts == ny(DAY, 18, 0) == largo.session_end_ts and largo.session_end_hours == "18:00"
+    assert largo.next_hours == "18:00" and largo.limit_verb == "terminara" and largo.close_ts == window_for(TBR, ORDER, AHEAD).close_ts
+    manager, _bus, found, *_ = run_skill("PATTERN_UNTIL=NY_AM@25:00\n")
+    manager.stop()
+    assert manager.skills["pattern"].state.value == "error" and "HH:MM" in manager.skills["pattern"].note

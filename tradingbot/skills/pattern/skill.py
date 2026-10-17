@@ -12,8 +12,8 @@ from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
-DEFAULT_UNTIL = ("ASIA:NY_AM",)                 # plazo de Asia: hasta el inicio de NY Open
-DEFAULT_EXTEND = ("NY_AM",)                     # TBR cuyo plazo llega hasta el final de la última zona del ciclo
+DEFAULT_UNTIL = ("ASIA:NY_AM", "LONDON:NY_AM:FIN", "NY_AM@18:00")   # Asia hasta NY Open, London hasta el final de NY Open, NY Open hasta las 18:00
+DEFAULT_EXTEND = ()                     # TBR cuyo plazo llega hasta el final de la última zona del ciclo
 DEFAULT_HISTORY_DAYS = 30                      # días de TBR pasadas de las que se dibujan fibos y entradas
 RECENT_SECONDS = 24 * 3600                      # solo se evalúan las TBR que cerraron en el último día
 
@@ -79,20 +79,34 @@ class PatternSkill(Skill):
         self.patterns = {key: PATTERN_REGISTRY[key](self.settings) for key in self.types}   # valida sus ajustes propios
 
     def _load_until(self, order: list[str]) -> dict[str, str]:
-        """PATTERN_UNTIL=ASIA:NY_AM: el plazo de cada zona llega hasta el inicio de la zona indicada."""
+        """PATTERN_UNTIL=ASIA:NY_AM, LONDON:NY_AM:FIN: el plazo de cada zona llega hasta el inicio (o el final, con :FIN) de la zona indicada."""
         raw = self.settings.get("UNTIL")
         items = self.settings.get_list("UNTIL", list(DEFAULT_UNTIL))
         until = {}
         for item in items:
-            zone, _sep, target = (x.strip().upper() for x in item.partition(":"))
-            if not zone or not target:
-                raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: usa ZONA:ZONA (por ejemplo ASIA:NY_AM).")
+            if "@" in item:                                     # ZONA@HH:MM: hasta una hora fija de NY
+                zone, _at, hour = (x.strip().upper() for x in item.partition("@"))
+                try:
+                    h, m = (int(x) for x in hour.split(":"))
+                    assert 0 <= h < 24 and 0 <= m < 60
+                except (ValueError, AssertionError):
+                    raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: la hora de {item} debe ser HH:MM.") from None
+                if zone not in order:
+                    if raw is None:
+                        continue
+                    raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: {zone} no está en PATTERN_ZONE_ORDER.")
+                until[zone] = f"@{h:02d}:{m:02d}"
+                continue
+            parts = [x.strip().upper() for x in item.split(":")]
+            zone, target = parts[0], (parts[1] if len(parts) > 1 else "")
+            if len(parts) not in (2, 3) or not zone or not target or (len(parts) == 3 and parts[2] != "FIN"):
+                raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: usa ZONA:ZONA o ZONA:ZONA:FIN (por ejemplo ASIA:NY_AM).")
             if zone not in order or target not in order:
                 if raw is None:
                     continue                                    # el valor por defecto no da error
                 raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: {zone if zone not in order else target} no está en "
                                  f"PATTERN_ZONE_ORDER.")
-            until[zone] = target
+            until[zone] = ":".join(parts[1:])
         return until
 
     # -- mensajes -----------------------------------------------------------------------------------
