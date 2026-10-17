@@ -375,3 +375,42 @@ def test_el_registro_anota_tbr_activa_patron_y_descartes(tmp_path, monkeypatch):
     assert "pattern: Continuación clásica Short identificado en NY Open" in text
     assert "Continuación clásica Short invalidado en NY Open" in text and "llegó al 50 %" in text
     assert "fin de la jornada de setups" in text and "16:30 NY" in text
+
+
+def test_el_grafico_marca_las_velas_sin_mecha():
+    from tradingbot.ui.chart import ChartView
+    o = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
+    h = np.array([100.0, 100.1, 102.0, 100.0, 101.0])           # 0: bajista sin mecha sup.; 1: bajista con mecha; 2: alcista con mecha
+    l = np.array([97.0, 97.0, 99.0, 100.0, 100.0])               # 3: doji (sin tamaño: no cuenta); 4: alcista sin mecha inferior
+    c = np.array([98.0, 98.0, 101.5, 100.0, 101.0])
+    bear, bull = ChartView.wickless_masks(o, h, l, c, 0.0)
+    assert list(bear) == [True, False, False, False, False] and list(bull) == [False, False, False, False, True]
+    bear, bull = ChartView.wickless_masks(o, h, l, c, 5.0)       # mecha de hasta el 5 % de la vela: la vela 1 mide 3,1 de alto, mecha 0,1 (3,2 %)
+    assert list(bear) == [True, True, False, False, False]
+
+
+def test_el_boton_sin_mecha_dibuja_los_marcadores(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
+    manager = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig(parse("PATTERN_CONTINUATION_MAX_WICK_PCT=0\n"))),
+                           [{"type": "pattern"}])
+    win = MainWindow(EventBus(), manager, cfg, "t")
+    assert win.wick_btn.text() == "Sin mecha" and not win.wick_btn.isChecked() and win.chart.wickless_count == 0
+    df = m5_frame([(100, 100, 97, 98), (100, 100.1, 97, 98), (100, 102, 99, 101.5), (100, 101, 100, 101)] * 3, (11, 0))
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    assert win.chart.wickless_count == 0                                                  # botón apagado
+    win.wick_btn.setChecked(True)
+    assert win.chart.wickless_count == 6                                                  # 3 bajistas sin mecha superior + 3 alcistas sin mecha inferior
+    win.wick_btn.setChecked(False)
+    assert win.chart.wickless_count == 0
+    manager2 = SkillManager(EventBus(), Services(None, None, cfg, EnvConfig(parse("PATTERN_CONTINUATION_MAX_WICK_PCT=3\n"))),
+                            [{"type": "pattern"}])
+    win2 = MainWindow(EventBus(), manager2, cfg, "t")                                     # la mecha máxima sale del ajuste, sin arrancar la skill
+    assert win2._wick_pct() == 3.0 and "3 %" in win2.wick_btn.toolTip()

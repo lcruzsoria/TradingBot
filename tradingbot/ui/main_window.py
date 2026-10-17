@@ -228,6 +228,13 @@ class MainWindow(QMainWindow):
         self.sma_cfg_btn.setVisible(levels_skill is not None)
         self.sma_cfg_btn.clicked.connect(self.open_sma_config)
         self._sma_cfg = (30, "#00ACC1", "normal")
+        # Velas sin mecha: marca las bajistas sin mecha superior y las alcistas sin mecha inferior (como las del patrón)
+        self.wick_btn = QPushButton("Sin mecha")
+        self.wick_btn.setProperty("chip", "true")
+        self.wick_btn.setCheckable(True)
+        pattern_skill = self.manager.skills.get("pattern")
+        self.wick_btn.setVisible(pattern_skill is not None)
+        self.wick_btn.setChecked(pattern_skill is not None and pattern_skill.settings.get_bool("SHOW_WICKLESS", False))
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -268,6 +275,7 @@ class MainWindow(QMainWindow):
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
+        grid.addWidget(self.wick_btn, 0, 3)
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)
@@ -295,6 +303,9 @@ class MainWindow(QMainWindow):
         for group, btn in self.level_btns.items():
             self.chart.show_level(group, btn.isChecked())
             btn.toggled.connect(lambda on, g=group: self.chart.show_level(g, on))
+        self.chart.show_wickless(self.wick_btn.isChecked())
+        self.wick_btn.toggled.connect(self.chart.show_wickless)
+        self._refresh_wick_tip()
         self.chart.show_sma(self.sma_btn.isChecked())
         self.sma_btn.toggled.connect(self.chart.show_sma)
         self._refresh_sma_tip()
@@ -397,6 +408,24 @@ class MainWindow(QMainWindow):
         self.log(f"bias: reglas actualizadas - {listing}; umbral ±{min_score:g} ({saved})", tone="info")
         if self.candles is not None:
             self.bus.publish("bias.recalc", {}, source="ui")
+
+    def _wick_pct(self) -> float:
+        """Mecha máxima de la vela de disparo del patrón 1 (PATTERN_CONTINUATION_MAX_WICK_PCT), 0 si no hay skill Pattern."""
+        skill = self.manager.skills.get("pattern")
+        if skill is None:
+            return 0.0
+        try:
+            from ..skills.pattern.continuation import read_options
+            return read_options(skill.settings, "CONTINUATION")[1]
+        except ValueError:                                    # ajuste no válido: la skill ya avisa con su error
+            return 0.0
+
+    def _refresh_wick_tip(self) -> None:
+        pct = self._wick_pct()
+        self.chart.set_wick_pct(pct)
+        self.wick_btn.setToolTip("Marca en el gráfico las velas sin mecha: triángulo rojo sobre las bajistas sin mecha superior y "
+                                 f"verde bajo las alcistas sin mecha inferior (mecha máxima {pct:g} % de la vela, "
+                                 "PATTERN_CONTINUATION_MAX_WICK_PCT).")
 
     def _refresh_sma_tip(self) -> None:
         period, color, style = self._sma_cfg

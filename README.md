@@ -143,6 +143,11 @@ Cada nivel se dibuja desde su vela hasta el final de su día, con su nombre al f
 pasan un poco de la última vela. Además, una **línea vertical punteada** marca el inicio de cada día de trading, y el
 nombre del día (LUNES, MARTES...) va abajo, centrado entre su separador y el siguiente. Todo se configura en el bloque **LEVELS** de `tradingbot.env` (botones activados al arrancar,
 colores, días hacia atrás, separadores). Con velas diarias o semanales no se dibujan y los botones se desactivan.
+**Velas sin mecha** (botón **Sin mecha**, en la primera fila a la derecha): marca en el gráfico un triángulo rojo sobre cada vela
+bajista sin mecha superior y uno verde bajo cada vela alcista sin mecha inferior, que son las velas de disparo de los patrones. La
+mecha máxima que se tolera sale de `PATTERN_CONTINUATION_MAX_WICK_PCT` (0 al inicio). Se marcan las últimas velas del timeframe que
+estés viendo; `PATTERN_SHOW_WICKLESS=true` lo deja activado al arrancar.
+
 **Histograma del sesgo** (botón **Sesgo**, bajo SMA): una barra por vela del timeframe visible con la puntuación que habría
 tenido el Bias (suma de voto x peso de las reglas activas), bajo el gráfico de precio como el volumen de TradingView. Verde:
 sesgo alcista; rojo: bajista; gris: sin sesgo; las líneas discontinuas marcan el umbral. Se reconstruye sin mirar al
@@ -236,6 +241,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **PATTERN** — patrones dentro de la TBR activa | | |
 | `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (`continuacion_clasica` y `continuacion_50`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `PATTERN_SHOW_WICKLESS` | `false` | Botón «Sin mecha» del gráfico activado al arrancar. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | `PATTERN_CONTINUATION_TF` | `5m` | Timeframe del patrón 1 (con el gráfico en ese timeframe o en uno menor que lo divida). |
 | `PATTERN_CONTINUATION_MAX_WICK_PCT` | `0` | Mecha superior máxima de la vela de disparo, en % de la vela (0 a 5). |

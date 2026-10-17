@@ -263,6 +263,10 @@ class ChartView(pg.PlotWidget):
         self._sma: tuple | None = None            # (valores, color, trazo) de la última SMA recibida
         self._sma_visible = False
         self._sma_item = None
+        self._ohlc: tuple | None = None           # velas del gráfico, para marcar las que no tienen mecha
+        self._wick_visible = False
+        self._wick_pct = 0.0
+        self._wick_item = None
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
@@ -298,6 +302,8 @@ class ChartView(pg.PlotWidget):
         self._n = len(df)
         self.time_axis.set_times(df["ts"].to_numpy())
         self.item.set_data(o, h, l, c)
+        self._ohlc = (o, h, l, c)
+        self._draw_wickless()
         self.clear_levels()
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
@@ -484,6 +490,52 @@ class ChartView(pg.PlotWidget):
             pi.addItem(marker, ignoreBounds=True)
         marker.setPos(float(index))
         marker.show()
+
+    # -- velas sin mecha -------------------------------------------------------------------------------
+    def show_wickless(self, visible: bool) -> None:
+        self._wick_visible = visible
+        self._draw_wickless()
+
+    def set_wick_pct(self, pct: float) -> None:
+        """Mecha máxima, en % del tamaño de la vela, para considerarla «sin mecha» (0 = ninguna)."""
+        self._wick_pct = float(pct)
+        self._draw_wickless()
+
+    @staticmethod
+    def wickless_masks(o, h, l, c, pct: float):
+        """(bajistas sin mecha superior, alcistas sin mecha inferior), con una mecha de hasta `pct` % de la vela."""
+        rng = h - l
+        tol = pct / 100 * rng + 1e-12 * np.abs(rng)
+        valid = rng > 0
+        return valid & (c < o) & ((h - o) <= tol), valid & (c > o) & ((o - l) <= tol)
+
+    def _draw_wickless(self) -> None:
+        pi = self.getPlotItem()
+        if self._wick_item is not None:
+            pi.removeItem(self._wick_item)
+            self._wick_item = None
+        if not self._wick_visible or self._ohlc is None:
+            return
+        o, h, l, c = self._ohlc
+        first = max(0, len(c) - MAX_CANDLES_DRAWN)                    # solo las últimas velas
+        o, h, l, c = o[first:], h[first:], l[first:], c[first:]
+        bear, bull = self.wickless_masks(o, h, l, c, self._wick_pct)
+        if not (bear.any() or bull.any()):
+            return
+        pad = float(np.median(h - l)) * 0.6
+        x = np.arange(first, first + len(c), dtype=float)
+        spots = ([{"pos": (x[i], h[i] + pad), "symbol": "t", "brush": pg.mkBrush(theme.BEAR), "pen": pg.mkPen(None), "size": 8}
+                  for i in np.flatnonzero(bear)] +
+                 [{"pos": (x[i], l[i] - pad), "symbol": "t1", "brush": pg.mkBrush(theme.BULL), "pen": pg.mkPen(None), "size": 8}
+                  for i in np.flatnonzero(bull)])
+        item = pg.ScatterPlotItem(spots=spots)
+        item.setZValue(6)
+        pi.addItem(item, ignoreBounds=True)
+        self._wick_item = item
+
+    @property
+    def wickless_count(self) -> int:
+        return 0 if self._wick_item is None else len(self._wick_item.data)
 
     # -- media móvil simple ----------------------------------------------------------------------------
     def set_sma(self, values, color: str = "#00ACC1", style: str = "normal") -> None:
