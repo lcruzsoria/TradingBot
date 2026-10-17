@@ -26,10 +26,14 @@ DEFAULT_DAYS = 10
 DEFAULT_OPACITY = 12     # % de opacidad del relleno de las zonas (traslúcido)
 DEFAULT_LINE_OPACITY = 60   # % de opacidad de las líneas High, Low y 50 %
 DEFAULT_MAX_TF_MINUTES = 60
-DEFAULT_ZONES = (        # clave, nombre, horario NY, color
+DEFAULT_ZONES = (        # zonas de trabajo: clave, nombre, horario NY, color
     ("ASIA", "Asia", "20:00-00:00", "#FFD60A"),
     ("LONDON", "London", "02:00-05:00", "#FF3B30"),
     ("NY_AM", "NY Open", "10:00-12:00", "#00C853"),
+)
+KNOWN_ZONES = DEFAULT_ZONES + (   # definidas pero no activas por defecto (la skill Pattern usa NY_PM como límite de NY Open)
+    ("PRE_NY", "Pre-NY", "09:00-10:00", "#9E9E9E"),
+    ("NY_PM", "NY-PM", "13:30-16:30", "#A64DFF"),
 )
 
 HOURS = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
@@ -85,10 +89,14 @@ def parse_hours(text: str, key: str = "HOURS") -> tuple[int, int]:
     return h0 * 60 + m0, (h1 * 60 + m1) % 1440
 
 
-def zones_from_settings(settings) -> list[Zone]:
-    """Zonas del bloque TBR de tradingbot.env (`settings` ya sin el prefijo TBR_)."""
-    defaults = {key: (name, hours, color) for key, name, hours, color in DEFAULT_ZONES}
-    keys = [k.upper() for k in settings.get_list("ZONES", list(defaults))]
+def zones_from_settings(settings, keys: list[str] | None = None) -> list[Zone]:
+    """Zonas del bloque TBR de tradingbot.env (`settings` ya sin el prefijo TBR_).
+
+    `keys`: otras zonas a leer (por su clave) en lugar de las de TBR_ZONES; sirve para consultar el horario de una zona que
+    no está activa (por ejemplo NY_PM, que marca el límite de NY Open).
+    """
+    defaults = {key: (name, hours, color) for key, name, hours, color in KNOWN_ZONES}
+    keys = [k.upper() for k in (keys if keys is not None else settings.get_list("ZONES", [z[0] for z in DEFAULT_ZONES]))]
     zones = []
     for key in keys:
         name, hours, color = defaults.get(key, (key.replace("_", " ").title(), None, None))

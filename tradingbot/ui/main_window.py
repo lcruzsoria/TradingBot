@@ -96,7 +96,8 @@ class MainWindow(QMainWindow):
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
             "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "pattern.updated": self._on_pattern_updated,
-            "pattern.detected": self._on_pattern_detected,
+            "pattern.detected": self._on_pattern_detected, "pattern.discarded": self._on_pattern_discarded,
+            "pattern.session": self._on_pattern_session,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
@@ -806,6 +807,8 @@ class MainWindow(QMainWindow):
     def _on_pattern_updated(self, p: dict) -> None:
         for error in p.get("errors", []):
             self.log_once("pattern_error", (p["symbol"], error), f"pattern: error en un patrón - {error}", tone="warn")
+        for text in p.get("unavailable", []):
+            self.log_once("pattern_tf", (p["symbol"], p["timeframe"], text), f"pattern: {text}", tone="warn")
         tbr = p["tbr"]
         if tbr is None:
             return
@@ -815,15 +818,22 @@ class MainWindow(QMainWindow):
                       f"Low {fmt_price(tbr.low)}, 50 % {fmt_price(tbr.mid)}",
                       f"La TBR activa es la última que cerró: {tbr.zone} del {tbr.day:%d/%m/%Y}.\n"
                       f"High {fmt_price(tbr.high)}   Low {fmt_price(tbr.low)}   50 % {fmt_price(tbr.mid)}   "
-                      f"rango {fmt_price(tbr.range)}\nAhí se buscan los patrones definidos.", "info")
+                      f"rango {fmt_price(tbr.range)}\nAhí se buscan los patrones definidos, hasta que empiece la TBR siguiente.", "info")
 
     def _pattern_lines(self, p: dict) -> tuple[str, str, list[str]]:
-        """(lado, vela, líneas del detalle) de un patrón identificado."""
+        """(lado, vela, líneas del detalle) de un resultado de patrón."""
         hit, tbr = p["hit"], p["tbr"]
-        side = "Long" if hit.direction == "long" else "Short"
-        when = self._bar_time(hit.x) if p["symbol"] == self.charted_symbol and p["timeframe"] == self.current_tf() else "-"
-        lines = [f"Patrón:   {hit.title} ({side})", f"TBR:      {tbr.zone} del {tbr.day:%d/%m/%Y} (High {fmt_price(tbr.high)}, "
-                 f"Low {fmt_price(tbr.low)}, 50 % {fmt_price(tbr.mid)})", f"Vela:     {when}", f"Precio:   {fmt_price(hit.price)}"]
+        side = {"long": "Long", "short": "Short"}.get(hit.direction, "")
+        if hit.ts:
+            when = f"{self._ny(hit.ts):%d/%m %H:%M} NY"
+        elif p["symbol"] == self.charted_symbol and p["timeframe"] == self.current_tf():
+            when = self._bar_time(hit.x)
+        else:
+            when = "-"
+        lines = [f"Patrón:   {hit.title}" + (f" ({side})" if side else ""),
+                 f"TBR:      {tbr.zone} del {tbr.day:%d/%m/%Y} (High {fmt_price(tbr.high)}, Low {fmt_price(tbr.low)}, "
+                 f"50 % {fmt_price(tbr.mid)})", f"Mercado:  {p['symbol']} {display_label(p['timeframe'])}", f"Vela:     {when}",
+                 f"Precio:   {fmt_price(hit.price)}"]
         lines += [f"{name.capitalize()}: {fmt_price(price)}" for name, price in hit.levels.items()]
         if hit.detail:
             lines += ["", hit.detail]
@@ -835,6 +845,20 @@ class MainWindow(QMainWindow):
         lines += ["", "La skill Setup lo valida ahora con el sesgo (GO / NO GO)."]
         self.log(f"pattern: {hit.title} {side} identificado en {tbr.zone} ({p['symbol']} {display_label(p['timeframe'])}, {when})",
                  "\n".join(lines), "info")
+
+    def _on_pattern_discarded(self, p: dict) -> None:
+        """Patrón invalidado, anulado o vencido: se anota por qué."""
+        side, when, lines = self._pattern_lines(p)
+        hit, tbr = p["hit"], p["tbr"]
+        state = {"invalidated": "invalidado", "annulled": "anulado", "expired": "vencido"}.get(hit.status, hit.status)
+        self.log(f"pattern: {hit.title}{' ' + side if side else ''} {state} en {tbr.zone} ({p['symbol']} "
+                 f"{display_label(p['timeframe'])}, {when}) - {hit.detail}", "\n".join(lines), "warn")
+
+    def _on_pattern_session(self, p: dict) -> None:
+        tbr = p["tbr"]
+        self.log_once("pattern_session", (p["symbol"], tbr.key, tbr.day),
+                      f"pattern: fin de la jornada de setups en {p['symbol']} ({p['session_end']} NY, fin de NY PM): no se "
+                      f"evalúan más hasta que cierre la próxima TBR", None, "warn")
 
     def _on_cortex_decision(self, p: dict) -> None:
         side, when, lines = self._pattern_lines(p)
