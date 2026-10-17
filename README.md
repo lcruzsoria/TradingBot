@@ -491,6 +491,17 @@ scripts/             run.ps1 (arrancar), sync.ps1 (sincronizar con git) y analis
 tests/               pruebas (uv run pytest)
 ```
 
+## Backtest de los patrones
+
+`scripts/backtest_patrones.py` aplica los patrones Continuación y Reversión (con sus fibonacci, entrada en el 0,5, stop en el nivel 1 y
+objetivo en 2R) a todo el histórico M15 que da MT5 de los índices americanos, con el spread real y el sesgo del bot, y genera
+`analisis/backtest_patrones.xlsx` (resumen, por mercado, zona, dirección, año, hora y día, mitades, sensibilidad al objetivo y al
+tiempo, embudo, MAE/MFE, curva de R y todas las operaciones). Resultados y limitaciones en `docs/backtest_patrones/RESULTADOS.md`.
+
+```
+uv run --with openpyxl python scripts/backtest_patrones.py
+```
+
 ## Análisis histórico de los setups
 
 `scripts/analisis_setups.py` lee las velas M15 de MT5 (solo lectura) y genera `analisis/analisis_setups.xlsx` con todas las
