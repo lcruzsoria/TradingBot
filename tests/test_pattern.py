@@ -267,3 +267,19 @@ def test_el_registro_anota_tbr_activa_patron_y_descartes(tmp_path, monkeypatch):
     assert "pattern: Mi patrón Short identificado en NY Open" in text
     assert all(f"Mi patrón Short {s} en NY Open" in text and f"motivo {s}" in text for s in ("invalidado", "anulado", "vencido"))
     assert "fin de la jornada de setups" in text and "16:30 NY" in text
+
+
+def test_history_tbrs_devuelve_las_pasadas_sin_las_activas():
+    from datetime import date
+    from types import SimpleNamespace as NS
+    from tradingbot.skills.pattern.patterns import history_tbrs
+
+    def sess(key, day, x1, complete=True):
+        return NS(zone=NS(key=key, name=key), day=date(2026, 10, day), high=2.0, low=1.0, x0=x1 - 1, x1=x1, complete=complete)
+
+    sessions = [sess("ASIA", 5, 10), sess("LONDON", 5, 20), sess("ASIA", 12, 30), sess("LONDON", 12, 40), sess("LONDON", 13, 50, False)]
+    skip = {("ASIA", date(2026, 10, 12)), ("LONDON", date(2026, 10, 12))}                # las activas
+    got = history_tbrs(sessions, None, skip, 30)
+    assert [(t.key, t.day.day) for t in got] == [("ASIA", 5), ("LONDON", 5)]             # de la más antigua a la más reciente
+    assert history_tbrs(sessions, None, skip, 5) == []                                   # fuera de los últimos 5 días
+    assert [t.key for t in history_tbrs(sessions, ["LONDON"], skip, 30)] == ["LONDON"]

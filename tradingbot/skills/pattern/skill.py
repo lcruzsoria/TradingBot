@@ -9,9 +9,10 @@ from ...envconfig import EnvConfig
 from ...timeframes import display_label, minutes
 from ..feed.datasource import aggregate_candles
 from ..tbr.zones import zones_from_settings
-from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, recent_tbrs, window_for
+from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
+DEFAULT_HISTORY_DAYS = 30                      # días de TBR pasadas de las que se dibujan fibos y entradas
 RECENT_SECONDS = 24 * 3600                      # solo se evalúan las TBR que cerraron en el último día
 
 
@@ -53,6 +54,9 @@ class PatternSkill(Skill):
     def _load_settings(self) -> None:
         # tradingbot.env, bloque PATTERN
         self.zones = [z.upper() for z in self.settings.get_list("ZONES", [])] or None      # vacío: todas las TBR
+        self.history_days = self.settings.get_int("HISTORY_DAYS", DEFAULT_HISTORY_DAYS)
+        if self.history_days < 1:
+            raise ValueError(f"PATTERN_HISTORY_DAYS={self.history_days} debe ser 1 o más.")
         order = [z.upper() for z in self.settings.get_list("ZONE_ORDER", list(DEFAULT_ZONE_ORDER))]
         env = self.services.env if self.services.env is not None else EnvConfig()
         self.order = zones_from_settings(env.section("TBR"), order) if order else []        # ciclo de TBR: define el plazo
@@ -99,6 +103,12 @@ class PatternSkill(Skill):
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
             self._evaluate_tbr(c, item, window, ahead, results, figures, errors, unavailable, tfs)
+        if self.history_days > 1:                       # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
+            skip = {(r.key, r.day) for r in recents}
+            for item in history_tbrs(t["sessions"], self.zones, skip, self.history_days):
+                window = window_for(item, self.order, ahead)
+                if window is not None and window.end_ts is not None:
+                    self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
         hits = [h for _t, h in results]
         window = windows[tbr.key]
         self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": tbr, "hits": hits, "errors": errors,

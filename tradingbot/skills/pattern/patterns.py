@@ -174,6 +174,21 @@ def recent_tbrs(sessions, zones: list[str] | None = None) -> list[ActiveTbr]:
     return [ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1) for s in ordered]
 
 
+def history_tbrs(sessions, zones: list[str] | None, skip: set, days: int) -> list[ActiveTbr]:
+    """Las TBR cerradas de los últimos `days` días que no están en `skip` ((clave, día)), de la más antigua a la más reciente.
+
+    Son las TBR pasadas, solo para dibujar sus fibos y entradas; las que cuentan para operar son las de `recent_tbrs`.
+    """
+    wanted = {z.upper() for z in zones} if zones else None
+    done = [s for s in sessions if s.complete and s.high > s.low and (wanted is None or s.zone.key in wanted)]
+    if not done:
+        return []
+    cutoff = max(s.day for s in done).toordinal() - days + 1
+    old = [s for s in done if s.day.toordinal() >= cutoff and (s.zone.key, s.day) not in skip]
+    old.sort(key=lambda s: s.x1)
+    return [ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1) for s in old]
+
+
 def _hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
