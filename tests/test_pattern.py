@@ -308,7 +308,7 @@ def test_plazo_de_asia_hasta_el_inicio_de_ny_open():
 def test_pattern_until_por_defecto_y_validacion():
     manager, _bus, _found, *_ = run_skill("")
     manager.stop()
-    assert manager.skills["pattern"].until == {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}
+    assert manager.skills["pattern"].until == {"ASIA": "@08:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}
     assert manager.skills["pattern"].extend == []
     for text in ("PATTERN_UNTIL=ASIA\n", "PATTERN_UNTIL=ASIA:NO_EXISTE\n"):
         manager, _bus, found, *_ = run_skill(text)

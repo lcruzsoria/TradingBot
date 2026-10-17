@@ -43,11 +43,15 @@ TF_MIN = 15
 SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "US2000.r")
 PATTERNS = {"Continuación": continuacion, "Reversión": reversion}
 ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
-UNTIL = {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}   # Asia hasta NY Open, London hasta su final y NY Open hasta las 18:00 (como el bot)
-if os.environ.get("BT_PLAZOS") == "anterior":         # variantes para comparar los plazos
-    UNTIL = {"NY_AM": "@16:30"}                       # el plazo anterior: NY Open hasta el final de NY PM
-elif os.environ.get("BT_PLAZOS") == "asia_london":
-    UNTIL = {"ASIA": "NY_AM", "LONDON": "NY_AM:FIN", "NY_AM": "@16:30"}
+NEW_UNTIL = {"ASIA": "@08:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot: Asia hasta las 08:00, London hasta el
+OLD_UNTIL = {"NY_AM": "@16:30"}                                                # final de NY Open y NY Open hasta las 18:00
+# BT_PLAZOS: "anterior" (NY Open hasta NY PM, lo demás normal), "solo_asia" / "solo_london" / "solo_ny" (un plazo nuevo sobre el
+# anterior) o, por defecto, los tres plazos nuevos juntos.
+_which = os.environ.get("BT_PLAZOS", "todos")
+UNTIL = dict(NEW_UNTIL) if _which == "todos" else dict(OLD_UNTIL)
+if _which.startswith("solo_"):
+    _zone = {"asia": "ASIA", "london": "LONDON", "ny": "NY_AM"}[_which[5:]]
+    UNTIL[_zone] = NEW_UNTIL[_zone]
 EXTEND = ()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
