@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "pattern.updated": self._on_pattern_updated,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected, "pattern.discarded": self._on_pattern_discarded,
             "pattern.session": self._on_pattern_session,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
@@ -938,6 +938,15 @@ class MainWindow(QMainWindow):
         lines += ["", f"Motivo:   {o.reason}", p["note"]]
         self.log(f"setup: orden {'enviada' if p['sent'] else 'preparada (simulación)'} - {o.label}", "\n".join(lines),
                  "info")
+
+    def _on_setup_closed(self, p: dict) -> None:
+        o, c = p["order"], p["closed"]
+        why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
+        lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)}   Salida: {fmt_price(c.exit_price)}",
+                 f"Motivo:   {why}", f"Resultado: {c.r:+.2f} R ({c.pct:+.2f} % del precio, sin spread)",
+                 "Modo simulación: no hubo posición real en MT5."]
+        self.log(f"setup: posición simulada cerrada - {o.label}: {c.r:+.2f} R ({c.result})", chr(10).join(lines),
+                 "go" if c.r > 0 else "nogo")
 
     def _on_bias_schedule(self, p: dict) -> None:
         start = p["day_start"]

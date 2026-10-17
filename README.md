@@ -426,7 +426,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
 | `pattern` | 4 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %) hasta que empieza la siguiente; avisa de cada uno que identifica y de los que se invalidan, anulan o vencen (`candles.loaded` + `tbr.updated` + `clock.offset` -> `pattern.updated` / `pattern.detected` / `pattern.discarded` / `pattern.session`). Lee el bloque PATTERN. |
-| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`) y mete la operación en la cuenta del broker; por ahora en modo simulación. Lee el bloque SETUP. |
+| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo y cierre por tiempo -> `setup.closed`, que se anota en el Registro); por ahora en modo simulación. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
 El anillo está completo; Setup ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.

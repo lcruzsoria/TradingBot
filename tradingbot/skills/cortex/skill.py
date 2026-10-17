@@ -17,7 +17,7 @@ class CortexSkill(Skill):
                    "lateral: NO GO) y, si es GO, le pasa toda la información a Setup, que es quien opera. También "
                    "responde a las peticiones de operar (Bullish solo Long, Bearish solo Short).")
     subscribes = ("bias.updated", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal")
-    publishes = ("trade.verdict", "cortex.decision", "setup.order")
+    publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
 
     def on_start(self) -> None:
@@ -32,6 +32,7 @@ class CortexSkill(Skill):
     def handle(self, event: Event) -> None:
         if event.topic == "candles.loaded":
             self.symbol, self.timeframe = event.payload["symbol"], event.payload["timeframe"]
+            self.publish("setup.candles", {"symbol": self.symbol, "timeframe": self.timeframe, "df": event.payload["df"]})
             self.set_caption(self.symbol)
         elif event.topic == "bias.updated":
             self._bias = event.payload

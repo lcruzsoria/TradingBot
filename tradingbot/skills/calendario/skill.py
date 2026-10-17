@@ -102,7 +102,8 @@ class CalendarioSkill(Skill):
             risk = price * self.stop_pct / 100
             self.publish("calendar.signal", {
                 "symbol": symbol, "timeframe": tf, "direction": self.direction, "price": price, "stop": price - risk,
-                "target": price + self.rr * risk, "day": ny.date(),
+                "target": price + self.rr * risk, "day": ny.date(), "entry_ts": int(ts[i]),
+                "close_ts": int(ts[i]) + (self.exit - self.entry) * 60,
                 "close_at": f"{self.exit // 60:02d}:{self.exit % 60:02d} NY ({ny:%d/%m/%Y})"})
             self.set_caption(f"señal {symbol}")
             return

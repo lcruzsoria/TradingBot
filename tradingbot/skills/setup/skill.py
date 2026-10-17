@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ...core import Event, Skill, register_skill
+from .positions import resolve, trackable
 
 
 @register_skill("setup")
@@ -9,9 +10,10 @@ class SetupSkill(Skill):
     title = "Setup"
     description = ("El ejecutor: mete la operación en la cuenta del broker (MT5). Solo recibe órdenes de Cortex, que es "
                    "quien reúne el activo, la temporalidad, el sesgo, la TBR y el patrón válido; Setup no decide nada. "
-                   "Por ahora funciona en modo simulación: prepara la orden y la anota, pero no la envía a MT5.")
-    subscribes = ("setup.order",)
-    publishes = ("setup.executed",)
+                   "Por ahora funciona en modo simulación: prepara la orden y la anota, pero no la envía a MT5. Sigue las "
+                   "posiciones simuladas (stop, objetivo y cierre por tiempo) con las velas que le reenvía Cortex.")
+    subscribes = ("setup.order", "setup.candles")
+    publishes = ("setup.executed", "setup.closed")
     slot = "aux1"
 
     def on_start(self) -> None:
@@ -23,6 +25,7 @@ class SetupSkill(Skill):
             raise ValueError(self.error)
         self.error = ""
         self.executed = 0
+        self.positions: list = []                       # órdenes simuladas abiertas (se pierden al reiniciar el bot)
         self.set_caption("esperando a Cortex")
 
     def handle(self, event: Event) -> None:
@@ -31,8 +34,29 @@ class SetupSkill(Skill):
         if event.source != "cortex":                    # solo Cortex puede dar la orden de operar
             self.set_caption("orden rechazada")
             return
+        if event.topic == "setup.candles":
+            self._follow(event.payload)
+            return
         order = event.payload["order"]
         self.executed += 1
+        if trackable(order):
+            self.positions.append(order)
         self.set_caption(f"simulada: {order.direction.capitalize()} {order.symbol}")
         self.publish("setup.executed", {"order": order, "sent": False,
                                         "note": "Modo simulación: la orden está lista pero no se ha enviado a MT5."})
+
+    def _follow(self, payload: dict) -> None:
+        """Comprueba stop, objetivo y cierre por tiempo de las posiciones abiertas del mercado cuyas velas llegan."""
+        df = payload["df"]
+        ts, high, low, close = (df[k].to_numpy() for k in ("ts", "high", "low", "close"))
+        still = []
+        for order in self.positions:
+            closed = resolve(order, ts, high, low, close) if order.symbol == payload["symbol"] else None
+            if closed is None:
+                still.append(order)
+                continue
+            self.publish("setup.closed", {"order": order, "closed": closed, "sent": False})
+            self.set_caption(f"cerrada: {closed.result} {closed.r:+.2f} R")
+        self.positions = still
+        if still:
+            self.set_caption(f"{len(still)} posición(es) abierta(s)")

@@ -23,7 +23,9 @@ class Order:
     bias: str                # sesgo vigente (Bullish / Bearish / No Bias) y su puntuación
     score: float
     reason: str              # por qué Cortex da GO
-    close_at: str | None = None    # cierre por tiempo, si la estrategia lo tiene (Calendario)
+    close_at: str | None = None    # cierre por tiempo, si la estrategia lo tiene (Calendario), para mostrarlo
+    entry_ts: int | None = None    # hora de servidor de la vela de entrada y del cierre por tiempo: Setup sigue la posición
+    close_ts: int | None = None
 
     @property
     def label(self) -> str:
@@ -46,4 +48,4 @@ def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
     score = float(bias_result.score) if bias_result is not None else 0.0
     return Order(payload["symbol"], payload["timeframe"], payload["direction"], "Calendario (largo a hora fija)", "calendario",
                  "", payload["day"], price, price, price, price, payload["stop"], payload["target"], bias, score, reason,
-                 payload["close_at"])
+                 payload["close_at"], payload["entry_ts"], payload["close_ts"])

@@ -1,0 +1,83 @@
+"""Seguimiento de las posiciones simuladas: stop, objetivo y cierre por tiempo."""
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import time
+from datetime import date
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from tradingbot.skills.cortex.order import Order
+from tradingbot.skills.setup.positions import resolve, trackable
+
+T0 = 1_000_000                       # hora de servidor de la vela de entrada
+STEP = 900
+
+
+def order(direction="long", entry=100.0, stop=99.0, target=102.0, close_after=4):
+    return Order("NAS100.r", "15m", direction, "Calendario", "calendario", "", date(2026, 10, 12), entry, entry, entry, entry,
+                 stop, target, "sin consultar", 0.0, "prueba", "10:00 NY", T0, T0 + close_after * STEP)
+
+
+def bars(rows):
+    """rows: lista de (high, low, close); una vela cada 15 min desde T0."""
+    ts = np.array([T0 + i * STEP for i in range(len(rows))])
+    h, l, c = (np.array([r[k] for r in rows], dtype=float) for k in range(3))
+    return ts, h, l, c
+
+
+def test_objetivo_stop_y_el_stop_va_primero():
+    assert resolve(order(), *bars([(100.5, 99.5, 100), (102.5, 100, 102)])).result == "objetivo"
+    cerrada = resolve(order(), *bars([(100.5, 98.5, 99)]))
+    assert cerrada.result == "stop" and cerrada.r == -1.0 and cerrada.exit_price == 99.0
+    assert resolve(order(), *bars([(102.5, 98.5, 100)])).result == "stop"           # caben los dos: cuenta el stop
+
+
+def test_corto_se_resuelve_al_reves():
+    o = order("short", stop=101.0, target=98.0)
+    assert resolve(o, *bars([(100.5, 97.5, 98)])).r == pytest.approx(2.0)
+    assert resolve(o, *bars([(101.5, 99.5, 101)])).r == -1.0
+
+
+def test_cierre_por_tiempo_solo_con_una_vela_posterior():
+    seguidas = [(100.5, 99.5, 100.2)] * 4                      # velas 0..3, antes de close_ts (T0 + 4 velas)
+    assert resolve(order(), *bars(seguidas)) is None            # la última aún puede estar formándose
+    cerrada = resolve(order(), *bars(seguidas + [(101, 100, 100.6)]))       # llega la vela de las 10:00
+    assert cerrada.result == "tiempo" and cerrada.exit_price == 100.2 and cerrada.r == pytest.approx(0.2)
+    assert cerrada.pct == pytest.approx(0.2) and cerrada.exit_ts == T0 + 3 * STEP
+
+
+def test_ignora_las_velas_anteriores_a_la_entrada_y_sigue_abierta():
+    ts, h, l, c = bars([(150, 50, 100)] + [(100.5, 99.5, 100)] * 2)
+    o = Order(**{**order().__dict__, "entry_ts": T0 + STEP})
+    assert resolve(o, ts, h, l, c) is None                      # el barrido de la vela 0 es anterior a la entrada
+
+
+def test_solo_se_siguen_las_ordenes_con_horas():
+    assert trackable(order())
+    assert not trackable(Order(**{**order().__dict__, "entry_ts": None}))
+
+
+def test_setup_cierra_la_posicion_con_las_velas_que_reenvia_cortex():
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig, parse
+    import tradingbot.skills  # noqa: F401
+    bus, closed = EventBus(), []
+    bus.subscribe("t", "setup.closed", closed.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(""))), [{"type": "setup"}])
+    manager.start()
+    bus.publish("setup.order", {"order": order()}, source="cortex")
+    time.sleep(0.2)
+    assert len(manager.skills["setup"].positions) == 1
+    df = pd.DataFrame(bars([(100.5, 99.5, 100), (102.5, 100, 102)]), index=["ts", "high", "low", "close"]).T
+    bus.publish("setup.candles", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="cortex")       # otro mercado
+    time.sleep(0.2)
+    assert closed == []
+    bus.publish("setup.candles", {"symbol": "NAS100.r", "timeframe": "15m", "df": df}, source="cortex")
+    time.sleep(0.3)
+    manager.stop()
+    assert len(closed) == 1 and closed[0].payload["closed"].result == "objetivo" and closed[0].payload["sent"] is False
+    assert manager.skills["setup"].positions == []
