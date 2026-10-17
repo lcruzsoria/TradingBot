@@ -42,10 +42,14 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
 1. **Rotura con cuerpo:** una vela de M15 **cierra** por encima del High de la TBR (o por debajo del Low). Una mecha sola no activa
    la TBR. Se evalúa la última TBR cerrada de cada zona (Asia, London, NY Open) mientras dura su plazo; las que no se han activado
    no dejan nada, y no se usan TBR de hace más de un día.
-2. **Swing previo:** el último pivote bajo (más bajo que `PATTERN_CONTINUACION_SWING_BARS` velas de cada lado) anterior a la rotura,
-   desde el inicio de la TBR; si no hay ninguno, el mínimo más bajo desde su inicio. En la rotura bajista, el pivote alto.
+2. **Swing previo:** el último pivote bajo (el patrón de tres velas: el mínimo más bajo en la del medio; `PATTERN_CONTINUACION_SWING_BARS`
+   velas de cada lado, 1 al inicio) anterior a la rotura,
+   desde el inicio de la TBR (a la derecha se miran las velas hasta la propia rotura, así que el pico justo antes de la vela de rotura
+   también cuenta); si no hay ninguno, el mínimo más bajo desde su inicio. En la rotura bajista, el pivote alto.
 3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): el **1** es el swing, el **0** el extremo que va alcanzando
-   el precio desde la rotura (se actualiza mientras no haya reversión), el **0,5** el punto medio y el **-0,5** (en rojo) media
+   el último **pivote de tres velas** confirmado tras la rotura (el mínimo más bajo, o el máximo más alto, en la del medio; un pivote
+   posterior más extremo alarga el tramo y, hasta que hay uno confirmado, el 0 provisional es el extremo que lleva el precio),
+   el **0,5** el punto medio y el **-0,5** (en rojo) media
    vuelta del tramo más allá del 0.
 4. **Entrada:** la primera vela que revierte hasta el 0,5 (su mínimo lo toca): se identifica en ese momento y el 0 queda fijo.
    **Stop** en el swing (el 1) y **objetivo** en el -0,5: con entrada en el 0,5 son **2R**. Si el plazo de la TBR termina sin
@@ -217,7 +221,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
 | `PATTERN_SHOW_FIBO` | `true` | Botón «Fibo» del gráfico activado al arrancar. |
 | `PATTERN_CONTINUACION_TF` | `15m` | Timeframe del patrón Continuación (el gráfico, en ese timeframe o uno menor que lo divida). |
-| `PATTERN_CONTINUACION_SWING_BARS` | `2` | Velas a cada lado que definen un swing (pivote). |
+| `PATTERN_CONTINUACION_SWING_BARS` | `1` | Velas a cada lado que definen un swing (pivote): 1 = patrón de tres velas. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |

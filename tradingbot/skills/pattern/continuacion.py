@@ -4,10 +4,14 @@ Ejemplo alcista (el bajista es el espejo exacto, con el Low):
 
 1. Rotura: una vela de M15 CIERRA por encima del High de la TBR (rotura con cuerpo; una mecha sola no activa la TBR). La primera
    vela de ese tipo tras el cierre de la TBR, dentro de su plazo, la activa.
-2. Swing previo: el último mínimo relevante (pivote: más bajo que las `PATTERN_CONTINUACION_SWING_BARS` velas de cada lado) anterior
-   a la rotura, desde el inicio de la TBR. Si no hay ninguno, el mínimo más bajo desde el inicio de la TBR hasta la rotura.
-3. Fibonacci de ese tramo, con tres niveles: el 1 es el swing (origen del tramo), el 0 es el máximo que va alcanzando el precio desde
-   la rotura (se actualiza mientras no haya reversión) y el 0,5 es el punto medio.
+2. Swing previo: el último mínimo relevante (pivote: más bajo que las `PATTERN_CONTINUACION_SWING_BARS` velas de cada lado, 1 al
+   inicio: el patrón de tres velas, con el extremo en la del medio) anterior
+   a la rotura, desde el inicio de la TBR. A la derecha solo se miran las velas hasta la propia rotura, que confirma el pivote: así
+   el pico inmediatamente anterior a la vela de rotura también es swing. Si no hay ninguno, el mínimo más bajo desde el inicio de la
+   TBR hasta la rotura.
+3. Fibonacci de ese tramo, con tres niveles: el 1 es el swing (origen del tramo), el 0 es el último pivote confirmado tras la rotura (el
+   mismo patrón de tres velas: el máximo más alto en la vela del medio; un pivote más alto lo alarga) y el 0,5 es el punto medio. Hasta que
+   hay un pivote confirmado, el 0 provisional es el extremo que lleva el precio.
 4. Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca). Se identifica en ese momento y el 0 queda fijo; el precio de
    referencia es el 0,5. Si termina el plazo de la TBR sin que el precio revierta al 0,5, el patrón vence.
 5. Stop en el swing (el nivel 1) y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R.
@@ -23,7 +27,7 @@ from ...timeframes import parse_timeframe
 from .patterns import DETECTED, EXPIRED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "15m"
-DEFAULT_SWING_BARS = 2
+DEFAULT_SWING_BARS = 1
 KEY = "continuacion"
 TITLE = "Continuación"
 
@@ -53,9 +57,10 @@ class Continuacion(Pattern):
 def _swing(L: np.ndarray, start: int, brk: int, k: int) -> int:
     """Índice del último pivote bajo (más bajo que `k` velas a cada lado) entre `start` y la rotura; si no hay, el mínimo más bajo."""
     for i in range(brk - 1, max(start, 0) - 1, -1):
-        if i + k > brk or i - k < 0:
+        if i - k < 0:
             continue
-        if L[i] < L[i - k:i].min() and L[i] < L[i + 1:i + k + 1].min():
+        right = L[i + 1:min(i + k, brk) + 1]                    # a la derecha, hasta la propia vela de rotura (que confirma el pivote)
+        if L[i] < L[i - k:i].min() and L[i] < right.min():
             return i
     window = L[max(start, 0):brk]
     return max(start, 0) + int(len(window) - 1 - np.argmin(window[::-1]))          # último mínimo (el más reciente si hay empate)
@@ -94,15 +99,22 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     # 2) swing previo a la rotura
     s = _swing(L, ctx.start_bar, j, swing_bars)
     swing = float(L[s])
-    # 3) fibonacci del tramo y 4) reversión al 0,5
-    extreme = float(H[j])
+    # 3) fibonacci del tramo: el 0 es el último pivote confirmado tras la rotura (el patrón de tres velas, con el extremo en la del medio),
+    #    y 4) reversión al 0,5. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
+    k = swing_bars
+    zero, zero_idx = None, -1
+    running = float(H[j])
     entry = None
     for t in range(j + 1, end + 1):
-        half = (extreme + swing) / 2
-        if L[t] <= half:
-            entry = (t, half)
+        p = t - k                                               # la vela t confirma el pivote de k velas atrás
+        if p >= max(j, k) and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
+            if zero is None or H[p] > zero:
+                zero, zero_idx = float(H[p]), p                 # un pivote más alto alarga el tramo
+        running = max(running, float(H[t]))
+        if zero is not None and t > zero_idx and L[t] <= (zero + swing) / 2:
+            entry = (t, (zero + swing) / 2)
             break
-        extreme = max(extreme, float(H[t]))
+    extreme = zero if entry is not None else max(running, zero if zero is not None else running)
     half = (extreme + swing) / 2
     target = extreme + (extreme - swing) / 2                  # nivel -0,5: media vuelta del tramo más allá del 0
     levels = {"-0,5": sign * target, "0": sign * extreme, "0,5": sign * half, "1": sign * swing}
@@ -111,8 +123,7 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
     if entry is not None:
         t, half = entry
-        target = extreme + (extreme - swing) / 2
-        detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing previo en {_when(ctx, s)}; reversión al 0,5 "
+        detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing previo en {_when(ctx, s)}, 0 en {_when(ctx, zero_idx)}; reversión al 0,5 "
                   f"({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el swing y objetivo en el -0,5 (2R)")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * swing, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})

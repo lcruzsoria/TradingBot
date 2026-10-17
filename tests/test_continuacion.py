@@ -99,7 +99,7 @@ def test_ajustes_del_patron():
     p = Continuacion(EnvConfig(parse("PATTERN_CONTINUACION_TF=M5\nPATTERN_CONTINUACION_SWING_BARS=3\n")).section("PATTERN"))
     assert (p.tf, p.swing_bars, p.timeframe()) == ("5m", 3, "5m")
     d = Continuacion()
-    assert (d.tf, d.swing_bars) == ("15m", 2) and PATTERN_REGISTRY["continuacion"] is Continuacion
+    assert (d.tf, d.swing_bars) == ("15m", 1) and PATTERN_REGISTRY["continuacion"] is Continuacion
     for text, key in (("PATTERN_CONTINUACION_SWING_BARS=0\n", "SWING_BARS"), ("PATTERN_CONTINUACION_TF=2h\n", "Timeframe")):
         with pytest.raises(ValueError, match=key):
             Continuacion(EnvConfig(parse(text)).section("PATTERN"))
@@ -164,3 +164,48 @@ def test_el_grafico_dibuja_los_fibo_y_el_boton_los_apaga(tmp_path, monkeypatch):
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [fig]})
     win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})         # otro activo: se olvidan
     assert win.chart.fib_count == 0
+
+
+def test_el_pico_justo_antes_de_la_vela_de_rotura_es_el_swing_y_no_el_maximo_de_la_tbr():
+    rows = [(100, 104, 99, 101), (101, 105, 100, 104),                      # 1: el máximo de la TBR (105)
+            (104, 104.5, 101, 102), (102, 102.8, 100, 101),                 # dentro de la TBR
+            (101, 102.5, 100, 102),                                         # primera vela tras el cierre
+            (102, 103, 101, 101.5),                                         # 5: el pico inmediatamente anterior a la rotura (103)
+            (101.5, 102, 93, 94)]                                           # 6: cierra bajo el Low (95): rotura con cuerpo
+    hits, figs = analyze(ctx_for(rows, first_bar=4), 2)
+    assert figs[0].direction == "short" and figs[0].levels["1"] == 103.0                                    # el 1 en el pico de la vela 5
+    assert figs[0].x0_ts == int(ctx_for(rows).ts[5]) and figs[0].levels["0"] == 93.0
+    long_rows = mirror(rows)
+    assert analyze(ctx_for(long_rows, first_bar=4), 2)[1][0].levels["1"] == 97.0                            # y su espejo en el largo
+
+
+def test_por_defecto_el_swing_es_el_patron_de_tres_velas():
+    rows = [(100, 104, 99, 101), (101, 105, 100, 104), (104, 104.5, 101, 102), (102, 102.8, 100, 101), (101, 102.5, 100, 102),
+            (102, 103, 101, 101.5), (101.5, 102, 93, 94)]
+    # la vela 5 tiene el máximo más alto de las tres (4, 5 y 6): ese es el swing, aunque otras velas anteriores lleguen más arriba
+    assert analyze(ctx_for(rows, first_bar=4), Continuacion().swing_bars)[1][0].levels["1"] == 103.0
+
+
+PIVOTS = ROWS[:9] + [(104, 108, 103.5, 107),          # 9: rotura con cuerpo
+                     (107, 109, 106.5, 108.5),        # 10: primer pivote: su máximo (109) es el más alto de las tres velas 9, 10 y 11
+                     (108.5, 108.8, 107, 108),        # 11: confirma el pivote 10 (no toca el 0,5: 103)
+                     (108, 111, 107.5, 110.5),        # 12: nuevo máximo...
+                     (110.5, 110.9, 109, 109.5),      # 13: ...que se confirma como pivote más alto: el 0 pasa a 111 (0,5 = 104)
+                     (109.5, 110, 103, 103.5),        # 14: baja hasta el 0,5: entrada
+                     (103.5, 120, 103, 119)]          # 15: el precio sigue después (no mueve el 0 ya fijado)
+
+
+def test_el_0_es_el_pivote_de_tres_velas_con_el_extremo_en_la_del_medio():
+    hits, figs = analyze(ctx_for(PIVOTS), 1)
+    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 14, 104.0)]                           # 0,5 de 97 a 111
+    assert hits[0].levels["target"] == 118.0 and figs[0].levels["0"] == 111.0 and figs[0].levels["-0,5"] == 118.0
+    hits, figs = analyze(ctx_for(PIVOTS, last_bar=11), 1)                                                # solo el primer pivote (109)
+    assert hits == [] and figs[0].levels["0"] == 109.0 and figs[0].levels["0,5"] == 103.0
+    sh, sf = analyze(ctx_for(mirror(PIVOTS)), 1)                                                         # el corto: el bajo más bajo en la del medio
+    assert sh[0].direction == "short" and sf[0].levels["0"] == 89.0 and sf[0].levels["1"] == 103.0 and sh[0].price == 96.0
+
+
+def test_la_vela_que_confirma_el_pivote_puede_ser_la_que_toca_el_05():
+    rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 110, 106, 109), (109, 109.5, 103, 103.5)]
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 11, 103.5)] and figs[0].levels["0"] == 110.0
