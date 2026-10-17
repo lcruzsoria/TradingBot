@@ -207,4 +207,4 @@ def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
                      session_end, _hhmm((last.start + last.minutes) % 1440), close_ny - zone.minutes * 60 + ahead)
 
 
-from . import continuacion  # noqa: E402,F401  (registra los patrones definidos)
+from . import continuacion, reversion  # noqa: E402,F401  (registran los patrones definidos)

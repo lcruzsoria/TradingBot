@@ -19,7 +19,7 @@ Low y su 50 %. Cada skill tiene un papel:
 - **Pattern** se conecta a TBR, toma la TBR activa y busca en ella los **patrones de entrada** (`@register_pattern`), hasta
   que empieza la TBR siguiente: Asia hasta London, London hasta NY Open y NY Open hasta NY PM (que solo marca el límite).
   Cada patrón identificado se anota en el Registro, igual que los que se invalidan, se anulan o vencen, con su motivo. Tras
-  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay un patrón (ver abajo).
+  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay dos patrones (ver abajo).
 - **Cortex** (el coordinador) reúne el activo, la temporalidad, el sesgo, la TBR y el patrón. Contrasta el patrón con las reglas
   del Bias: a favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
   **NO GO**. El Registro anota los dos resultados con su motivo. Con GO, Cortex le pasa a Setup la orden completa (activo,
@@ -56,6 +56,20 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
    reversión al 0,5, el patrón vence y el Registro lo indica.
 
 Solo se trata el fibonacci en curso; stop y objetivo viajan en la orden que Cortex le pasa a Setup (en simulación).
+
+#### Patrón «Reversión» (`reversion`)
+
+Ejemplo bajista; el alcista es el espejo exacto. También trabaja siempre con velas de M15 (`PATTERN_REVERSION_TF`).
+
+1. **Toma con mecha:** una vela de M15 supera el High de la TBR con su mecha pero **cierra dentro** del rango (con el Low, para el
+   alcista). Si cerrara fuera sería una rotura con cuerpo y la TBR es del patrón Continuación. Se evalúa la primera toma de un lado.
+2. **Mecha pivote:** el pivote de tres velas que forma esa mecha (su máximo es el más alto de las tres). Si antes de confirmarse
+   una vela cierra por encima del High, el patrón se invalida.
+3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): el **1** es la mecha pivote y el **0** el último pivote bajo confirmado que
+   genera a continuación (uno posterior más bajo, antes de revertir al 0,5, lo sustituye); 0,5 y -0,5 como en Continuación.
+4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí), **stop** en la mecha pivote (el 1) y **objetivo** en el -0,5: **2R**.
+   Si el precio supera la mecha pivote antes de la entrada, el patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5,
+   vence. Ambos patrones pueden dar señal en la misma TBR: Cortex las valida con el sesgo.
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
@@ -217,11 +231,12 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
 | **PATTERN** — patrones dentro de la TBR activa | | |
-| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento `continuacion`). |
+| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (`continuacion` y `reversion`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
 | `PATTERN_SHOW_FIBO` | `true` | Botón «Fibo» del gráfico activado al arrancar. |
 | `PATTERN_CONTINUACION_TF` | `15m` | Timeframe del patrón Continuación (el gráfico, en ese timeframe o uno menor que lo divida). |
 | `PATTERN_CONTINUACION_SWING_BARS` | `1` | Velas a cada lado que definen un swing (pivote): 1 = patrón de tres velas. |
+| `PATTERN_REVERSION_TF` / `PATTERN_REVERSION_SWING_BARS` | `15m` / `1` | Timeframe y velas por lado del pivote del patrón Reversión. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |

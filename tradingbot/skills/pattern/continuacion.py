@@ -24,7 +24,8 @@ from __future__ import annotations
 import numpy as np
 
 from ...timeframes import parse_timeframe
-from .patterns import DETECTED, EXPIRED, Figure, Pattern, PatternContext, PatternHit, register_pattern
+from .fibo import run_fibo
+from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "15m"
 DEFAULT_SWING_BARS = 1
@@ -99,25 +100,17 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     # 2) swing previo a la rotura
     s = _swing(L, ctx.start_bar, j, swing_bars)
     swing = float(L[s])
-    # 3) fibonacci del tramo: el 0 es el último pivote confirmado tras la rotura (el patrón de tres velas, con el extremo en la del medio),
-    #    y 4) reversión al 0,5. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
-    k = swing_bars
-    zero, zero_idx = None, -1
-    running = float(H[j])
-    entry = None
-    for t in range(j + 1, end + 1):
-        p = t - k                                               # la vela t confirma el pivote de k velas atrás
-        if p >= max(j, k) and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
-            if zero is None or H[p] > zero:
-                zero, zero_idx = float(H[p]), p                 # un pivote más alto alarga el tramo
-        running = max(running, float(H[t]))
-        if zero is not None and t > zero_idx and L[t] <= (zero + swing) / 2:
-            entry = (t, (zero + swing) / 2)
-            break
-    extreme = zero if entry is not None else max(running, zero if zero is not None else running)
+    # 3) fibonacci del tramo (el 0 es el último pivote confirmado, ver fibo.py) y 4) reversión al 0,5
+    state = run_fibo(H, L, j, end, swing, swing_bars, j, float(H[j]))
+    zero, zero_idx, entry = state.zero, state.zero_idx, state.entry
+    extreme = state.extreme
     half = (extreme + swing) / 2
     target = extreme + (extreme - swing) / 2                  # nivel -0,5: media vuelta del tramo más allá del 0
     levels = {"-0,5": sign * target, "0": sign * extreme, "0,5": sign * half, "1": sign * swing}
+    if state.breach is not None:
+        return [hit(INVALIDATED, direction, state.breach, sign * swing,
+                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing ({sign * swing:.5g}) antes de llegar "
+                    f"al 0,5: patrón invalidado")], []
     arrow = "▲" if up else "▼"
     label = f"{tbr.zone} {arrow}"
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
