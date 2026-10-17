@@ -13,7 +13,7 @@ TIMEFRAMES: dict[str, int] = {
     "1h": 60, "3h": 180, "4h": 240, "7h": 420, "12h": 720,
     "1d": 1440, "1w": 10080,
 }
-DEFAULT_TIMEFRAME = "5m"
+DEFAULT_TIMEFRAME = "15m"
 
 # clave -> constante del módulo MetaTrader5
 NATIVE: dict[str, str] = {

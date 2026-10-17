@@ -19,7 +19,7 @@ def cfg_from(text: str, tmp_path, toml: str = "") -> dict:
 
 def test_sin_tradingbot_env_se_usan_los_valores_del_codigo(tmp_path):
     cfg = cfg_from("", tmp_path)
-    assert cfg["app"]["symbol"] == DEFAULT_SYMBOL and cfg["app"]["timeframe"] == "5m"
+    assert cfg["app"]["symbol"] == DEFAULT_SYMBOL and cfg["app"]["timeframe"] == "15m"
     assert cfg["app"]["max_bars"] == DEFAULT_MAX_BARS
     assert cfg["app"]["profile"] is None and cfg["app"]["demo"] is False
     assert [r["type"] for r in cfg["bias"]["rules"]] == list(DEFAULT_BIAS_RULES)
