@@ -53,5 +53,9 @@ type = "setup"
 slot = 4
 
 [[skills]]
+type = "pattern"
+slot = "aux1"
+
+[[skills]]
 type = "quotes"
 slot = 5

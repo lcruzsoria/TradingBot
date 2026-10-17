@@ -11,6 +11,16 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro compacto en la cabecera del gráfico, a la derecha de los botones TDO, Midnight, PDH/PDL y TBR (en una matriz 2x2). |
 
+### Patrones dentro de la TBR activa (skill Pattern)
+
+Con las tres TBR de trabajo (Asia, London, NY Open), la **TBR activa** es la última que ha cerrado: nos deja fijados su High, su
+Low y su 50 %. La skill **Pattern** se conecta a TBR, toma esa zona y busca en ella los patrones que vayamos definiendo
+(`tradingbot/skills/pattern/patterns.py`, con `@register_pattern`). Cada patrón identificado se **valida con el sesgo**: a favor
+del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, o sin sesgo (o con el mercado lateral), **NO GO**. En
+los dos casos el Registro anota qué patrón se ha identificado, en qué TBR y vela, y por qué se permite o se deniega.
+Se configura en el bloque **PATTERN** de `tradingbot.env` (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_WINDOW_HOURS`,
+`PATTERN_ALLOW_NO_BIAS`). De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
+
 ### El setup de continuación
 
 En cada TBR cerrada (Asia, London, NY Open) se anotan High, Low y 50 %. En un **largo**:
@@ -367,9 +377,10 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
 | `setup` | 4 | La estrategia: continuación sobre cada TBR (toma de liquidez, retest del 50 %, segunda ruptura; entrada límite, stop y objetivo -1) (`candles.loaded` + `tbr.updated` -> `setup.updated`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
+| `pattern` | aux1 | Patrones dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %), validados con el sesgo: a favor GO, en contra o sin sesgo NO GO; cada patrón identificado se anota en el Registro (`candles.loaded` + `tbr.updated` + `bias.updated` -> `pattern.updated` / `pattern.detected`). Lee el bloque PATTERN. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
-El anillo está completo; quedan libres los tres satélites pequeños (`aux1`, `aux2`, `aux3`).
+El anillo está completo; Pattern ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + setup + cortex -> bias.updated -> cortex`;
@@ -422,6 +433,7 @@ tradingbot/
     tbr/             zonas horarias TBR: skill.py, zones.py
     levels/          TDO, Midnight, PDH / PDL y separadores de día: skill.py, daylevels.py
     setup/           la estrategia (tomas de liquidez de las zonas TBR): skill.py, setups.py
+    pattern/         patrones dentro de la TBR activa, validados con el sesgo: skill.py, patterns.py
     _plantilla/      carpeta a copiar para crear una skill nueva
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
 tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, SETUP, UI)

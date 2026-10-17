@@ -95,7 +95,8 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.updated": self._on_setup,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.updated": self._on_setup, "pattern.updated": self._on_pattern_updated,
+            "pattern.detected": self._on_pattern_detected,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history, "bias.execution": self._on_execution,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
@@ -801,6 +802,33 @@ class MainWindow(QMainWindow):
         self.log(f"mercados: nuevo día de trading ({p['day']}) a las {hour} NY - {group}",
                  f"Empieza el día de trading del {p['day']} para {group} ({hour} NY).\nActivos de tu lista: {names}.\n"
                  "Los niveles TDO, PDH/PDL y los separadores del gráfico se renuevan con este día.", tone="info")
+
+    def _on_pattern_updated(self, p: dict) -> None:
+        for error in p.get("errors", []):
+            self.log_once("pattern_error", (p["symbol"], error), f"pattern: error en un patrón - {error}", tone="warn")
+        tbr = p["tbr"]
+        if tbr is None:
+            return
+        tf = display_label(p["timeframe"])
+        self.log_once("pattern_tbr", (p["symbol"], p["timeframe"], tbr.key, tbr.day, tbr.high, tbr.low),
+                      f"pattern: TBR activa {tbr.zone} ({tbr.day:%d/%m}) en {p['symbol']} {tf} - High {fmt_price(tbr.high)}, "
+                      f"Low {fmt_price(tbr.low)}, 50 % {fmt_price(tbr.mid)}",
+                      f"La TBR activa es la última que cerró: {tbr.zone} del {tbr.day:%d/%m/%Y}.\n"
+                      f"High {fmt_price(tbr.high)}   Low {fmt_price(tbr.low)}   50 % {fmt_price(tbr.mid)}   "
+                      f"rango {fmt_price(tbr.range)}\nAhí se buscan los patrones definidos.", "info")
+
+    def _on_pattern_detected(self, p: dict) -> None:
+        hit, decision, tbr = p["hit"], p["decision"], p["tbr"]
+        side = "Long" if hit.direction == "long" else "Short"
+        when = self._bar_time(hit.x) if p["symbol"] == self.charted_symbol and p["timeframe"] == self.current_tf() else "-"
+        lines = [f"Patrón:   {hit.title} ({side})", f"TBR:      {tbr.zone} del {tbr.day:%d/%m/%Y} (High {fmt_price(tbr.high)}, "
+                 f"Low {fmt_price(tbr.low)}, 50 % {fmt_price(tbr.mid)})", f"Vela:     {when}", f"Precio:   {fmt_price(hit.price)}"]
+        lines += [f"{name.capitalize()}: {fmt_price(price)}" for name, price in hit.levels.items()]
+        if hit.detail:
+            lines += ["", hit.detail]
+        lines += ["", f"Sesgo:    {p['bias'].value}", f"Decisión: {decision.verdict} - {decision.reason}"]
+        self.log(f"pattern: {hit.title} {side} en {tbr.zone} ({p['symbol']} {display_label(p['timeframe'])}, {when}) - "
+                 f"{decision.verdict}: {decision.reason}", "\n".join(lines), "go" if decision.allowed else "nogo")
 
     def _on_setup(self, p: dict) -> None:
         s = p["last"]
