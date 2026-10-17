@@ -4,46 +4,48 @@ Scripts: `scripts/buscar_subconjuntos.py` (sobre `analisis/backtest_patrones.xls
 
 ## Método
 
-Las 6.063 operaciones del backtest de Continuación y Reversión se agrupan por todo lo que se sabe antes de entrar: mercado, patrón, zona,
-dirección, franja horaria, día de la semana, año, sesgo (a favor, en contra o sin él), lateral, puntuación del sesgo, tamaño del riesgo y
-coste (spread / riesgo). Se probaron **3.103 combinaciones** de una, dos y tres características (con al menos 120 operaciones), se
-eligió con el primer 60 % del tiempo y se validó con el 40 % final. Para saber cuánto sale bueno solo por probar tantas, se repitió
-todo 300 veces con los resultados barajados entre las operaciones (sin ventaja posible). Se hizo con el R neto y con el R bruto (sin
-costes), porque los costes varían mucho entre mercados y distorsionan la comparación.
+Las 10.384 operaciones del backtest de Continuación y Reversión (2018-2026) se agrupan por todo lo que se sabe antes de entrar: mercado,
+patrón, zona, dirección, franja horaria, día de la semana, año, sesgo (a favor, en contra o sin él), lateral, puntuación del sesgo, tamaño
+del riesgo y coste (spread / riesgo). Se probaron **4.373 combinaciones** de una, dos y tres características (con al menos 120 operaciones),
+se eligió con el 60 % más antiguo y se validó con el 40 % final. Para saber cuánto sale bueno solo por probar tantas, se repitió todo 300
+veces con los resultados barajados entre las operaciones. Se hizo con el R neto y con el R bruto (sin costes), porque los costes varían
+mucho entre mercados.
 
 ## Resultado
 
-**No hay ningún subconjunto con ventaja confirmada.**
+**Los patrones en general no tienen ventaja, pero hay un efecto que se repite: los largos de los lunes.**
 
-- El mejor subconjunto elegido con el entrenamiento (SP500, largos, lunes) tuvo +0,44 R en entrenamiento y **-0,27 R en validación**.
-  En el azar, el mejor de entrenamiento rinde de media -0,13 R en validación: no hay nada que valide.
-- Hay 600 subconjuntos positivos en las dos mitades (R bruto), pero el azar ya da 523 de media: no hay exceso.
-- El mejor t sobre todo el histórico (R bruto) es 3,49; el azar da un máximo de 2,9 (mediana) y 3,55 (percentil 95): **p = 0,07**, no es
-  significativo.
-- **Los costes** explican gran parte de las diferencias: R neto por coste de la operación: < 0,05 R: -0,056; 0,05-0,1 R: -0,016;
-  0,1-0,2 R: -0,186; > 0,2 R: -0,496. Aun quedándose solo con las operaciones baratas, el resultado es ≈ 0, no positivo.
-- El sesgo y la lateralidad no separan buenas de malas operaciones; la puntuación del sesgo ≥ 5 es la menos mala (-0,07 R).
+- **El mejor subconjunto del entrenamiento** (Reversión, 06-09 NY, riesgo muy alto) ganó +0,53 R y en validación +0,10 R (t = 0,5): no se
+  confirma.
+- **Mejor t sobre todo el histórico:** 3,61 (R neto) y 4,31 (R bruto), frente a 2,9 y 3,9 que alcanza el azar en el 5 % de las veces.
+  Los subconjuntos positivos en las dos mitades superan lo esperable por azar (383 frente a 156 con R neto; 1.185 frente a 1.079 con bruto).
+- **Los costes** explican gran parte de las diferencias entre mercados: el NAS100 es el de menor coste relativo y el US2000 el de mayor.
 
-## La única pista: largos en lunes (ventana Asia + London)
+## Largos en lunes (ventana Asia + London)
 
 | Largos en lunes | Operaciones | R bruto | R neto | t (neto) |
 |---|---:|---:|---:|---:|
-| Todas las zonas | 625 | +0,19 | +0,07 | 1,2 |
-| London | 395 | +0,26 | +0,16 | 2,1 |
-| Resto de largos (no lunes) | 2.427 | -0,01 | -0,13 | -4,4 |
-| Cortos en lunes | 557 | -0,11 | -0,23 | -4,0 |
+| Todas las zonas | 1.046 | +0,19 | +0,09 | 1,9 |
+| London | 709 | +0,23 | +0,15 | 2,7 |
+| A favor del sesgo | 444 | +0,28 | +0,19 | 2,7 |
+| NAS100 | 302 | +0,37 | +0,31 | 3,6 |
+| Resto de largos (no lunes) | 4.224 | +0,01 | -0,09 | -4,1 |
+| Cortos en lunes | 917 | -0,09 | -0,20 | -4,4 |
 
-- Positivo en las dos mitades (+0,18 / +0,20 bruto), en los 5 años (de +0,05 a +0,25 bruto) y en 3 de los 4 mercados (US2000 es
-  negativo). Los cortos en lunes pierden el doble: es un efecto direccional, no de un patrón.
+- **Se replica fuera de la muestra.** El efecto se vio primero con las velas de 2022-2026. Con las velas añadidas de 2018 a julio de 2022
+  (que no se habían usado), los largos de lunes dan **+0,189 R bruto** (+0,114 neto, 421 operaciones) y los de London +0,207 bruto (314
+  operaciones); los cortos de lunes pierden igual (-0,16 neto). Son casi las mismas cifras que en la muestra donde se halló.
+- Positivo en las dos mitades (+0,17 / +0,21 bruto), en 8 de los 9 años y en 3 de los 4 mercados (US2000 es negativo).
 - **Contraste independiente** (`scripts/deriva_semanal.py`, velas H1, 10-18 años): la ventana de las 20:00 a las 10:00 NY **de los
-  lunes** sube de media +0,08 % a +0,125 % en los cuatro índices (t = 2,4-2,5 en cada uno), y algo menos los miércoles; martes, jueves y
-  viernes son ≈ 0. Es la deriva alcista nocturna conocida de los índices: los largos de lunes de los patrones la están capturando.
+  lunes** sube de media +0,08 % a +0,125 % en los cuatro índices (t = 2,4-2,5 en cada uno); martes, jueves y viernes son ≈ 0. Es la
+  deriva alcista nocturna conocida de los índices: los largos de lunes de los patrones la están capturando.
+- Otra pista más débil: Reversión con riesgo muy alto (+0,29 R neto, 225 operaciones; validación +0,20 R, t = 1,1).
 
 ## Cómo leerlo
 
-- La ventaja, si existe, está en **cuándo** se entra (lunes, largo, sesión asiática y de Londres), no en los patrones: una entrada
-  larga cualquiera en esa ventana captura el mismo efecto.
-- Neto de costes sale +0,07 R (todas las zonas) a +0,16 R (London) por operación, con unas 100-150 operaciones al año en los cuatro
-  mercados: poco, y ninguna de las dos cifras es estadísticamente sólida al corregir por el número de combinaciones probadas.
-- Para confirmarlo hacen falta más datos fuera de muestra (subir «Máx. barras en el gráfico» en MT5 para tener más historia M15, o
-  seguirlo unos meses en demo) y definirlo ANTES de mirar, como una sola hipótesis.
+- La ventaja, si existe, está en **cuándo** se entra (lunes, largo, sesión asiática y de Londres), no en los patrones: una entrada larga
+  cualquiera en esa ventana captura el mismo efecto.
+- Neto de costes son +0,09 R (todas las zonas) a +0,19 R (a favor del sesgo) por operación, con unas 55 a 130 operaciones al año entre los
+  cuatro mercados: del orden de 10-13 R al año. Es una ventaja pequeña, y se ha mirado entre miles de combinaciones.
+- Siguiente paso razonable: medirlo como una sola hipótesis (largos de lunes en la ventana Asia + London), con entrada a hora fija y
+  sin patrones, y compararlo con las entradas de los patrones; y seguirlo en demo antes de darlo por bueno.

@@ -94,9 +94,20 @@ def stats(r: pd.Series, exit_time: pd.Series | None = None) -> dict:
             "desv. típica (R)": sd, "estadístico t": r.mean() / (sd / np.sqrt(n)) if sd > 0 else 0.0}
 
 
+def intraday_start(ts: np.ndarray, window: int = 200) -> int:
+    """Primera vela desde la que el histórico es realmente M15: antes, MT5 solo tiene velas diarias o de varias horas (el paso
+    mediano entre velas es de 15 minutos o menos)."""
+    step = np.diff(ts)
+    for i in range(0, max(len(step) - window, 1), 50):
+        if np.median(step[i:i + window]) <= 900:
+            return i
+    return 0
+
+
 def run_symbol(source, sym: str, order, zones):
     from analisis_setups import spread_prices
     df = source.load_candles(sym, "15m").reset_index(drop=True)
+    df = df.iloc[intraday_start(df["ts"].to_numpy()):].reset_index(drop=True)      # antes de ese punto el broker solo tiene velas diarias
     spread = spread_prices(source, sym, df)
     df = df.iloc[:-1]                                    # la última vela sigue formándose
     spread = spread[:len(df)]
@@ -240,7 +251,8 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
 
 NOTES = [
     ("Qué es", "Backtest de los patrones Continuación y Reversión del bot (con sus fibonacci) en M15 sobre los índices americanos."),
-    ("Datos", "Velas M15 de MT5 (bid) con el máximo histórico que da el terminal (100.000 velas por mercado: «Máx. barras en el gráfico»)."),
+    ("Datos", "Velas M15 de MT5 (bid) con todo el histórico intradía que tiene el broker (antes de 2018 solo hay velas diarias, que se descartan; "
+              "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
     ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
