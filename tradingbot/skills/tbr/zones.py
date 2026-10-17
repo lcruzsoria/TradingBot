@@ -1,6 +1,6 @@
 """TBR (Time-Based Ranges): zonas horarias del día en hora de Nueva York y sus niveles.
 
-Cada zona (Asia, London, Pre-NY, NY-AM, NY-PM...) es una franja horaria fija en hora de Nueva York. Para cada día y
+Cada zona (Asia, London, NY Open...) es una franja horaria fija en hora de Nueva York. Para cada día y
 zona se calcula el máximo (High), el mínimo (Low) y el punto medio (50 %) de las velas de esa franja: la zona se dibuja
 como una caja del Low al High. Cuando la franja termina, cada nivel sale del borde derecho de la caja y se extiende
 hasta que una vela posterior lo "toma" (lo toca o lo atraviesa); si ninguna lo ha tomado aún, llega al borde derecho.
@@ -29,9 +29,7 @@ DEFAULT_MAX_TF_MINUTES = 60
 DEFAULT_ZONES = (        # clave, nombre, horario NY, color
     ("ASIA", "Asia", "20:00-00:00", "#FFD60A"),
     ("LONDON", "London", "02:00-05:00", "#FF3B30"),
-    ("PRE_NY", "Pre-NY", "09:00-10:00", "#9E9E9E"),
-    ("NY_AM", "NY-AM", "10:00-12:00", "#00C853"),
-    ("NY_PM", "NY-PM", "13:30-16:30", "#A64DFF"),
+    ("NY_AM", "NY Open", "10:00-12:00", "#00C853"),
 )
 
 HOURS = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")

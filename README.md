@@ -13,7 +13,7 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 
 ### El setup de continuación
 
-En cada TBR cerrada (Asia, London, Pre-NY, NY-AM, NY-PM) se anotan High, Low y 50 %. En un **largo**:
+En cada TBR cerrada (Asia, London, NY Open) se anotan High, Low y 50 %. En un **largo**:
 
 1. **Toma de liquidez:** una vela supera el High.
 2. **Retest del 50 %:** el precio vuelve al rango y toca el 50 % (mecha o cierre). Si no lo toca, no hay setup.
@@ -62,9 +62,10 @@ sigan viendo las velas:
 |---|---|---|
 | Asia | 20:00 - 00:00 | amarillo |
 | London | 02:00 - 05:00 | rojo |
-| Pre-NY | 09:00 - 10:00 | gris |
-| NY-AM | 10:00 - 12:00 | verde |
-| NY-PM | 13:30 - 16:30 | morado |
+| NY Open | 10:00 - 12:00 | verde |
+
+Las zonas Pre-NY (RHT, 09:00 - 10:00, gris) y NY-PM (13:30 - 16:30, morado) se han quitado por ahora para simplificar la
+estrategia; siguen definidas en `tradingbot.env` y se recuperan añadiendo `PRE_NY` / `NY_PM` a `TBR_ZONES`.
 
 Para cada zona ya terminada dibuja tres niveles con su color: **High** y **Low** (línea continua) y **50 %** (punteada).
 Cada nivel sale del borde derecho de la caja y se prolonga hasta la primera vela posterior que lo toca o lo atraviesa;
@@ -172,7 +173,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `TBR_OPACITY` | `12` | Opacidad del relleno de las zonas, en % (0 invisible, 100 opaco); valores bajos dan el efecto traslúcido. |
 | `TBR_LINE_OPACITY` | `60` | Opacidad de las líneas High, Low y 50 % de las zonas, en % (0-100). |
 | `TBR_MAX_TF_MINUTES` | `60` | Timeframe máximo (en minutos) con el que se dibujan. |
-| `TBR_ZONES` | `ASIA, LONDON, PRE_NY, NY_AM, NY_PM` | Zonas activas y su orden. |
+| `TBR_ZONES` | `ASIA, LONDON, NY_AM` | Zonas activas y su orden. |
 | `TBR_<ZONA>_NAME` / `_HOURS` / `_COLOR` | ver tabla de TBR | Nombre, horario NY (`HH:MM-HH:MM`; si acaba antes de empezar, termina al día siguiente) y color `#RRGGBB` de cada zona. |
 | **LEVELS** — niveles del día y separadores | | |
 | `LEVELS_SHOW_TDO` / `_SHOW_MIDNIGHT` / `_SHOW_PDHL` | `false` | Botones TDO, Midnight y PDH/PDL activados al arrancar. |

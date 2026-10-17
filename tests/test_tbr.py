@@ -43,8 +43,11 @@ def test_horarios_y_zonas_por_defecto():
         parse_hours("20h-24h")
     zones = zones_from_settings(EnvConfig())
     assert [(z.name, z.hours) for z in zones] == [("Asia", "20:00-00:00"), ("London", "02:00-05:00"),
-                                                   ("Pre-NY", "09:00-10:00"), ("NY-AM", "10:00-12:00"),
-                                                   ("NY-PM", "13:30-16:30")]
+                                                   ("NY Open", "10:00-12:00")]         # solo tres zonas por defecto
+    # Pre-NY (RHT) y NY-PM siguen definidas en tradingbot.env: se recuperan añadiéndolas a TBR_ZONES
+    env = EnvConfig(parse("TBR_ZONES=ASIA, LONDON, PRE_NY, NY_AM, NY_PM\nTBR_PRE_NY_NAME=Pre-NY\nTBR_PRE_NY_HOURS=09:00-10:00\n"
+                          "TBR_PRE_NY_COLOR=#9E9E9E\nTBR_NY_PM_NAME=NY-PM\nTBR_NY_PM_HOURS=13:30-16:30\nTBR_NY_PM_COLOR=#A64DFF\n"))
+    assert [z.name for z in zones_from_settings(env.section("TBR"))] == ["Asia", "London", "Pre-NY", "NY Open", "NY-PM"]
 
 
 def test_zonas_desde_tradingbot_env():
@@ -52,7 +55,7 @@ def test_zonas_desde_tradingbot_env():
                           "TBR_KZ_HOURS=07:00-09:00\nTBR_KZ_COLOR=#abcdef\n")).section("TBR")
     zones = zones_from_settings(env)
     assert [(z.key, z.name, z.hours, z.color) for z in zones] == [
-        ("NY_AM", "NY-AM", "10:00-12:00", "#123456"), ("KZ", "Killzone", "07:00-09:00", "#ABCDEF")]
+        ("NY_AM", "NY Open", "10:00-12:00", "#123456"), ("KZ", "Killzone", "07:00-09:00", "#ABCDEF")]
     with pytest.raises(ValueError, match="TBR_X_HOURS"):
         zones_from_settings(EnvConfig(parse("TBR_ZONES=X\n")).section("TBR"))
     with pytest.raises(ValueError, match="RRGGBB"):
@@ -78,7 +81,7 @@ def test_zona_que_cruza_medianoche_y_zona_en_curso_sin_niveles():
     ts, high, low = candles(19, 24)                         # 19:00 a 00:45 en M15
     [asia] = compute(ts, high, low, [zone("20:00", "00:00")], AHEAD, 15, days=2)
     assert (asia.x0, asia.x1, asia.complete) == (3.5, 19.5, True)   # velas de 20:00 a 23:45
-    ts, high, low = candles(10, 4)                          # NY-AM aún abierta: 10:00 a 10:45
+    ts, high, low = candles(10, 4)                          # NY Open aún abierta: 10:00 a 10:45
     [live] = compute(ts, high, low, [zone("10:00", "12:00")], AHEAD, 15, days=1)
     assert not live.complete and live.levels == () and (live.high, live.low) == (100, 99)   # la caja ya crece
 
@@ -132,7 +135,7 @@ def test_la_skill_publica_las_zonas():
     skill, events = run_skill("TBR_OPACITY=20\nTBR_LINE_OPACITY=50\nTBR_DAYS=1\n", offset=None)
     p = events[-1].payload
     assert p["available"] and p["estimated"] and p["opacity"] == 0.2 and p["line_opacity"] == 0.5
-    assert [s.zone.name for s in p["sessions"]] == ["Pre-NY", "NY-AM"]
+    assert [s.zone.name for s in p["sessions"]] == ["NY Open"]
     _, events = run_skill("", timeframe="4h")
     assert events[-1].payload["available"] is False and events[-1].payload["sessions"] == []
 

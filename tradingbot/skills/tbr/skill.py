@@ -11,7 +11,7 @@ from ...timeframes import display_label, minutes
 @register_skill("tbr")
 class TbrSkill(Skill):
     title = "TBR"
-    description = ("Marca las zonas horarias del día en hora de Nueva York (Asia, London, Pre-NY, NY-AM, NY-PM) y sus "
+    description = ("Marca las zonas horarias del día en hora de Nueva York (Asia, London, NY Open) y sus "
                    "niveles High, Low y 50 %, que se prolongan hasta que una vela los toma.")
     subscribes = ("candles.loaded", "clock.offset")
     publishes = ("tbr.updated",)

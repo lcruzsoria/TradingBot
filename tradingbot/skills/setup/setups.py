@@ -1,6 +1,6 @@
 """Setup de continuación sobre una TBR: toma de liquidez, retest del 50 %, segunda ruptura y entrada límite.
 
-La TBR (Asia, London, Pre-NY, NY-AM, NY-PM...) ya cerrada es el rango de trabajo. Se anotan sus tres niveles clave:
+La TBR (Asia, London, NY Open...) ya cerrada es el rango de trabajo. Se anotan sus tres niveles clave:
 High, Low y 50 %. Largo (el corto es el espejo exacto, con el Low):
 
 1. Toma de liquidez   una vela supera el High del rango.
@@ -47,7 +47,7 @@ STATUS_NAMES = {
 
 @dataclass(frozen=True)
 class Setup:
-    zone: str                  # nombre de la TBR (p. ej. "NY-AM")
+    zone: str                  # nombre de la TBR (p. ej. "NY Open")
     zone_key: str
     day: date                  # día (hora de NY) en que empezó la TBR
     direction: str             # "long" (toma el High) o "short" (toma el Low)
@@ -87,7 +87,7 @@ class Setup:
 
     @property
     def label(self) -> str:
-        """Texto corto, p. ej. "Continuación Long en NY-AM: orden límite activa"."""
+        """Texto corto, p. ej. "Continuación Long en NY Open: orden límite activa"."""
         return f"Continuación {self.direction.capitalize()} en {self.zone}: {STATUS_NAMES[self.status]}"
 
 
