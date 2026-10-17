@@ -12,6 +12,7 @@ from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
+DEFAULT_UNTIL = ("ASIA:NY_AM",)                 # plazo de Asia: hasta el inicio de NY Open
 DEFAULT_EXTEND = ("NY_AM",)                     # TBR cuyo plazo llega hasta el final de la última zona del ciclo
 DEFAULT_HISTORY_DAYS = 30                      # días de TBR pasadas de las que se dibujan fibos y entradas
 RECENT_SECONDS = 24 * 3600                      # solo se evalúan las TBR que cerraron en el último día
@@ -66,6 +67,7 @@ class PatternSkill(Skill):
             unknown_zone = []
         if unknown_zone:
             raise ValueError(f"PATTERN_EXTEND={', '.join(self.extend)}: {', '.join(unknown_zone)} no está en PATTERN_ZONE_ORDER.")
+        self.until = self._load_until(order)
         env = self.services.env if self.services.env is not None else EnvConfig()
         self.order = zones_from_settings(env.section("TBR"), order) if order else []        # ciclo de TBR: define el plazo
         wanted = [t.lower() for t in self.settings.get_list("TYPES", [])]
@@ -75,6 +77,23 @@ class PatternSkill(Skill):
                              f"Disponibles: {', '.join(PATTERN_REGISTRY) or 'ninguno todavía'}.")
         self.types = wanted or list(PATTERN_REGISTRY)                                     # vacío: todos los definidos
         self.patterns = {key: PATTERN_REGISTRY[key](self.settings) for key in self.types}   # valida sus ajustes propios
+
+    def _load_until(self, order: list[str]) -> dict[str, str]:
+        """PATTERN_UNTIL=ASIA:NY_AM: el plazo de cada zona llega hasta el inicio de la zona indicada."""
+        raw = self.settings.get("UNTIL")
+        items = self.settings.get_list("UNTIL", list(DEFAULT_UNTIL))
+        until = {}
+        for item in items:
+            zone, _sep, target = (x.strip().upper() for x in item.partition(":"))
+            if not zone or not target:
+                raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: usa ZONA:ZONA (por ejemplo ASIA:NY_AM).")
+            if zone not in order or target not in order:
+                if raw is None:
+                    continue                                    # el valor por defecto no da error
+                raise ValueError(f"PATTERN_UNTIL={', '.join(items)}: {zone if zone not in order else target} no está en "
+                                 f"PATTERN_ZONE_ORDER.")
+            until[zone] = target
+        return until
 
     # -- mensajes -----------------------------------------------------------------------------------
     def handle(self, event: Event) -> None:
@@ -106,7 +125,7 @@ class PatternSkill(Skill):
         results, figures, errors, unavailable, tfs = [], [], [], [], {}
         windows = {}
         for item in recents:
-            window = window_for(item, self.order, ahead, self.extend)
+            window = window_for(item, self.order, ahead, self.extend, self.until)
             windows[item.key] = window
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
@@ -114,7 +133,7 @@ class PatternSkill(Skill):
         if self.history_days > 1:                       # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
             skip = {(r.key, r.day) for r in recents}
             for item in history_tbrs(t["sessions"], self.zones, skip, self.history_days):
-                window = window_for(item, self.order, ahead, self.extend)
+                window = window_for(item, self.order, ahead, self.extend, self.until)
                 if window is not None and window.end_ts is not None:
                     self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
         hits = [h for _t, h in results]

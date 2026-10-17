@@ -806,6 +806,7 @@ class MainWindow(QMainWindow):
             return
         self._hist_data = p
         self.bias_hist.set_scores(p["scores"], p["min_score"], p.get("lateral"))
+        self._apply_fibs()                                              # el GO / NO GO de cada entrada depende de este sesgo
         self._refresh_rules_view()
 
     def _on_market_closed(self, p: dict) -> None:
@@ -847,10 +848,32 @@ class MainWindow(QMainWindow):
             fibs.append({"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                          "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction})
         self.chart.set_fibs(fibs)
-        self.chart.set_positions([
-            {"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
-             "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"], "direction": f.direction,
-             "state": f.state, "label": f.label} for f in self._positions])
+        positions = []
+        for f in self._positions:
+            x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
+            decision, reason = self._entry_decision(x0, f.direction)
+            positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
+                              "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
+                              "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
+                              "reason": reason})
+        self.chart.set_positions(positions)
+
+    def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:
+        """GO / NO GO que habría dado Cortex a una entrada en la vela `index`, con el sesgo que tenía el bot en esa vela."""
+        from types import SimpleNamespace
+        from ..skills.bias.models import Bias
+        from ..skills.cortex.validation import validate
+        data = self._hist_data
+        if not data or index >= len(data["scores"]) or len(data["scores"]) != len(self.candles):
+            return "", ""
+        score, min_score = float(data["scores"][index]), float(data["min_score"])
+        lateral = data.get("lateral")
+        side = bool(lateral[index]) if lateral is not None and len(lateral) == len(data["scores"]) else False
+        bias = Bias.NO_BIAS if side else Bias.BULLISH if score >= min_score else Bias.BEARISH if score <= -min_score else Bias.NO_BIAS
+        cortex = self.manager.skills.get("cortex")
+        decision = validate(direction, SimpleNamespace(bias=bias, score=score, lateral=side, summary=f"puntuación {score:+g}"),
+                            bool(getattr(cortex, "allow_no_bias", False)))
+        return decision.verdict, f"{'lateral' if side else bias.value} {score:+g}"       # motivo corto para la etiqueta
 
     def _on_pattern_updated(self, p: dict) -> None:
         if p["symbol"] == self.charted_symbol:

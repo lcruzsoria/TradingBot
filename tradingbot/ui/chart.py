@@ -537,6 +537,15 @@ class ChartView(pg.PlotWidget):
                 tag.setZValue(8)
                 pi.addItem(tag, ignoreBounds=True)
                 self._pos_items.append(tag)
+            if pos.get("decision"):                                  # GO / NO GO de Cortex con el sesgo de esa vela
+                go = pos["decision"] == "GO"
+                verdict = pg.TextItem(f"{pos['decision']}: {pos.get('reason', '')}", color="#FFFFFF",
+                                      fill=pg.mkBrush(QColor(0, 150, 90, 235) if go else QColor(200, 60, 60, 235)),
+                                      anchor=(1, 0.5))
+                verdict.setPos(x1, entry)
+                verdict.setZValue(9)
+                pi.addItem(verdict, ignoreBounds=True)
+                self._pos_items.append(verdict)
 
     @property
     def position_count(self) -> int:

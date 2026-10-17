@@ -42,6 +42,7 @@ TF_MIN = 15
 SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "US2000.r")
 PATTERNS = {"Continuación": continuacion, "Reversión": reversion}
 ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
+UNTIL = {"ASIA": "NY_AM"}                    # el plazo de Asia llega hasta el inicio de NY Open (como el bot)
 EXTEND = ("NY_AM",)                           # el plazo de NY Open llega hasta el final de NY PM (como el bot)
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
@@ -126,7 +127,7 @@ def run_symbol(source, sym: str, order, zones):
         if not (s.complete and s.high > s.low):
             continue
         tbr = ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1)
-        window = window_for(tbr, order, AHEAD, EXTEND)
+        window = window_for(tbr, order, AHEAD, EXTEND, UNTIL)
         if window is None or window.end_ts is None or window.end_ts > ts[-1] + TF_MIN * 60:
             continue                                      # plazo todavía abierto (o fuera del ciclo): no se evalúa
         first = int(np.searchsorted(ts, window.close_ts, "left"))

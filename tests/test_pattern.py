@@ -293,3 +293,46 @@ def test_plazo_ampliado_de_ny_open_hasta_el_final_de_ny_pm():
     assert ampliado.next_zone == "NY-PM" and ampliado.next_hours == "16:30" and ampliado.close_ts == normal.close_ts
     asia = window_for(ActiveTbr("ASIA", "Asia", date(2026, 10, 5), 105, 95, 0, 1), ORDER, AHEAD, ("NY_AM",))
     assert asia.end_ts == window_for(ActiveTbr("ASIA", "Asia", date(2026, 10, 5), 105, 95, 0, 1), ORDER, AHEAD).end_ts   # solo NY Open
+
+
+def test_plazo_de_asia_hasta_el_inicio_de_ny_open():
+    asia = ActiveTbr("ASIA", "Asia", date(2026, 10, 5), 105, 95, 0, 1)
+    normal = window_for(asia, ORDER, AHEAD)
+    largo = window_for(asia, ORDER, AHEAD, (), {"ASIA": "NY_AM"})
+    assert normal.next_zone == "London" and largo.next_zone == "NY Open" and largo.next_hours == "10:00"
+    assert largo.end_ts == ny(date(2026, 10, 6), 10, 0) and largo.close_ts == normal.close_ts and largo.limit_verb == "empezara"
+    assert largo.session_end_ts is None                      # la jornada solo termina tras NY PM
+
+
+def test_pattern_until_por_defecto_y_validacion():
+    manager, _bus, _found, *_ = run_skill("")
+    manager.stop()
+    assert manager.skills["pattern"].until == {"ASIA": "NY_AM"} and manager.skills["pattern"].extend == ["NY_AM"]
+    for text in ("PATTERN_UNTIL=ASIA\n", "PATTERN_UNTIL=ASIA:NO_EXISTE\n"):
+        manager, _bus, found, *_ = run_skill(text)
+        manager.stop()
+        assert manager.skills["pattern"].state.value == "error" and "PATTERN_UNTIL" in manager.skills["pattern"].note and not found
+
+
+def test_cada_entrada_dibujada_lleva_su_go_o_no_go_con_el_sesgo_de_su_vela(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.ui.main_window import MainWindow
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    win.candles = pd.DataFrame({"ts": np.arange(6) * 900, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0})
+    win._hist_data = {"scores": np.array([5.0, 5.0, -3.0, -1.0, 0.0, 5.0]), "min_score": 3.0,
+                      "lateral": np.array([False, True, False, False, False, False])}
+    assert win._entry_decision(0, "long") == ("GO", "Bullish +5")
+    assert win._entry_decision(0, "short") == ("NO GO", "Bullish +5")
+    assert win._entry_decision(1, "long") == ("NO GO", "lateral +5")        # el filtro de lateralidad anula el sesgo
+    assert win._entry_decision(2, "short") == ("GO", "Bearish -3")
+    assert win._entry_decision(3, "long") == ("NO GO", "No Bias -1")        # sin sesgo: NO GO (CORTEX_ALLOW_NO_BIAS=false)
+    win._hist_data = None
+    assert win._entry_decision(0, "long") == ("", "")                       # sin historial de sesgo no se marca nada

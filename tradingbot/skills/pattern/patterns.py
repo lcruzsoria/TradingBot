@@ -195,13 +195,14 @@ def _hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def window_for(tbr: ActiveTbr, order, ahead: int, extend=()) -> TbrWindow | None:
+def window_for(tbr: ActiveTbr, order, ahead: int, extend=(), until=None) -> TbrWindow | None:
     """Plazo de la TBR activa. `order`: las zonas del ciclo en orden (Asia, London, NY Open, NY PM) como `Zone`.
 
     Termina cuando empieza la TBR siguiente del ciclo: Asia -> London, London -> NY Open y NY Open -> NY PM. Tras la última
     zona del ciclo (NY PM) no se evalúan más setups. Si la zona de la TBR no está en el ciclo, devuelve None (sin límite).
     `extend`: claves de zona cuyo plazo se amplía hasta el final de la última zona del ciclo (p. ej. NY_AM hasta el fin de
-    NY PM, en vez de hasta el inicio de NY PM). `ahead`: segundos que el servidor va por delante de Nueva York.
+    NY PM, en vez de hasta el inicio de NY PM). `until`: {clave de zona: clave de otra zona} para que el plazo llegue hasta el inicio
+    de esa otra zona (p. ej. ASIA -> NY_AM: Asia hasta el inicio de NY Open, en vez de hasta London). `ahead`: segundos que el servidor va por delante de Nueva York.
     """
     zone = next((z for z in order if z.key == tbr.key), None)
     if zone is None:
@@ -222,6 +223,11 @@ def window_for(tbr: ActiveTbr, order, ahead: int, extend=()) -> TbrWindow | None
         session_end = best[0] + last.minutes * 60 + ahead          # la siguiente zona es la última: su final cierra la jornada
     start_ts = close_ny - zone.minutes * 60 + ahead
     last_hours = _hhmm((last.start + last.minutes) % 1440)
+    target = next((z for z in order if z.key == (until or {}).get(tbr.key)), None)
+    if target is not None and target.key != tbr.key:
+        begin = min(s for s in ((day + k) * DAY + target.start * 60 for k in range(0, 3)) if s >= close_ny)
+        ends_session = begin + target.minutes * 60 + ahead if target.key == last.key else None
+        return TbrWindow(close_ny + ahead, begin + ahead, target.name, _hhmm(target.start), ends_session, last_hours, start_ts)
     if tbr.key in {k.upper() for k in extend} and last.key != tbr.key:
         first_last = min((day + k) * DAY + last.start * 60 for k in range(0, 3) if (day + k) * DAY + last.start * 60 >= close_ny)
         end = first_last + last.minutes * 60 + ahead              # el plazo llega hasta el final de la última zona del ciclo
