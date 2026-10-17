@@ -924,13 +924,17 @@ class MainWindow(QMainWindow):
     def _on_setup_executed(self, p: dict) -> None:
         o = p["order"]
         lines = [f"Orden:    {o.label}", f"Activo:   {o.symbol}   Temporalidad: {display_label(o.timeframe)}",
-                 f"Sesgo:    {o.bias} (puntuación {o.score:+g})",
-                 f"TBR:      {o.tbr_zone} del {o.tbr_day:%d/%m/%Y} (High {fmt_price(o.tbr_high)}, Low {fmt_price(o.tbr_low)}, "
-                 f"50 % {fmt_price(o.tbr_mid)})", f"Patrón:   {o.pattern}   Precio: {fmt_price(o.price)}"]
+                 f"Sesgo:    {o.bias} (puntuación {o.score:+g})"]
+        if o.tbr_zone:
+            lines.append(f"TBR:      {o.tbr_zone} del {o.tbr_day:%d/%m/%Y} (High {fmt_price(o.tbr_high)}, Low {fmt_price(o.tbr_low)}, "
+                         f"50 % {fmt_price(o.tbr_mid)})")
+        lines.append(f"Patrón:   {o.pattern}   Precio: {fmt_price(o.price)}")
         if o.stop is not None:
             lines.append(f"Stop:     {fmt_price(o.stop)}")
         if o.target is not None:
             lines.append(f"Objetivo: {fmt_price(o.target)}")
+        if o.close_at:
+            lines.append(f"Cierre:   a las {o.close_at} si no se ha tocado el stop ni el objetivo")
         lines += ["", f"Motivo:   {o.reason}", p["note"]]
         self.log(f"setup: orden {'enviada' if p['sent'] else 'preparada (simulación)'} - {o.label}", "\n".join(lines),
                  "info")

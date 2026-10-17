@@ -57,5 +57,9 @@ type = "setup"
 slot = "aux1"
 
 [[skills]]
+type = "calendario"
+slot = "aux2"
+
+[[skills]]
 type = "quotes"
 slot = 5

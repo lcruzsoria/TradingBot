@@ -23,10 +23,12 @@ class Order:
     bias: str                # sesgo vigente (Bullish / Bearish / No Bias) y su puntuación
     score: float
     reason: str              # por qué Cortex da GO
+    close_at: str | None = None    # cierre por tiempo, si la estrategia lo tiene (Calendario)
 
     @property
     def label(self) -> str:
-        return f"{self.direction.capitalize()} {self.symbol} {self.timeframe} ({self.pattern} en {self.tbr_zone})"
+        where = f" en {self.tbr_zone}" if self.tbr_zone else ""
+        return f"{self.direction.capitalize()} {self.symbol} {self.timeframe} ({self.pattern}{where})"
 
 
 def build_order(payload: dict, decision, bias_result) -> Order:
@@ -35,3 +37,13 @@ def build_order(payload: dict, decision, bias_result) -> Order:
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
                  bias_result.bias.value, float(bias_result.score), decision.reason)
+
+
+def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
+    """Orden a partir de un `calendar.signal`: sin TBR ni patrón, con cierre por tiempo."""
+    price = payload["price"]
+    bias = bias_result.bias.value if bias_result is not None else "sin consultar"
+    score = float(bias_result.score) if bias_result is not None else 0.0
+    return Order(payload["symbol"], payload["timeframe"], payload["direction"], "Calendario (largo a hora fija)", "calendario",
+                 "", payload["day"], price, price, price, price, payload["stop"], payload["target"], bias, score, reason,
+                 payload["close_at"])

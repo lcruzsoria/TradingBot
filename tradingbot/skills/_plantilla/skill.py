@@ -30,6 +30,7 @@ Temas que ya existen (payload entre llaves):
   pattern.updated {symbol, timeframe, tbr, hits, errors}  TBR activa y patrones vistos (pattern)
   pattern.detected {symbol, timeframe, tbr, hit}          patrón de entrada nuevo en la TBR activa (pattern)
   cortex.decision {symbol, timeframe, tbr, hit, decision, bias}  GO / NO GO del patrón según el sesgo (cortex)
+  calendar.signal {symbol, direction, price, stop, target, ...}  entrada de calendario (calendario)
   setup.order {order}                 orden de operar, solo de Cortex a Setup (cortex)
   setup.executed {order, sent, note}  orden ejecutada o, de momento, simulada (setup)
   bias.recalc {}                     pide recalcular el sesgo     (ui -> bias)
