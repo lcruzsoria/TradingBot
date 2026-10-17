@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.decision": self._on_setup_decision, "pattern.updated": self._on_pattern_updated,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
@@ -836,13 +836,27 @@ class MainWindow(QMainWindow):
         self.log(f"pattern: {hit.title} {side} identificado en {tbr.zone} ({p['symbol']} {display_label(p['timeframe'])}, {when})",
                  "\n".join(lines), "info")
 
-    def _on_setup_decision(self, p: dict) -> None:
+    def _on_cortex_decision(self, p: dict) -> None:
         side, when, lines = self._pattern_lines(p)
         hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
-        lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}",
-                  "", "El bot no envía órdenes: el GO / NO GO solo informa."]
-        self.log(f"setup: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "
+        lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]
+        lines += ["", "Con GO, Cortex le pasa la orden a Setup." if decision.allowed else "Con NO GO, Setup no recibe ninguna orden."]
+        self.log(f"cortex: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "
                  f"{decision.reason}", "\n".join(lines), "go" if decision.allowed else "nogo")
+
+    def _on_setup_executed(self, p: dict) -> None:
+        o = p["order"]
+        lines = [f"Orden:    {o.label}", f"Activo:   {o.symbol}   Temporalidad: {display_label(o.timeframe)}",
+                 f"Sesgo:    {o.bias} (puntuación {o.score:+g})",
+                 f"TBR:      {o.tbr_zone} del {o.tbr_day:%d/%m/%Y} (High {fmt_price(o.tbr_high)}, Low {fmt_price(o.tbr_low)}, "
+                 f"50 % {fmt_price(o.tbr_mid)})", f"Patrón:   {o.pattern}   Precio: {fmt_price(o.price)}"]
+        if o.stop is not None:
+            lines.append(f"Stop:     {fmt_price(o.stop)}")
+        if o.target is not None:
+            lines.append(f"Objetivo: {fmt_price(o.target)}")
+        lines += ["", f"Motivo:   {o.reason}", p["note"]]
+        self.log(f"setup: orden {'enviada' if p['sent'] else 'preparada (simulación)'} - {o.label}", "\n".join(lines),
+                 "info")
 
     def _on_bias_schedule(self, p: dict) -> None:
         start = p["day_start"]

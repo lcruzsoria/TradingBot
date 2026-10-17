@@ -1,4 +1,4 @@
-"""Skill Setup: valida el trade. El patrón que detecta Pattern debe ir alineado con el sesgo (reglas de Bias)."""
+"""Skill Setup (ejecutor): solo actúa cuando Cortex le da la orden de operar."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -6,106 +6,68 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import time
 from datetime import date
 
-import pytest
-
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.skills.bias.models import Bias, BiasResult
-from tradingbot.skills.pattern.patterns import ActiveTbr, PatternHit
-from tradingbot.skills.setup.validation import validate
+from tradingbot.skills.cortex.order import Order
 
-TBR = ActiveTbr("NY_AM", "NY Open", date(2026, 10, 6), 105.0, 95.0, -0.5, 9.5)
-
-
-def bias(kind, score=3.0, lateral=False):
-    return BiasResult(kind, None, (), {}, "resumen", score, 3.0, lateral)
+ORDER = Order("EURUSD", "15m", "long", "Patrón de prueba", "p", "NY Open", date(2026, 10, 6), 105.0, 95.0, 100.0, 105.0, 95.0, 115.0,
+              "Bullish", 3.0, "Long a favor del sesgo Bullish (puntuación +3)")
 
 
-def test_el_sesgo_valida_la_direccion_del_patron():
-    assert validate("long", bias(Bias.BULLISH)).allowed and not validate("short", bias(Bias.BULLISH)).allowed
-    assert validate("short", bias(Bias.BEARISH, -3.0)).allowed and not validate("long", bias(Bias.BEARISH, -3.0)).allowed
-    go, no_go = validate("long", bias(Bias.BULLISH)), validate("long", bias(Bias.BEARISH, -3.0))
-    assert go.verdict == "GO" and "a favor del sesgo Bullish" in go.reason
-    assert no_go.verdict == "NO GO" and "contra el sesgo Bearish" in no_go.reason
-
-
-def test_sin_sesgo_o_en_lateral_no_se_opera_salvo_que_se_permita():
-    sin = validate("long", bias(Bias.NO_BIAS, 0.0))
-    assert not sin.allowed and "sin sesgo" in sin.reason
-    assert validate("long", bias(Bias.NO_BIAS, 0.0), allow_no_bias=True).allowed
-    assert "lateral" in validate("long", bias(Bias.NO_BIAS, 3.0, lateral=True)).reason
-    assert not validate("long", None).allowed and "aún no está calculado" in validate("long", None).reason
-
-
-def run_skill(env_text="", publish=("bias", "pattern")):
+def run_skill(env_text=""):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
-    bus, decisions = EventBus(), []
-    bus.subscribe("t", "setup.decision", decisions.append)
+    bus, executed = EventBus(), []
+    bus.subscribe("t", "setup.executed", executed.append)
     manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), [{"type": "setup"}])
     manager.start()
-    return manager, bus, decisions
+    return manager, bus, executed
 
 
-def pattern_event(symbol="EURUSD", direction="long"):
-    hit = PatternHit("p", "Patrón de prueba", direction, 13, 105.0, "detalle", {"stop": 95.0})
-    return {"symbol": symbol, "timeframe": "15m", "tbr": TBR, "hit": hit}
-
-
-def wait(decisions, n=1):
+def wait(executed, n=1):
     deadline = time.time() + 3
-    while len(decisions) < n and time.time() < deadline:
+    while len(executed) < n and time.time() < deadline:
         time.sleep(0.02)
-    time.sleep(0.1)
+    time.sleep(0.15)
 
 
-def test_setup_da_go_al_patron_a_favor_del_sesgo_y_no_go_en_contra():
-    manager, bus, decisions = run_skill()
-    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
-    bus.publish("pattern.detected", pattern_event(direction="long"), source="pattern")
-    bus.publish("pattern.detected", pattern_event(direction="short"), source="pattern")
-    wait(decisions, 2)
-    manager.stop()
-    assert [(d.payload["hit"].direction, d.payload["decision"].allowed) for d in decisions] == [("long", True), ("short", False)]
-    p = decisions[0].payload
-    assert p["bias"] is Bias.BULLISH and p["tbr"].zone == "NY Open" and p["symbol"] == "EURUSD"
-    assert manager.skills["setup"].caption == "NO GO Short NY Open"
-
-
-def test_setup_espera_al_sesgo_del_mismo_mercado():
-    manager, bus, decisions = run_skill()
-    bus.publish("pattern.detected", pattern_event("GBPUSD"), source="pattern")
-    bus.publish("bias.updated", {"result": bias(Bias.BEARISH, -3.0), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+def test_setup_solo_ejecuta_las_ordenes_de_cortex():
+    manager, bus, executed = run_skill()
+    bus.publish("setup.order", {"order": ORDER}, source="pattern")                 # de otra skill: se rechaza
     time.sleep(0.3)
-    assert decisions == []                                                                 # el sesgo es de otro mercado
-    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "GBPUSD", "timeframe": "15m"}, source="bias")
-    wait(decisions)
+    assert executed == [] and manager.skills["setup"].caption == "orden rechazada"
+    bus.publish("setup.order", {"order": ORDER}, source="cortex")
+    wait(executed)
     manager.stop()
-    assert len(decisions) == 1 and decisions[0].payload["decision"].allowed
+    assert len(executed) == 1
+    p = executed[0].payload
+    assert p["order"] is ORDER and p["sent"] is False and "simulación" in p["note"]      # por ahora no se envía a MT5
+    assert manager.skills["setup"].caption == "simulada: Long EURUSD"
 
 
-def test_ajuste_permitir_operar_sin_sesgo():
-    manager, bus, decisions = run_skill("SETUP_ALLOW_NO_BIAS=true\n")
-    bus.publish("bias.updated", {"result": bias(Bias.NO_BIAS, 0.0), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
-    bus.publish("pattern.detected", pattern_event(), source="pattern")
-    wait(decisions)
+def test_setup_solo_esta_conectado_a_cortex():
+    from tradingbot.skills.setup.skill import SetupSkill
+    assert SetupSkill.subscribes == ("setup.order",) and SetupSkill.slot == "aux1"      # no escucha a Pattern, Bias ni velas
+
+
+def test_enviar_ordenes_reales_a_mt5_aun_no_esta_implementado():
+    manager, bus, executed = run_skill("SETUP_SEND_ORDERS=true\n")
+    bus.publish("setup.order", {"order": ORDER}, source="cortex")
+    time.sleep(0.3)
     manager.stop()
-    assert decisions[0].payload["decision"].allowed
+    assert manager.skills["setup"].state.value == "error" and "SETUP_SEND_ORDERS" in manager.skills["setup"].note
+    assert executed == []
 
 
-def test_el_registro_anota_el_go_y_el_no_go_del_setup(tmp_path, monkeypatch):
+def test_el_registro_anota_la_orden_preparada(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
     from tradingbot import settings
-    from tradingbot.core import EventBus, SkillManager, Services
-    from tradingbot.skills.setup.validation import Decision
+    from tradingbot.core import EventBus, Services, SkillManager
     from tradingbot.ui.main_window import MainWindow
     import tradingbot.skills  # noqa: F401
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
     win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
-    base = pattern_event()
-    win._on_setup_decision({**base, "decision": Decision(True, "Long a favor del sesgo Bullish"), "bias": Bias.BULLISH})
-    win._on_setup_decision({**base, "decision": Decision(False, "Long contra el sesgo Bearish"), "bias": Bias.BEARISH})
+    win._on_setup_executed({"order": ORDER, "sent": False, "note": "Modo simulación: la orden está lista pero no se ha enviado a MT5."})
     text = win.log_view.toPlainText()
-    assert "setup: GO Long (Patrón de prueba, NY Open" in text and "Long a favor del sesgo Bullish" in text
-    assert "setup: NO GO Long" in text and "Long contra el sesgo Bearish" in text            # el denegado también se muestra
+    assert "setup: orden preparada (simulación) - Long EURUSD 15m" in text

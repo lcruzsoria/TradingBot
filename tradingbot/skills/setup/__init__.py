@@ -1,6 +1,5 @@
-"""Skill Setup: valida el trade. Recibe de Pattern el patrón de entrada identificado en la TBR activa y lo contrasta con
-el sesgo del Bias: a favor, GO; en contra o sin sesgo, NO GO.
+"""Skill Setup: el ejecutor. Solo recibe órdenes de Cortex (activo, temporalidad, sesgo, TBR y patrón ya validados) y las
+mete en la cuenta del broker. Por ahora funciona en modo simulación: no envía nada a MT5.
 
-- skill.py       la skill (hexágono 4)
-- validation.py  GO / NO GO de un patrón según el sesgo
+- skill.py  la skill (satélite aux1)
 """

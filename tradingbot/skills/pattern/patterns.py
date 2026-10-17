@@ -15,7 +15,7 @@ Para definir un patrón nuevo (todos los patrones viven en este módulo o en otr
             return [PatternHit(self.key, self.title, "long", x=i, price=ctx.tbr.mid, detail="qué se vio")]
 
 La skill llama a `detect` con cada carga de velas y de TBR; un patrón solo debe devolver lo que ve AHORA (la skill se
-encarga de no repetir avisos). Cada patrón identificado pasa a la skill Setup, que lo valida con el sesgo (GO / NO GO).
+encarga de no repetir avisos). Cada patrón identificado pasa a Cortex, que lo valida con el sesgo (GO / NO GO).
 """
 from __future__ import annotations
 

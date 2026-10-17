@@ -1,50 +1,38 @@
-"""Skill Setup: valida el trade. Cuando Pattern detecta un patrón de entrada, lo contrasta con el sesgo (GO / NO GO)."""
+"""Skill Setup: el ejecutor. Solo actúa cuando Cortex le da la orden de operar en la cuenta del broker."""
 from __future__ import annotations
 
 from ...core import Event, Skill, register_skill
-from .validation import DEFAULT_ALLOW_NO_BIAS, validate
-
-MAX_PENDING = 50
 
 
 @register_skill("setup")
 class SetupSkill(Skill):
     title = "Setup"
-    description = ("Valida el trade. Cuando Pattern identifica el patrón de entrada en la TBR activa, comprueba que va "
-                   "alineado con las reglas del Bias: a favor del sesgo es GO; en contra, sin sesgo o con el mercado lateral, "
-                   "NO GO. Solo informa: no envía órdenes.")
-    subscribes = ("pattern.detected", "bias.updated")
-    publishes = ("setup.decision",)
-    slot = 4
+    description = ("El ejecutor: mete la operación en la cuenta del broker (MT5). Solo recibe órdenes de Cortex, que es "
+                   "quien reúne el activo, la temporalidad, el sesgo, la TBR y el patrón válido; Setup no decide nada. "
+                   "Por ahora funciona en modo simulación: prepara la orden y la anota, pero no la envía a MT5.")
+    subscribes = ("setup.order",)
+    publishes = ("setup.executed",)
+    slot = "aux1"
 
     def on_start(self) -> None:
-        self._bias: dict | None = None
-        self._pending: list[dict] = []                 # patrones que esperan a que llegue el sesgo
-        self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque SETUP
-        self.set_caption("esperando patrón")
+        self.error = "Configuración SETUP no válida"
+        self.send_orders = self.settings.get_bool("SEND_ORDERS", False)      # tradingbot.env, bloque SETUP
+        if self.send_orders:
+            self.error = ("SETUP_SEND_ORDERS=true: el envío real de órdenes a MT5 aún no está implementado "
+                          "(la skill funciona en modo simulación)")
+            raise ValueError(self.error)
+        self.error = ""
+        self.executed = 0
+        self.set_caption("esperando a Cortex")
 
     def handle(self, event: Event) -> None:
-        if event.topic == "pattern.detected":
-            self._pending = (self._pending + [event.payload])[-MAX_PENDING:]
-        else:
-            self._bias = event.payload
-        self._decide()
-
-    def _decide(self) -> None:
-        """Valida los patrones pendientes con el sesgo del mismo mercado (el último que llegó)."""
-        bias = self._bias
-        if bias is None:
+        if self.error:
+            raise ValueError(self.error)
+        if event.source != "cortex":                    # solo Cortex puede dar la orden de operar
+            self.set_caption("orden rechazada")
             return
-        waiting = []
-        for p in self._pending:
-            if p["symbol"] != bias["symbol"]:
-                waiting.append(p)
-                continue
-            hit, result = p["hit"], bias["result"]
-            decision = validate(hit.direction, result, self.allow_no_bias)
-            side = hit.direction.capitalize()
-            self.set_caption(f"{decision.verdict} {side} {p['tbr'].zone}")
-            self.publish("setup.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"], "hit": hit,
-                                            "decision": decision, "bias": result.bias if result else None,
-                                            "bias_result": result})
-        self._pending = waiting
+        order = event.payload["order"]
+        self.executed += 1
+        self.set_caption(f"simulada: {order.direction.capitalize()} {order.symbol}")
+        self.publish("setup.executed", {"order": order, "sent": False,
+                                        "note": "Modo simulación: la orden está lista pero no se ha enviado a MT5."})

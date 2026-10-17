@@ -49,11 +49,11 @@ type = "levels"
 slot = 3
 
 [[skills]]
-type = "setup"
+type = "pattern"
 slot = 4
 
 [[skills]]
-type = "pattern"
+type = "setup"
 slot = "aux1"
 
 [[skills]]

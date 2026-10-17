@@ -11,22 +11,27 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro compacto en la cabecera del gráfico, a la derecha de los botones TDO, Midnight, PDH/PDL y TBR (en una matriz 2x2). |
 
-### Patrones y validación del trade (skills Pattern y Setup)
+### Patrones, coordinación y ejecución (skills Pattern, Cortex y Setup)
 
 Con las tres TBR de trabajo (Asia, London, NY Open), la **TBR activa** es la última que ha cerrado: nos deja fijados su High, su
-Low y su 50 %. La skill **Pattern** se conecta a TBR, toma esa zona y busca en ella los **patrones de entrada** que vayamos
-definiendo (`tradingbot/skills/pattern/patterns.py`, con `@register_pattern`). Cada patrón identificado se anota en el Registro
-(TBR, vela, niveles). De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
+Low y su 50 %. Cada skill tiene un papel:
 
-La skill **Setup** es la que **valida el trade**: cuando Pattern identifica un patrón, comprueba que va alineado con las reglas
-del Bias. A favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
-**NO GO**. El Registro anota los dos resultados con su motivo. `SETUP_ALLOW_NO_BIAS=true` da GO también sin sesgo. El bot
-**no envía órdenes**: el GO / NO GO solo informa.
+- **Pattern** se conecta a TBR, toma la TBR activa y busca en ella los **patrones de entrada** que vayamos definiendo
+  (`tradingbot/skills/pattern/patterns.py`, con `@register_pattern`). Cada patrón identificado se anota en el Registro.
+  De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
+- **Cortex** (el coordinador) reúne el activo, la temporalidad, el sesgo, la TBR y el patrón. Contrasta el patrón con las reglas
+  del Bias: a favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
+  **NO GO**. El Registro anota los dos resultados con su motivo. Con GO, Cortex le pasa a Setup la orden completa (activo,
+  temporalidad, dirección, sesgo, TBR, patrón y, si el patrón los define, stop y objetivo). `CORTEX_ALLOW_NO_BIAS=true` da GO
+  también sin sesgo.
+- **Setup** es solo el **ejecutor** en la cuenta del broker: únicamente escucha a Cortex (`setup.order`) y no decide nada.
+  **Por ahora funciona en modo simulación:** prepara la orden y la anota en el Registro, pero no la envía a MT5
+  (`SETUP_SEND_ORDERS=true` da error hasta que se implemente el envío real). El bot sigue sin enviar órdenes a MT5.
 
-Se configuran en los bloques **PATTERN** (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_WINDOW_HOURS`) y **SETUP**
-(`SETUP_ALLOW_NO_BIAS`) de `tradingbot.env`. El antiguo setup de continuación (toma de liquidez, retest del 50 %, segunda
-ruptura) se retiró de la skill Setup; su código y sus resultados se conservan solo para el análisis histórico
-(`scripts/setups_continuacion.py`, `docs/analisis_setups`).
+Se configuran en los bloques **PATTERN** (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_WINDOW_HOURS`), **CORTEX**
+(`CORTEX_ALLOW_NO_BIAS`) y **SETUP** (`SETUP_SEND_ORDERS`) de `tradingbot.env`. El antiguo setup de continuación (toma de
+liquidez, retest del 50 %, segunda ruptura) se retiró de la skill Setup; su código y sus resultados se conservan solo para el
+análisis histórico (`scripts/setups_continuacion.py`, `docs/analisis_setups`).
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
@@ -191,8 +196,10 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento ninguno). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
 | `PATTERN_WINDOW_HOURS` | `24` | Horas, desde que cierra la TBR activa, durante las que se buscan patrones. |
-| **SETUP** — validación del trade con el sesgo | | |
-| `SETUP_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
+| **CORTEX** — coordinador | | |
+| `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
+| **SETUP** — ejecutor | | |
+| `SETUP_SEND_ORDERS` | `false` | Enviar las órdenes de Cortex a MT5. Aún no implementado: `true` da error; ahora solo se simulan. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
@@ -364,24 +371,24 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 
 | Skill | Hexágono | Qué hace |
 |---|---|---|
-| `cortex` | centro | Coordinador. Guarda el Bias vigente y responde a `trade.request` con `trade.verdict` (el filtro de operativa). |
+| `cortex` | centro | Coordinador. Guarda activo, temporalidad y Bias; valida con el sesgo cada patrón de Pattern (GO / NO GO) y, con GO, le pasa la orden a Setup (`pattern.detected` + `bias.updated` -> `cortex.decision` + `setup.order`). También responde a `trade.request` con `trade.verdict`. Lee el bloque CORTEX. |
 | `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
-| `setup` | 4 | Valida el trade: contrasta con el sesgo cada patrón que identifica Pattern (a favor GO; en contra, sin sesgo o lateral NO GO) (`pattern.detected` + `bias.updated` -> `setup.decision`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
-| `pattern` | aux1 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %); avisa de cada uno que identifica (`candles.loaded` + `tbr.updated` -> `pattern.updated` / `pattern.detected`). Lee el bloque PATTERN. |
+| `pattern` | 4 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %); avisa de cada uno que identifica (`candles.loaded` + `tbr.updated` -> `pattern.updated` / `pattern.detected`). Lee el bloque PATTERN. |
+| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`) y mete la operación en la cuenta del broker; por ahora en modo simulación. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
-El anillo está completo; Pattern ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.
+El anillo está completo; Setup ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + pattern + cortex -> bias.updated -> cortex`;
-`tbr -> tbr.updated -> pattern -> pattern.detected -> setup -> setup.decision` (con `bias.updated` hacia setup; patrones y GO / NO GO se anotan en el Registro).
+`tbr -> tbr.updated -> pattern -> pattern.detected -> cortex -> cortex.decision + setup.order -> setup -> setup.executed` (Cortex también recibe `bias.updated`; patrones, GO / NO GO y órdenes se anotan en el Registro).
 Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` y `levels` recolocan lo que depende de la hora de NY.
 **Registro** (panel inferior): anota los eventos relevantes de todas las skills, con la hora del PC: carga y recarga de velas,
 cada recálculo del Bias (con el motivo: carga, recálculo programado o botón), cambios de TBR y de niveles del día, desfase del
-servidor, patrones identificados y el **GO / NO GO** de Setup con su motivo (p. ej. «Short contra el sesgo Bullish»), en
+servidor, patrones identificados, el **GO / NO GO** de Cortex con su motivo y las órdenes de Setup (p. ej. «Short contra el sesgo Bullish»), en
 verde o rojo. Las trazas largas llevan un enlace **+ detalle** que abre la información completa (votos y pesos de las reglas,
 controles del GO / NO GO, niveles y zonas TBR...). Una traza que no cambia no se repite.
 
@@ -422,14 +429,14 @@ tradingbot/
     feed/            conexión con MT5 y velas: skill.py, datasource.py, mt5_client.py (solo lectura), demo_data.py
     quotes/          cotizaciones, cuenta y desfase del servidor: skill.py
     bias/            sesgo del día: skill.py, engine.py, rules.py, context.py, models.py, filter.py
-    cortex/          coordinador y filtro de operativa: skill.py
+    cortex/          coordinador: valida los patrones con el sesgo y da la orden a Setup: skill.py, validation.py, order.py
     tbr/             zonas horarias TBR: skill.py, zones.py
     levels/          TDO, Midnight, PDH / PDL y separadores de día: skill.py, daylevels.py
-    setup/           valida el trade con el sesgo (GO / NO GO): skill.py, validation.py
+    setup/           el ejecutor (solo escucha a Cortex): skill.py
     pattern/         patrones de entrada dentro de la TBR activa: skill.py, patterns.py
     _plantilla/      carpeta a copiar para crear una skill nueva
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
-tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, SETUP, UI)
+tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, PATTERN, CORTEX, SETUP, UI)
 config.toml          watchlist inicial, colores sueltos y disposición de las skills
 scripts/             run.ps1 (arrancar), sync.ps1 (sincronizar con git) y analisis_setups.py (Excel de análisis histórico)
 tests/               pruebas (uv run pytest)

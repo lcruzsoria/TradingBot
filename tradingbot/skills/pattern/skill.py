@@ -13,11 +13,11 @@ DEFAULT_WINDOW_HOURS = 24.0
 class PatternSkill(Skill):
     title = "Pattern"
     description = ("Se conecta a la skill TBR: la TBR activa es la última que ha cerrado, con su High, Low y 50 %. Busca en "
-                   "ella los patrones de entrada definidos y avisa de cada uno que identifica. La validación con el sesgo "
-                   "(GO / NO GO) la hace la skill Setup. Solo informa: no envía órdenes.")
+                   "ella los patrones de entrada definidos y avisa de cada uno que identifica. Cortex valida "
+                   "cada patrón con el sesgo (GO / NO GO). Solo informa: no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated")
     publishes = ("pattern.updated", "pattern.detected")
-    slot = "aux1"
+    slot = 4
 
     def on_start(self) -> None:
         self.error = "Configuración PATTERN no válida"
