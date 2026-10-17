@@ -63,7 +63,7 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
 
     def expired(direction, detail):
         x = min(max(end, 0), len(ts) - 1)
-        return [hit(EXPIRED, direction, x, tbr.mid, f"{detail} antes de que empezara {ctx.next_zone} ({ctx.next_hours} NY)")], []
+        return [hit(EXPIRED, direction, x, tbr.mid, f"{detail} antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)")], []
 
     # 1) primera toma de un lado: con mecha (cierra dentro) es reversión; con cuerpo es continuación y aquí no hay nada
     take = None

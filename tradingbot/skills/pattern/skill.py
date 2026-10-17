@@ -12,6 +12,7 @@ from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
+DEFAULT_EXTEND = ("NY_AM",)                     # TBR cuyo plazo llega hasta el final de la última zona del ciclo
 DEFAULT_HISTORY_DAYS = 30                      # días de TBR pasadas de las que se dibujan fibos y entradas
 RECENT_SECONDS = 24 * 3600                      # solo se evalúan las TBR que cerraron en el último día
 
@@ -58,6 +59,13 @@ class PatternSkill(Skill):
         if self.history_days < 1:
             raise ValueError(f"PATTERN_HISTORY_DAYS={self.history_days} debe ser 1 o más.")
         order = [z.upper() for z in self.settings.get_list("ZONE_ORDER", list(DEFAULT_ZONE_ORDER))]
+        self.extend = [z.upper() for z in self.settings.get_list("EXTEND", list(DEFAULT_EXTEND))]
+        unknown_zone = [z for z in self.extend if z not in order]
+        if self.settings.get("EXTEND") is None:
+            self.extend = [z for z in self.extend if z in order]                # el valor por defecto no da error
+            unknown_zone = []
+        if unknown_zone:
+            raise ValueError(f"PATTERN_EXTEND={', '.join(self.extend)}: {', '.join(unknown_zone)} no está en PATTERN_ZONE_ORDER.")
         env = self.services.env if self.services.env is not None else EnvConfig()
         self.order = zones_from_settings(env.section("TBR"), order) if order else []        # ciclo de TBR: define el plazo
         wanted = [t.lower() for t in self.settings.get_list("TYPES", [])]
@@ -98,7 +106,7 @@ class PatternSkill(Skill):
         results, figures, errors, unavailable, tfs = [], [], [], [], {}
         windows = {}
         for item in recents:
-            window = window_for(item, self.order, ahead)
+            window = window_for(item, self.order, ahead, self.extend)
             windows[item.key] = window
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
@@ -106,7 +114,7 @@ class PatternSkill(Skill):
         if self.history_days > 1:                       # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
             skip = {(r.key, r.day) for r in recents}
             for item in history_tbrs(t["sessions"], self.zones, skip, self.history_days):
-                window = window_for(item, self.order, ahead)
+                window = window_for(item, self.order, ahead, self.extend)
                 if window is not None and window.end_ts is not None:
                     self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
         hits = [h for _t, h in results]
@@ -173,7 +181,8 @@ class PatternSkill(Skill):
             closed = window is not None and window.end_ts is not None and int(ts[-1]) + tf_sec >= window.end_ts
             ctx = PatternContext(c["symbol"], ptf, minutes(ptf), ts, df["open"].to_numpy(), df["high"].to_numpy(),
                                  df["low"].to_numpy(), df["close"].to_numpy(), tbr, first, end, closed,
-                                 window.next_zone if window else "", window.next_hours if window else "", ahead, start)
+                                 window.next_zone if window else "", window.next_hours if window else "", ahead, start,
+                                 window.limit_verb if window else "empezara")
             try:
                 results += [(tbr, h) for h in pattern.detect(ctx)]
                 figures += pattern.figures(ctx)

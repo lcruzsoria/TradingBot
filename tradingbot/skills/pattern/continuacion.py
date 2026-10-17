@@ -126,7 +126,7 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     if ctx.window_closed:
         x = min(max(end, 0), len(ts) - 1)
         return [hit(EXPIRED, direction, x, sign * half, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin reversión al 0,5 "
-                                                        f"antes de que empezara {ctx.next_zone} ({ctx.next_hours} NY)")], []
+                                                        f"antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)")], []
     return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "en curso", label)]
 
 

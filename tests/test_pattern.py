@@ -283,3 +283,13 @@ def test_history_tbrs_devuelve_las_pasadas_sin_las_activas():
     assert [(t.key, t.day.day) for t in got] == [("ASIA", 5), ("LONDON", 5)]             # de la más antigua a la más reciente
     assert history_tbrs(sessions, None, skip, 5) == []                                   # fuera de los últimos 5 días
     assert [t.key for t in history_tbrs(sessions, ["LONDON"], skip, 30)] == ["LONDON"]
+
+
+def test_plazo_ampliado_de_ny_open_hasta_el_final_de_ny_pm():
+    normal = window_for(TBR, ORDER, AHEAD)
+    ampliado = window_for(TBR, ORDER, AHEAD, ("NY_AM",))
+    assert normal.end_ts == ny(DAY, 13, 30) and normal.limit_verb == "empezara"
+    assert ampliado.end_ts == ny(DAY, 16, 30) == ampliado.session_end_ts and ampliado.limit_verb == "terminara"
+    assert ampliado.next_zone == "NY-PM" and ampliado.next_hours == "16:30" and ampliado.close_ts == normal.close_ts
+    asia = window_for(ActiveTbr("ASIA", "Asia", date(2026, 10, 5), 105, 95, 0, 1), ORDER, AHEAD, ("NY_AM",))
+    assert asia.end_ts == window_for(ActiveTbr("ASIA", "Asia", date(2026, 10, 5), 105, 95, 0, 1), ORDER, AHEAD).end_ts   # solo NY Open

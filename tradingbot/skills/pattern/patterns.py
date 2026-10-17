@@ -81,6 +81,7 @@ class TbrWindow:
     session_end_ts: int | None   # fin de la última zona del ciclo (NY PM): a partir de ahí no se evalúa más
     session_end_hours: str
     start_ts: int = 0        # inicio de la propia TBR (hora del servidor, segundos)
+    limit_verb: str = "empezara"   # "empezara" (inicio de la TBR siguiente) o "terminara" (plazo ampliado hasta el fin de la última)
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,7 @@ class PatternContext:
     next_hours: str = ""
     ahead: int = 0           # segundos que el servidor va por delante de Nueva York (para mostrar horas de NY)
     start_bar: int = 0       # primera vela de la propia TBR
+    limit_verb: str = "empezara"   # cómo se nombra el límite: "antes de que empezara X" o "antes de que terminara X"
 
 
 @dataclass(frozen=True)
@@ -193,12 +195,13 @@ def _hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
+def window_for(tbr: ActiveTbr, order, ahead: int, extend=()) -> TbrWindow | None:
     """Plazo de la TBR activa. `order`: las zonas del ciclo en orden (Asia, London, NY Open, NY PM) como `Zone`.
 
     Termina cuando empieza la TBR siguiente del ciclo: Asia -> London, London -> NY Open y NY Open -> NY PM. Tras la última
     zona del ciclo (NY PM) no se evalúan más setups. Si la zona de la TBR no está en el ciclo, devuelve None (sin límite).
-    `ahead`: segundos que el servidor va por delante de Nueva York.
+    `extend`: claves de zona cuyo plazo se amplía hasta el final de la última zona del ciclo (p. ej. NY_AM hasta el fin de
+    NY PM, en vez de hasta el inicio de NY PM). `ahead`: segundos que el servidor va por delante de Nueva York.
     """
     zone = next((z for z in order if z.key == tbr.key), None)
     if zone is None:
@@ -217,9 +220,15 @@ def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
     session_end = None
     if best is not None and best[1].key == last.key:
         session_end = best[0] + last.minutes * 60 + ahead          # la siguiente zona es la última: su final cierra la jornada
+    start_ts = close_ny - zone.minutes * 60 + ahead
+    last_hours = _hhmm((last.start + last.minutes) % 1440)
+    if tbr.key in {k.upper() for k in extend} and last.key != tbr.key:
+        first_last = min((day + k) * DAY + last.start * 60 for k in range(0, 3) if (day + k) * DAY + last.start * 60 >= close_ny)
+        end = first_last + last.minutes * 60 + ahead              # el plazo llega hasta el final de la última zona del ciclo
+        return TbrWindow(close_ny + ahead, end, last.name, last_hours, end, last_hours, start_ts, "terminara")
     return TbrWindow(close_ny + ahead, None if best is None else best[0] + ahead,
                      "" if best is None else best[1].name, "" if best is None else _hhmm(best[1].start),
-                     session_end, _hhmm((last.start + last.minutes) % 1440), close_ny - zone.minutes * 60 + ahead)
+                     session_end, last_hours, start_ts)
 
 
 from . import continuacion, reversion  # noqa: E402,F401  (registran los patrones definidos)
