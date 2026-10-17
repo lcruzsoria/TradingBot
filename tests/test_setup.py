@@ -1,132 +1,111 @@
-"""Skill Setup: continuación sobre una TBR (toma de liquidez, retest del 50 %, segunda ruptura, entrada límite)."""
+"""Skill Setup: valida el trade. El patrón que detecta Pattern debe ir alineado con el sesgo (reglas de Bias)."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
+from datetime import date
 
-import numpy as np
-import pandas as pd
+import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.skills.setup.setups import detect
-from tradingbot.skills.tbr.zones import Zone, compute
+from tradingbot.skills.bias.models import Bias, BiasResult
+from tradingbot.skills.pattern.patterns import ActiveTbr, PatternHit
+from tradingbot.skills.setup.validation import validate
 
-from tests.test_tbr import AHEAD, candles
-
-WINDOW = 96
-# TBR 10:00-11:00 (velas 0-3): High 105, Low 95, 50 % = 100, rango 10.
-BOX_H = [101, 105, 102, 101]
-BOX_L = [99, 98, 95, 99]
+TBR = ActiveTbr("NY_AM", "NY Open", date(2026, 10, 6), 105.0, 95.0, -0.5, 9.5)
 
 
-def run(after_h, after_l, mirror=False, zones=None, window=WINDOW):
-    """Detecta sobre la TBR más las velas `after_*`. `mirror`: precios espejo (200 - precio) para probar el corto."""
-    highs, lows = BOX_H + list(after_h), BOX_L + list(after_l)
-    if mirror:
-        highs, lows = [200 - x for x in lows], [200 - x for x in highs]
-    ts, high, low = candles(10, len(highs), highs=highs, lows=lows)
-    sessions = compute(ts, high, low, [Zone("NY_AM", "NY-AM", 600, 660, "#00C853")], AHEAD, 15, days=1)
-    return detect(sessions, high, low, window, zones)
+def bias(kind, score=3.0, lateral=False):
+    return BiasResult(kind, None, (), {}, "resumen", score, 3.0, lateral)
 
 
-def only(setups):
-    assert len(setups) == 1
-    return setups[0]
+def test_el_sesgo_valida_la_direccion_del_patron():
+    assert validate("long", bias(Bias.BULLISH)).allowed and not validate("short", bias(Bias.BULLISH)).allowed
+    assert validate("short", bias(Bias.BEARISH, -3.0)).allowed and not validate("long", bias(Bias.BEARISH, -3.0)).allowed
+    go, no_go = validate("long", bias(Bias.BULLISH)), validate("long", bias(Bias.BEARISH, -3.0))
+    assert go.verdict == "GO" and "a favor del sesgo Bullish" in go.reason
+    assert no_go.verdict == "NO GO" and "contra el sesgo Bearish" in no_go.reason
 
 
-def test_largo_completo_hasta_el_objetivo():
-    # 4: toma el High (106). 5: toca el 50 % (mín. 99,5). 6: rompe otra vez (107). 7: retest del High (llena). 8: objetivo.
-    s = only(run([106, 104, 107, 106, 116], [101, 99.5, 102, 104, 110]))
-    assert (s.direction, s.status, s.zone) == ("long", "target", "NY-AM")
-    assert (s.entry, s.stop, s.target) == (105, 99.5, 115)           # stop: mínimo del paso 2; objetivo: nivel -1
-    assert (s.sweep_x, s.retest_x, s.rebreak_x, s.fill_x, s.end_x) == (4, 5, 6, 7, 8)
-    assert abs(s.rr - 10 / 5.5) < 1e-9
-    assert (s.high, s.mid, s.low) == (105, 100, 95)
+def test_sin_sesgo_o_en_lateral_no_se_opera_salvo_que_se_permita():
+    sin = validate("long", bias(Bias.NO_BIAS, 0.0))
+    assert not sin.allowed and "sin sesgo" in sin.reason
+    assert validate("long", bias(Bias.NO_BIAS, 0.0), allow_no_bias=True).allowed
+    assert "lateral" in validate("long", bias(Bias.NO_BIAS, 3.0, lateral=True)).reason
+    assert not validate("long", None).allowed and "aún no está calculado" in validate("long", None).reason
 
 
-def test_orden_activa_y_entrada_en_curso_y_stop():
-    armed = only(run([106, 104, 107, 108], [101, 99.5, 102, 106]))     # aún no vuelve al High: orden límite activa
-    assert armed.status == "armed" and armed.fill_x is None and armed.label.endswith("orden límite activa")
-    filled = only(run([106, 104, 107, 106], [101, 99.5, 102, 104]))    # llenada y sin resolver
-    assert filled.status == "filled" and filled.fill_x == 7
-    stop = only(run([106, 104, 107, 106, 106], [101, 99.5, 102, 104, 99]))   # cae bajo el mínimo del paso 2
-    assert stop.status == "stop" and stop.end_x == 8
-
-
-def test_si_en_una_vela_caben_stop_y_objetivo_cuenta_el_stop():
-    s = only(run([106, 104, 107, 106, 116], [101, 99.5, 102, 104, 99]))
-    assert s.status == "stop"
-
-
-def test_sin_toque_del_50_no_hay_setup_y_espera():
-    s = only(run([106, 105.5], [101, 101]))                            # nunca baja al 50 %
-    assert s.status == "sweep" and s.retest_x is None
-    s = only(run([106, 105.5, 107, 106], [101, 101, 102, 103]))        # rompe de nuevo, pero sin tocar el 50 %
-    assert s.status == "sweep"
-    caducado = only(run([106] + [105.5] * 10, [101] * 11, window=6))   # pasa la ventana sin tocar el 50 %
-    assert caducado.status == "expired" and "50 %" in caducado.note
-
-
-def test_espera_la_segunda_ruptura():
-    s = only(run([106, 104, 103], [101, 99.5, 100.5]))
-    assert s.status == "retest" and s.retest_x == 5 and s.entry is None
-
-
-def test_se_invalida_si_toma_el_lado_contrario():
-    s = only(run([106, 104], [101, 94]))                               # el retest baja del Low (95)
-    assert s.status == "invalid" and "lado contrario" in s.note
-    s = only(run([106, 104, 103, 107], [101, 99.5, 94, 102]))          # lo toma antes de la segunda ruptura
-    assert s.status == "invalid"
-
-
-def test_la_orden_caduca_si_el_precio_llega_al_objetivo_sin_llenarla():
-    s = only(run([106, 104, 107, 116], [101, 99.5, 102, 109]))
-    assert s.status == "expired" and "objetivo" in s.note
-
-
-def test_corto_es_el_espejo():
-    s = only(run([106, 104, 107, 106, 116], [101, 99.5, 102, 104, 110], mirror=True))
-    assert (s.direction, s.status) == ("short", "target")
-    assert (s.entry, s.stop, s.target) == (95, 100.5, 85)
-    assert s.side == "low" and s.level == 95 and (s.high, s.low) == (105, 95)
-
-
-def test_un_setup_por_tbr_y_lado_y_filtro_de_zonas():
-    after_h, after_l = [106, 104, 107, 106, 116], [101, 99.5, 102, 104, 110]
-    assert len(run(after_h, after_l)) == 1
-    assert run(after_h, after_l, zones=["LONDON"]) == []
-    assert len(run(after_h, after_l, zones=["ny_am"])) == 1
-
-
-def run_skill(env_text):
+def run_skill(env_text="", publish=("bias", "pattern")):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
-    bus, events = EventBus(), []
-    bus.subscribe("t", "setup.updated", events.append)
-    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))),
-                           [{"type": "tbr"}, {"type": "setup"}])
+    bus, decisions = EventBus(), []
+    bus.subscribe("t", "setup.decision", decisions.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), [{"type": "setup"}])
     manager.start()
-    highs, lows = BOX_H + [106, 104, 107, 108], BOX_L + [101, 99.5, 102, 106]
-    ts, high, low = candles(10, len(highs), highs=highs, lows=lows)
-    df = pd.DataFrame({"ts": ts, "high": high, "low": low, "close": np.asarray(low, dtype=float)})
-    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    return manager, bus, decisions
+
+
+def pattern_event(symbol="EURUSD", direction="long"):
+    hit = PatternHit("p", "Patrón de prueba", direction, 13, 105.0, "detalle", {"stop": 95.0})
+    return {"symbol": symbol, "timeframe": "15m", "tbr": TBR, "hit": hit}
+
+
+def wait(decisions, n=1):
     deadline = time.time() + 3
-    while not events and time.time() < deadline:
+    while len(decisions) < n and time.time() < deadline:
         time.sleep(0.02)
+    time.sleep(0.1)
+
+
+def test_setup_da_go_al_patron_a_favor_del_sesgo_y_no_go_en_contra():
+    manager, bus, decisions = run_skill()
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", pattern_event(direction="long"), source="pattern")
+    bus.publish("pattern.detected", pattern_event(direction="short"), source="pattern")
+    wait(decisions, 2)
     manager.stop()
-    return manager.skills["setup"], events
+    assert [(d.payload["hit"].direction, d.payload["decision"].allowed) for d in decisions] == [("long", True), ("short", False)]
+    p = decisions[0].payload
+    assert p["bias"] is Bias.BULLISH and p["tbr"].zone == "NY Open" and p["symbol"] == "EURUSD"
+    assert manager.skills["setup"].caption == "NO GO Short NY Open"
 
 
-def test_la_skill_publica_los_setups_de_las_tbr():
-    skill, events = run_skill("TBR_ZONES=ny_am\nTBR_NY_AM_HOURS=10:00-11:00\nTBR_DAYS=1\n")
-    p = events[-1].payload
-    assert p["symbol"] == "EURUSD" and p["last"].status == "armed" and p["last"].direction == "long"
-    assert p["last"].entry == 105 and p["last"].target == 115 and p["bars"] == 8
+def test_setup_espera_al_sesgo_del_mismo_mercado():
+    manager, bus, decisions = run_skill()
+    bus.publish("pattern.detected", pattern_event("GBPUSD"), source="pattern")
+    bus.publish("bias.updated", {"result": bias(Bias.BEARISH, -3.0), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    time.sleep(0.3)
+    assert decisions == []                                                                 # el sesgo es de otro mercado
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "GBPUSD", "timeframe": "15m"}, source="bias")
+    wait(decisions)
+    manager.stop()
+    assert len(decisions) == 1 and decisions[0].payload["decision"].allowed
 
 
-def test_la_skill_rechaza_valores_no_validos():
-    for text, key in (("SETUP_WINDOW_HOURS=0\n", "SETUP_WINDOW_HOURS"), ("SETUP_TP_RANGES=-1\n", "SETUP_TP_RANGES"),
-                      ("SETUP_TYPES=reversal\n", "SETUP_TYPES")):
-        skill, events = run_skill(text)
-        assert skill.state.value == "error" and key in skill.note and not events
+def test_ajuste_permitir_operar_sin_sesgo():
+    manager, bus, decisions = run_skill("SETUP_ALLOW_NO_BIAS=true\n")
+    bus.publish("bias.updated", {"result": bias(Bias.NO_BIAS, 0.0), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", pattern_event(), source="pattern")
+    wait(decisions)
+    manager.stop()
+    assert decisions[0].payload["decision"].allowed
+
+
+def test_el_registro_anota_el_go_y_el_no_go_del_setup(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, SkillManager, Services
+    from tradingbot.skills.setup.validation import Decision
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    base = pattern_event()
+    win._on_setup_decision({**base, "decision": Decision(True, "Long a favor del sesgo Bullish"), "bias": Bias.BULLISH})
+    win._on_setup_decision({**base, "decision": Decision(False, "Long contra el sesgo Bearish"), "bias": Bias.BEARISH})
+    text = win.log_view.toPlainText()
+    assert "setup: GO Long (Patrón de prueba, NY Open" in text and "Long a favor del sesgo Bullish" in text
+    assert "setup: NO GO Long" in text and "Long contra el sesgo Bearish" in text            # el denegado también se muestra

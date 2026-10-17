@@ -95,9 +95,9 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.updated": self._on_setup, "pattern.updated": self._on_pattern_updated,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "setup.decision": self._on_setup_decision, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected,
-            "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history, "bias.execution": self._on_execution,
+            "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
             "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
@@ -817,8 +817,9 @@ class MainWindow(QMainWindow):
                       f"High {fmt_price(tbr.high)}   Low {fmt_price(tbr.low)}   50 % {fmt_price(tbr.mid)}   "
                       f"rango {fmt_price(tbr.range)}\nAhí se buscan los patrones definidos.", "info")
 
-    def _on_pattern_detected(self, p: dict) -> None:
-        hit, decision, tbr = p["hit"], p["decision"], p["tbr"]
+    def _pattern_lines(self, p: dict) -> tuple[str, str, list[str]]:
+        """(lado, vela, líneas del detalle) de un patrón identificado."""
+        hit, tbr = p["hit"], p["tbr"]
         side = "Long" if hit.direction == "long" else "Short"
         when = self._bar_time(hit.x) if p["symbol"] == self.charted_symbol and p["timeframe"] == self.current_tf() else "-"
         lines = [f"Patrón:   {hit.title} ({side})", f"TBR:      {tbr.zone} del {tbr.day:%d/%m/%Y} (High {fmt_price(tbr.high)}, "
@@ -826,52 +827,22 @@ class MainWindow(QMainWindow):
         lines += [f"{name.capitalize()}: {fmt_price(price)}" for name, price in hit.levels.items()]
         if hit.detail:
             lines += ["", hit.detail]
-        lines += ["", f"Sesgo:    {p['bias'].value}", f"Decisión: {decision.verdict} - {decision.reason}"]
-        self.log(f"pattern: {hit.title} {side} en {tbr.zone} ({p['symbol']} {display_label(p['timeframe'])}, {when}) - "
-                 f"{decision.verdict}: {decision.reason}", "\n".join(lines), "go" if decision.allowed else "nogo")
+        return side, when, lines
 
-    def _on_setup(self, p: dict) -> None:
-        s = p["last"]
-        if s is None:
-            self.log_once("setup", (p["symbol"], None), f"setup: ninguna toma de liquidez de las TBR en {p['symbol']}")
-            return
-        tf = display_label(p["timeframe"])
-        lines = [s.label, "",
-                 f"Mercado:        {p['symbol']} {tf}",
-                 f"TBR:            {s.zone} del {s.day:%d/%m}  (High {fmt_price(s.high)}, 50 % {fmt_price(s.mid)}, "
-                 f"Low {fmt_price(s.low)})",
-                 f"1 Toma:         {'High' if s.side == 'high' else 'Low'} de la TBR, vela de las {self._bar_time(s.sweep_x)}",
-                 f"2 Retest 50 %:  {self._bar_time(s.retest_x) if s.retest_x is not None else 'pendiente'}",
-                 f"3 2ª ruptura:   {self._bar_time(s.rebreak_x) if s.rebreak_x is not None else 'pendiente'}"]
-        if s.entry is not None:
-            rr = f"  (riesgo/beneficio {s.rr:.1f}R)" if s.rr else ""
-            lines += ["", f"Entrada (límite): {fmt_price(s.entry)}   Stop: {fmt_price(s.stop)}   "
-                          f"Objetivo (-1): {fmt_price(s.target)}{rr}"]
-        if s.fill_x is not None:
-            lines.append(f"Llenada:          vela de las {self._bar_time(s.fill_x)}")
-        if s.end_x is not None and s.status in ("target", "stop", "expired", "invalid"):
-            lines.append(f"Fin:              vela de las {self._bar_time(s.end_x)}" + (f" - {s.note}" if s.note else ""))
-        tone = ("info" if s.status in ("armed", "filled") else "go" if s.status == "target" else
-                "nogo" if s.status == "stop" else None)
-        self.log_once("setup", (p["symbol"], s.sweep_x, s.direction, s.status),
-                      f"setup: {s.label} ({p['symbol']} {tf}, {self._bar_time(s.sweep_x)})", "\n".join(lines), tone)
+    def _on_pattern_detected(self, p: dict) -> None:
+        side, when, lines = self._pattern_lines(p)
+        hit, tbr = p["hit"], p["tbr"]
+        lines += ["", "La skill Setup lo valida ahora con el sesgo (GO / NO GO)."]
+        self.log(f"pattern: {hit.title} {side} identificado en {tbr.zone} ({p['symbol']} {display_label(p['timeframe'])}, {when})",
+                 "\n".join(lines), "info")
 
-    def _on_execution(self, p: dict) -> None:
-        s, d = p["setup"], p["decision"]
-        if s.status in ("sweep", "retest"):
-            return                                       # aún no hay nada que ejecutar: lo anuncia Setup
-        lines = [f"{d.verdict}: {s.label}", f"Mercado: {p['symbol']} {display_label(p['timeframe'])}   "
-                 f"Sesgo del día: {p['bias'].value if p['bias'] else 'sin calcular'}", "", "Controles:"]
-        lines += [f"  {'✓' if c.passed else '✗'} {c.name:<20} {c.detail}" for c in d.checks]
-        if s.entry is not None:
-            lines += ["", f"Entrada (límite) {fmt_price(s.entry)}, stop {fmt_price(s.stop)}, "
-                          f"objetivo {fmt_price(s.target)}"]
-        lines += ["", "El bot no envía órdenes: el GO / NO GO solo informa."]
-        side = s.direction.capitalize()
-        self.log_once("execution", (p["symbol"], s.sweep_x, s.direction, s.status, d.allowed, d.reason),
-                      f"bias execution: {d.verdict} {side} ({s.zone}) - "
-                      + ("todas las condiciones se cumplen" if d.allowed else d.reason),
-                      "\n".join(lines), "go" if d.allowed else "nogo")
+    def _on_setup_decision(self, p: dict) -> None:
+        side, when, lines = self._pattern_lines(p)
+        hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
+        lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}",
+                  "", "El bot no envía órdenes: el GO / NO GO solo informa."]
+        self.log(f"setup: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "
+                 f"{decision.reason}", "\n".join(lines), "go" if decision.allowed else "nogo")
 
     def _on_bias_schedule(self, p: dict) -> None:
         start = p["day_start"]

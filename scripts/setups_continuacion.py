@@ -1,4 +1,7 @@
-"""Setup de continuación sobre una TBR: toma de liquidez, retest del 50 %, segunda ruptura y entrada límite.
+"""ARCHIVADO: el setup de continuación se retiró de la skill Setup (ahora valida el trade que detecta Pattern).
+Se conserva aquí solo para que scripts/analisis_setups.py pueda reproducir el estudio de docs/analisis_setups.
+
+Setup de continuación sobre una TBR: toma de liquidez, retest del 50 %, segunda ruptura y entrada límite.
 
 La TBR (Asia, London, NY Open...) ya cerrada es el rango de trabajo. Se anotan sus tres niveles clave:
 High, Low y 50 %. Largo (el corto es el espejo exacto, con el Low):

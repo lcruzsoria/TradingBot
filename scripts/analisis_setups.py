@@ -2,7 +2,7 @@
 
 Solo LEE velas de MT5 (el bot no envía órdenes). Para cada mercado y cada TBR cerrada busca:
 
-- Continuación: el setup real de la skill Setup (tradingbot.skills.setup.setups.detect).
+- Continuación: el setup que tenía la skill Setup (scripts/setups_continuacion.py, retirado de la skill).
 - Reversión C (propuesta, aún sin implementar en la skill): tras la toma de liquidez y el retest del 50 %, el precio
   cierra bajo el mínimo del retest sin haber vuelto a romper el High: orden límite en ese mínimo, stop en el High
   tomado y objetivo en el nivel -1 por el lado contrario.
@@ -36,7 +36,7 @@ from tradingbot.envconfig import EnvConfig                                      
 from tradingbot.skills.bias.htf import break_vote, sweep_vote                                # noqa: E402
 from tradingbot.skills.feed.mt5_client import Mt5Source                          # noqa: E402
 from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index   # noqa: E402
-from tradingbot.skills.setup.setups import detect                                # noqa: E402
+from setups_continuacion import detect                                          # noqa: E402  (la estrategia retirada de la skill Setup)
 from tradingbot.skills.tbr.zones import compute, zones_from_settings             # noqa: E402
 
 AHEAD = 7 * 3600                      # servidor del broker = NY + 7 h (Vantage)

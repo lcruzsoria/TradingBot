@@ -1,4 +1,4 @@
-"""Skill Bias: sesgo (Bullish / Bearish / No Bias) de la sesión del día en curso y Bias Execution de los setups."""
+"""Skill Bias: sesgo (Bullish / Bearish / No Bias) de la sesión del día en curso y su histórico por vela."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,7 +12,6 @@ from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAU
 from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
 from ..levels.daylevels import DEFAULT_SMA_PERIOD
 from .history import block_ids, frozen_votes, lateral_flags
-from .execution import DEFAULT_ALLOW_NO_BIAS, DEFAULT_PREMIUM_DISCOUNT, ExecutionGate
 from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_recalc
 
 
@@ -20,10 +19,10 @@ from .schedule import CHECK_SECONDS, DEFAULT_HOURS, DEFAULT_INDEX_HOURS, next_re
 class BiasSkill(Skill):
     title = "Bias"
     description = ("Evalúa las reglas del sesgo (voto x peso) y decide Bullish, Bearish o No Bias. Lo recalcula cada "
-                   "3 h en los índices americanos y cada 4 h en el resto, y decide si cada setup detectado se puede "
-                   "ejecutar (GO / NO GO) y por qué.")
-    subscribes = ("candles.loaded", "bias.recalc", "levels.updated", "setup.updated", "clock.offset")
-    publishes = ("bias.updated", "bias.schedule", "bias.execution", "bias.history", "feed.refresh")
+                   "3 h en los índices americanos y cada 4 h en el resto. La skill Setup lo usa para validar (GO / NO GO) "
+                   "los patrones de entrada.")
+    subscribes = ("candles.loaded", "bias.recalc", "levels.updated", "clock.offset")
+    publishes = ("bias.updated", "bias.schedule", "bias.history", "feed.refresh")
     slot = 1
     interval = CHECK_SECONDS
 
@@ -31,7 +30,6 @@ class BiasSkill(Skill):
         self._last: dict | None = None
         self.result = None
         self.result_symbol = ""
-        self._setup: dict | None = None
         self._next: datetime | None = None
         self._plan: tuple | None = None          # (símbolo, timeframe, inicio del día, horas, índice USA)
         self._levels: dict | None = None         # último levels.updated (TDO y Midnight para las reglas)
@@ -50,8 +48,6 @@ class BiasSkill(Skill):
         for key, value in (("HTF_SWEEP_INDEX_HOURS", self.sweep_index_hours), ("HTF_SWEEP_HOURS", self.sweep_hours)):
             if value < 1:
                 raise ValueError(f"BIAS_{key}={value} debe ser 1 o más.")
-        self.gate = ExecutionGate(self.settings.get_bool("EXEC_ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS),
-                                  self.settings.get_bool("EXEC_PREMIUM_DISCOUNT", DEFAULT_PREMIUM_DISCOUNT))
 
     # -- mensajes -----------------------------------------------------------------------------------
     def handle(self, event: Event) -> None:
@@ -75,10 +71,6 @@ class BiasSkill(Skill):
             if self._last is None:
                 return
             self._reason = "desfase del servidor"                # las velas H3 / H4 dependen de la hora de NY
-        elif topic == "setup.updated":
-            self._setup = p
-            self._execution()
-            return
         if topic == "candles.loaded":
             if minutes(p["timeframe"]) > 1440:
                 # Con velas semanales "el día" no existe: se conserva el último sesgo calculado.
@@ -107,7 +99,6 @@ class BiasSkill(Skill):
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
         self._history()
-        self._execution()
 
     def _history(self) -> None:
         """Puntuación que habría tenido el sesgo en cada vela del gráfico (histograma bajo el precio)."""
@@ -195,14 +186,3 @@ class BiasSkill(Skill):
         self._next = next_recalc(datetime.now(NY), day_start, hours) if hours > 0 else None
         self.publish("bias.schedule", {"symbol": symbol, "next": self._next, "hours": hours, "us_index": us_index,
                                        "day_start": day_start})
-
-    # -- Bias Execution -----------------------------------------------------------------------------------
-    def _execution(self) -> None:
-        p = self._setup
-        if p is None or p["last"] is None:
-            return
-        setup = p["last"]                             # el vivo más reciente, o el último que terminó
-        result = self.result if self.result_symbol == p["symbol"] else None
-        decision = self.gate.evaluate(setup, result)
-        self.publish("bias.execution", {"symbol": p["symbol"], "timeframe": p["timeframe"], "setup": setup,
-                                        "decision": decision, "bias": result.bias if result else None})

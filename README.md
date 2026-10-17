@@ -11,28 +11,22 @@ tarjetas de mercado, gráfico de velas verde azulado/coral y, a la derecha, el s
 | Conexión y velas | Conecta con MT5 usando la cuenta del `.env` y carga todas las velas posibles en 1m, 3m, 5m o 15m (por defecto 15m). |
 | Bias | Evalúa las reglas y decide el sesgo del día: **Bullish**, **Bearish** o **No Bias**. Se muestra en un recuadro compacto en la cabecera del gráfico, a la derecha de los botones TDO, Midnight, PDH/PDL y TBR (en una matriz 2x2). |
 
-### Patrones dentro de la TBR activa (skill Pattern)
+### Patrones y validación del trade (skills Pattern y Setup)
 
 Con las tres TBR de trabajo (Asia, London, NY Open), la **TBR activa** es la última que ha cerrado: nos deja fijados su High, su
-Low y su 50 %. La skill **Pattern** se conecta a TBR, toma esa zona y busca en ella los patrones que vayamos definiendo
-(`tradingbot/skills/pattern/patterns.py`, con `@register_pattern`). Cada patrón identificado se **valida con el sesgo**: a favor
-del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, o sin sesgo (o con el mercado lateral), **NO GO**. En
-los dos casos el Registro anota qué patrón se ha identificado, en qué TBR y vela, y por qué se permite o se deniega.
-Se configura en el bloque **PATTERN** de `tradingbot.env` (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_WINDOW_HOURS`,
-`PATTERN_ALLOW_NO_BIAS`). De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
+Low y su 50 %. La skill **Pattern** se conecta a TBR, toma esa zona y busca en ella los **patrones de entrada** que vayamos
+definiendo (`tradingbot/skills/pattern/patterns.py`, con `@register_pattern`). Cada patrón identificado se anota en el Registro
+(TBR, vela, niveles). De momento no hay ningún patrón definido: la skill muestra la TBR activa y espera.
 
-### El setup de continuación
+La skill **Setup** es la que **valida el trade**: cuando Pattern identifica un patrón, comprueba que va alineado con las reglas
+del Bias. A favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
+**NO GO**. El Registro anota los dos resultados con su motivo. `SETUP_ALLOW_NO_BIAS=true` da GO también sin sesgo. El bot
+**no envía órdenes**: el GO / NO GO solo informa.
 
-En cada TBR cerrada (Asia, London, NY Open) se anotan High, Low y 50 %. En un **largo**:
-
-1. **Toma de liquidez:** una vela supera el High.
-2. **Retest del 50 %:** el precio vuelve al rango y toca el 50 % (mecha o cierre). Si no lo toca, no hay setup.
-3. **Segunda ruptura:** vuelve a superar el High.
-
-**Entrada:** orden límite en el High, el nivel roto en los pasos 1 y 3. **Stop:** bajo el mínimo del paso 2. **Objetivo:**
-nivel -1 de Fibonacci (un rango sobre el High: el doble del rango contado desde el Low). El **corto** es el espejo, con el Low.
-Se invalida si, antes de la segunda ruptura, el precio toma el lado contrario; la orden caduca si el precio llega al objetivo
-sin llenarla o pasa `SETUP_WINDOW_HOURS`. Un setup por TBR y por lado. El Bias solo valida o no la dirección (Bias Execution).
+Se configuran en los bloques **PATTERN** (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_WINDOW_HOURS`) y **SETUP**
+(`SETUP_ALLOW_NO_BIAS`) de `tradingbot.env`. El antiguo setup de continuación (toma de liquidez, retest del 50 %, segunda
+ruptura) se retiró de la skill Setup; su código y sus resultados se conservan solo para el análisis histórico
+(`scripts/setups_continuacion.py`, `docs/analisis_setups`).
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
 **en hora de Nueva York**. MT5 entrega los ticks en la hora del servidor de tu broker; el bot mide el desfase de ese
@@ -172,8 +166,6 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `BIAS_MIN_SCORE` | `3` | Umbral: puntuación mínima (suma de voto x peso) para que haya sesgo (`+3` Bullish, `-3` Bearish). |
 | `BIAS_LATERAL_HOURS` / `BIAS_LATERAL_MIN_EFFICIENCY` | `6` / `0.15` | Filtro de lateralidad: sin sesgo si en las últimas horas el precio avanzó menos de esa fracción de su recorrido (`0`: sin filtro). |
 | `BIAS_RECALC_INDEX_HOURS` / `BIAS_RECALC_HOURS` | `3` / `4` | Cada cuántas horas se recalcula el sesgo solo, alineado con el inicio del día de trading: índices USA / resto. `0`: desactivado. |
-| `BIAS_EXEC_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO a los setups. |
-| `BIAS_EXEC_PREMIUM_DISCOUNT` | `true` | Las reversiones solo compran bajo la apertura del día y venden sobre ella. |
 | `BIAS_<REGLA>_WEIGHT` | `2` ruptura / `1` apertura | Peso de cada regla en la puntuación. |
 | `BIAS_REQUIRE_ALL` | `false` | `true`: solo hay sesgo si todas las reglas activas votan lo mismo. |
 | `BIAS_<REGLA>_<PARÁMETRO>` | — | Parámetros de cada regla, p. ej. `BIAS_ABOVE_BELOW_OPEN_TOLERANCE_PCT=0.1`. |
@@ -195,11 +187,12 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre centrado. |
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
-| **SETUP** — la estrategia (tomas de liquidez de las zonas TBR) | | |
-| `SETUP_WINDOW_HOURS` | `24` | Horas, desde que acaba la TBR, para completar los tres pasos y llenar la orden límite. |
-| `SETUP_TP_RANGES` | `1` | Objetivo, en rangos de la TBR sobre el High (bajo el Low en cortos): 1 = nivel -1 de Fibonacci. |
-| `SETUP_ZONES` | vacío | Claves de las TBR que se vigilan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
-| `SETUP_TYPES` | `continuation` | Tipos de setup (de momento solo continuación). |
+| **PATTERN** — patrones dentro de la TBR activa | | |
+| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento ninguno). |
+| `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
+| `PATTERN_WINDOW_HOURS` | `24` | Horas, desde que cierra la TBR activa, durante las que se buscan patrones. |
+| **SETUP** — validación del trade con el sesgo | | |
+| `SETUP_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
@@ -376,19 +369,19 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
-| `setup` | 4 | La estrategia: continuación sobre cada TBR (toma de liquidez, retest del 50 %, segunda ruptura; entrada límite, stop y objetivo -1) (`candles.loaded` + `tbr.updated` -> `setup.updated`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
-| `pattern` | aux1 | Patrones dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %), validados con el sesgo: a favor GO, en contra o sin sesgo NO GO; cada patrón identificado se anota en el Registro (`candles.loaded` + `tbr.updated` + `bias.updated` -> `pattern.updated` / `pattern.detected`). Lee el bloque PATTERN. |
+| `setup` | 4 | Valida el trade: contrasta con el sesgo cada patrón que identifica Pattern (a favor GO; en contra, sin sesgo o lateral NO GO) (`pattern.detected` + `bias.updated` -> `setup.decision`). Lee el bloque SETUP. Solo informa: no envía órdenes. |
+| `pattern` | aux1 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %); avisa de cada uno que identifica (`candles.loaded` + `tbr.updated` -> `pattern.updated` / `pattern.detected`). Lee el bloque PATTERN. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 
 El anillo está completo; Pattern ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
-Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + setup + cortex -> bias.updated -> cortex`;
-`tbr -> tbr.updated -> setup -> setup.updated` (los setups nuevos se anotan en el Registro).
+Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + pattern + cortex -> bias.updated -> cortex`;
+`tbr -> tbr.updated -> pattern -> pattern.detected -> setup -> setup.decision` (con `bias.updated` hacia setup; patrones y GO / NO GO se anotan en el Registro).
 Quotes publica `clock.offset` cuando cambia el desfase del servidor, y `tbr` y `levels` recolocan lo que depende de la hora de NY.
 **Registro** (panel inferior): anota los eventos relevantes de todas las skills, con la hora del PC: carga y recarga de velas,
 cada recálculo del Bias (con el motivo: carga, recálculo programado o botón), cambios de TBR y de niveles del día, desfase del
-servidor, setups detectados y el **GO / NO GO** de Bias Execution con su motivo (p. ej. «Short contra el sesgo Bullish»), en
+servidor, patrones identificados y el **GO / NO GO** de Setup con su motivo (p. ej. «Short contra el sesgo Bullish»), en
 verde o rojo. Las trazas largas llevan un enlace **+ detalle** que abre la información completa (votos y pesos de las reglas,
 controles del GO / NO GO, niveles y zonas TBR...). Una traza que no cambia no se repite.
 
@@ -432,8 +425,8 @@ tradingbot/
     cortex/          coordinador y filtro de operativa: skill.py
     tbr/             zonas horarias TBR: skill.py, zones.py
     levels/          TDO, Midnight, PDH / PDL y separadores de día: skill.py, daylevels.py
-    setup/           la estrategia (tomas de liquidez de las zonas TBR): skill.py, setups.py
-    pattern/         patrones dentro de la TBR activa, validados con el sesgo: skill.py, patterns.py
+    setup/           valida el trade con el sesgo (GO / NO GO): skill.py, validation.py
+    pattern/         patrones de entrada dentro de la TBR activa: skill.py, patterns.py
     _plantilla/      carpeta a copiar para crear una skill nueva
   ui/                ventana, panel de hexágonos, gráfico de velas, tarjetas, tema
 tradingbot.env       configuración de arranque y de cada skill (APP, FEED, QUOTES, BIAS, TBR, LEVELS, SETUP, UI)
@@ -445,7 +438,7 @@ tests/               pruebas (uv run pytest)
 ## Análisis histórico de los setups
 
 `scripts/analisis_setups.py` lee las velas M15 de MT5 (solo lectura) y genera `analisis/analisis_setups.xlsx` con todas las
-operaciones de la continuación (la de la skill Setup) y de una reversión propuesta, con win rate, R medio, profit factor,
+operaciones de la continuación (la que tuvo la skill Setup, ahora archivada en `scripts/setups_continuacion.py`) y de una reversión propuesta, con win rate, R medio, profit factor,
 máximo drawdown, resultados por TBR, mercado, sesgo, hora y rango, el embudo (tomas, retests, continuaciones y reversiones),
 los setups que no entraron y una tabla de sensibilidad de stop y objetivo. Sirve para refinar la estrategia con datos:
 

@@ -15,7 +15,7 @@ Para definir un patrón nuevo (todos los patrones viven en este módulo o en otr
             return [PatternHit(self.key, self.title, "long", x=i, price=ctx.tbr.mid, detail="qué se vio")]
 
 La skill llama a `detect` con cada carga de velas y de TBR; un patrón solo debe devolver lo que ve AHORA (la skill se
-encarga de no repetir avisos). Después, la skill valida cada patrón con el sesgo: Bullish solo permite Long, Bearish solo Short.
+encarga de no repetir avisos). Cada patrón identificado pasa a la skill Setup, que lo valida con el sesgo (GO / NO GO).
 """
 from __future__ import annotations
 
@@ -97,16 +97,6 @@ class PatternHit:
     levels: dict[str, float] = field(default_factory=dict)   # otros precios del patrón (stop, objetivo...) para mostrarlos
 
 
-@dataclass(frozen=True)
-class PatternDecision:
-    allowed: bool
-    reason: str
-
-    @property
-    def verdict(self) -> str:
-        return "GO" if self.allowed else "NO GO"
-
-
 class Pattern(ABC):
     key: ClassVar[str] = ""
     title: ClassVar[str] = ""
@@ -114,24 +104,6 @@ class Pattern(ABC):
     @abstractmethod
     def detect(self, ctx: PatternContext) -> list[PatternHit]:
         ...
-
-
-def validate(hit: PatternHit, bias_result, allow_no_bias: bool = False) -> PatternDecision:
-    """Valida un patrón con el sesgo: Bullish solo permite Long, Bearish solo Short; No Bias, solo si allow_no_bias."""
-    from ..bias.models import Bias
-    if bias_result is None:
-        return PatternDecision(False, "el sesgo del día aún no está calculado")
-    side = hit.direction.capitalize()
-    bias = bias_result.bias
-    if bias is Bias.NO_BIAS:
-        if allow_no_bias:
-            return PatternDecision(True, f"sin sesgo ({bias_result.summary}); se permite operar sin sesgo")
-        why = "mercado lateral" if getattr(bias_result, "lateral", False) else "sin sesgo claro"
-        return PatternDecision(False, f"{why}: {bias_result.summary}")
-    favour = (bias is Bias.BULLISH) == (hit.direction == "long")
-    if favour:
-        return PatternDecision(True, f"{side} a favor del sesgo {bias.value} (puntuación {bias_result.score:+g})")
-    return PatternDecision(False, f"{side} contra el sesgo {bias.value} (puntuación {bias_result.score:+g})")
 
 
 def active_tbr(sessions, zones: list[str] | None = None) -> ActiveTbr | None:

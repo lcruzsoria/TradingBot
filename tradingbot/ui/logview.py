@@ -1,6 +1,6 @@
 """Registro de la ventana principal: una línea por evento relevante de las skills.
 
-Cuando el evento tiene más información de la que cabe en una línea (votos de las reglas, controles del Bias Execution,
+Cuando el evento tiene más información de la que cabe en una línea (votos de las reglas, votos de cada regla del histórico,
 datos de un setup...), la línea lleva un enlace «+ detalle» que la abre en una ventana aparte.
 """
 from __future__ import annotations

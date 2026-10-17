@@ -1,4 +1,4 @@
-"""Skill Pattern: TBR activa, registro de patrones y validación con el sesgo (GO / NO GO)."""
+"""Skill Pattern: TBR activa y registro de patrones de entrada (la validación con el sesgo la hace Setup)."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -11,9 +11,8 @@ import pandas as pd
 import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.skills.bias.models import Bias, BiasResult
 from tradingbot.skills.pattern.patterns import (PATTERN_REGISTRY, Pattern, PatternContext, PatternHit, active_tbr,
-                                                register_pattern, validate)
+                                                register_pattern)
 from tradingbot.skills.tbr.zones import Session, Zone
 
 ASIA = Zone("ASIA", "Asia", 1200, 0, "#FFD60A")
@@ -23,10 +22,6 @@ NY = Zone("NY_AM", "NY Open", 600, 720, "#00C853")
 
 def session(zone, day, x1, high=105.0, low=95.0, complete=True):
     return Session(zone, day, x1 - 10, x1, complete, high, low)
-
-
-def bias(kind, score=3.0):
-    return BiasResult(kind, None, (), {}, "resumen", score, 3.0)
 
 
 class RompeElHigh(Pattern):
@@ -69,20 +64,7 @@ def test_la_tbr_activa_es_la_ultima_cerrada():
     assert active_tbr([]) is None
 
 
-def test_el_sesgo_valida_el_patron():
-    long_hit = PatternHit("p", "P", "long", 10, 100.0)
-    short_hit = PatternHit("p", "P", "short", 10, 100.0)
-    assert validate(long_hit, bias(Bias.BULLISH)).allowed and not validate(short_hit, bias(Bias.BULLISH)).allowed
-    assert validate(short_hit, bias(Bias.BEARISH, -3.0)).allowed and not validate(long_hit, bias(Bias.BEARISH, -3.0)).allowed
-    sin = validate(long_hit, bias(Bias.NO_BIAS, 0.0))
-    assert not sin.allowed and "sin sesgo" in sin.reason and sin.verdict == "NO GO"
-    assert validate(long_hit, bias(Bias.NO_BIAS, 0.0), allow_no_bias=True).allowed
-    lateral = BiasResult(Bias.NO_BIAS, None, (), {}, "Mercado lateral", 3.0, 3.0, True, 0.05)
-    assert "lateral" in validate(long_hit, lateral).reason
-    assert not validate(long_hit, None).allowed                                          # sesgo aún sin calcular
-
-
-def run_skill(env_text="", bias_result=None, publish_bias=True):
+def run_skill(env_text=""):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus, found, updated = EventBus(), [], []
@@ -94,8 +76,6 @@ def run_skill(env_text="", bias_result=None, publish_bias=True):
     close = np.array([100.0] * 12 + [101, 106, 107] + [100.0] * 15)                       # cierra sobre el High en la vela 13
     df = pd.DataFrame({"ts": np.arange(n) * 900, "open": close, "high": close + 1, "low": close - 1, "close": close})
     sessions = [session(NY, date(2026, 10, 6), 9.5)]
-    if publish_bias and bias_result is not None:
-        bus.publish("bias.updated", {"result": bias_result, "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
     bus.publish("tbr.updated", {"symbol": "EURUSD", "timeframe": "15m", "sessions": sessions, "available": True}, source="tbr")
     deadline = time.time() + 3
@@ -105,45 +85,35 @@ def run_skill(env_text="", bias_result=None, publish_bias=True):
     return manager, bus, found, updated, df, sessions
 
 
-def test_un_patron_a_favor_del_sesgo_es_go_y_en_contra_es_no_go(registry):
-    manager, _bus, found, updated, *_ = run_skill("", bias(Bias.BULLISH))
+def test_la_skill_avisa_del_patron_identificado_en_la_tbr_activa(registry):
+    manager, _bus, found, updated, *_ = run_skill()
     manager.stop()
     assert updated[-1].payload["tbr"].zone == "NY Open" and len(found) == 1
     p = found[0].payload
     assert p["hit"].key == "rompe_high" and p["hit"].direction == "long" and p["hit"].x == 13
-    assert p["decision"].allowed and "a favor del sesgo Bullish" in p["decision"].reason
-    manager, _bus, found, *_ = run_skill("", bias(Bias.BEARISH, -3.0))
-    manager.stop()
-    assert len(found) == 1 and not found[0].payload["decision"].allowed                   # se muestra igualmente, como NO GO
-    assert "contra el sesgo Bearish" in found[0].payload["decision"].reason
+    assert p["tbr"].zone == "NY Open" and "decision" not in p                              # la decisión la toma Setup
+    assert manager.skills["pattern"].caption == "1 patrón(es) en NY Open"
 
 
-def test_no_repite_avisos_y_espera_al_sesgo(registry):
-    manager, bus, found, updated, df, sessions = run_skill("", bias(Bias.BULLISH))
+def test_no_repite_avisos(registry):
+    manager, bus, found, updated, df, sessions = run_skill()
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")   # recarga de las mismas velas
     bus.publish("tbr.updated", {"symbol": "EURUSD", "timeframe": "15m", "sessions": sessions, "available": True}, source="tbr")
     time.sleep(0.3)
     manager.stop()
     assert len(found) == 1                                                                 # el mismo patrón no se avisa dos veces
-    manager, _bus, found, updated, *_ = run_skill("", None)                                # sin sesgo calculado: no se avisa aún
-    manager.stop()
-    assert found == [] and len(updated[-1].payload["hits"]) == 1                           # pero sí se ve en pattern.updated
-    assert not updated[-1].payload["decisions"][0].allowed
 
 
 def test_ajustes_de_pattern(registry):
-    manager, *_ = run_skill("PATTERN_TYPES=\n", bias(Bias.BULLISH))
+    manager, *_ = run_skill("PATTERN_TYPES=\n")
     manager.stop()
     for text, key in (("PATTERN_WINDOW_HOURS=0\n", "PATTERN_WINDOW_HOURS"), ("PATTERN_TYPES=no_existe\n", "no_existe")):
-        manager, _bus, found, *_ = run_skill(text, bias(Bias.BULLISH))
+        manager, _bus, found, *_ = run_skill(text)
         manager.stop()
         assert manager.skills["pattern"].state.value == "error" and key in manager.skills["pattern"].note and not found
-    manager, _bus, found, *_ = run_skill("PATTERN_ZONES=ASIA\n", bias(Bias.BULLISH))     # la TBR activa es NY Open: no es de Asia
+    manager, _bus, found, *_ = run_skill("PATTERN_ZONES=ASIA\n")                         # la TBR activa es NY Open: no es de Asia
     manager.stop()
     assert found == []
-    manager, _bus, found, *_ = run_skill("PATTERN_ALLOW_NO_BIAS=true\n", bias(Bias.NO_BIAS, 0.0))
-    manager.stop()
-    assert len(found) == 1 and found[0].payload["decision"].allowed
 
 
 def test_sin_patrones_definidos_la_skill_lo_dice():
@@ -164,7 +134,7 @@ def test_sin_patrones_definidos_la_skill_lo_dice():
     assert caption == "sin patrones definidos"
 
 
-def test_el_registro_anota_la_tbr_activa_y_cada_patron(tmp_path, monkeypatch):
+def test_el_registro_anota_la_tbr_activa_y_el_patron_identificado(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
     from tradingbot import settings
     from tradingbot.core import EventBus, Services, SkillManager
@@ -175,14 +145,9 @@ def test_el_registro_anota_la_tbr_activa_y_cada_patron(tmp_path, monkeypatch):
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
     win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
     tbr = active_tbr([session(NY, date(2026, 10, 6), 9.5)])
-    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hits": [], "decisions": [], "errors": []})
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hits": [], "errors": []})
     hit = PatternHit("rompe_high", "Cierre sobre el High", "long", 13, 105.0, "detalle", {"stop": 95.0})
-    from tradingbot.skills.pattern.patterns import PatternDecision
-    win._on_pattern_detected({"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hit": hit, "bias": Bias.BULLISH,
-                              "decision": PatternDecision(True, "Long a favor del sesgo Bullish")})
-    win._on_pattern_detected({"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hit": hit, "bias": Bias.BEARISH,
-                              "decision": PatternDecision(False, "Long contra el sesgo Bearish")})
+    win._on_pattern_detected({"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hit": hit})
     text = win.log_view.toPlainText()
     assert "pattern: TBR activa NY Open" in text and "50 %" in text
-    assert "Cierre sobre el High Long en NY Open" in text and "GO: Long a favor del sesgo Bullish" in text
-    assert "NO GO: Long contra el sesgo Bearish" in text                                   # se muestra también el denegado
+    assert "pattern: Cierre sobre el High Long identificado en NY Open" in text
