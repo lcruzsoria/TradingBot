@@ -19,7 +19,7 @@ Low y su 50 %. Cada skill tiene un papel:
 - **Pattern** se conecta a TBR, toma la TBR activa y busca en ella los **patrones de entrada** (`@register_pattern`), hasta
   que empieza la TBR siguiente: Asia hasta London, London hasta NY Open y NY Open hasta NY PM (que solo marca el límite).
   Cada patrón identificado se anota en el Registro, igual que los que se invalidan, se anulan o vencen, con su motivo. Tras
-  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay un patrón (ver abajo).
+  NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay dos patrones (ver abajo).
 - **Cortex** (el coordinador) reúne el activo, la temporalidad, el sesgo, la TBR y el patrón. Contrasta el patrón con las reglas
   del Bias: a favor del sesgo (Bullish solo Long, Bearish solo Short) es **GO**; en contra, sin sesgo o con el mercado lateral,
   **NO GO**. El Registro anota los dos resultados con su motivo. Con GO, Cortex le pasa a Setup la orden completa (activo,
@@ -51,7 +51,27 @@ Ejemplo bajista; el alcista es el espejo exacto, con el High. Se evalúa siempre
    patrón se **anula**. Además todo debe ocurrir **antes de que empiece la TBR siguiente**: si el precio no retrocede o no dispara a
    tiempo, el patrón **vence** y el Registro lo indica. Sin retroceso no hay disparo, aunque haya velas bajistas sin mecha.
 
-Todavía no define entrada, stop ni objetivo (se concretarán después): la orden que Cortex le pasa a Setup lleva el precio de
+#### Patrón 2: continuación 50 % (`continuacion_50`)
+
+Como el patrón 1 (mismas velas, mecha máxima, 10 velas y plazo hasta la TBR siguiente), pero la TBR se activa al **tomar el 50 %
+sin haber tomado antes un extremo**. Ejemplo bajista; el alcista es el espejo exacto.
+
+1. **Activación:** una vela toma el 50 % **de abajo hacia arriba** (con mecha o con cuerpo): la dirección es **bajista**. De arriba
+   hacia abajo sería alcista. Esa vela cuenta como la vela 1 y **nunca** es la de disparo. Si esa misma vela toma también el High
+   (el extremo contrario), el patrón se **invalida**.
+2. **Límite:** el precio **no puede tocar el High** (el extremo contrario) antes del disparo; si lo toca, el patrón se invalida. Si el
+   precio sigue subiendo sin revertir, no vale.
+3. **Vela de disparo:** desde la vela siguiente a la de activación, la primera vela bajista sin mecha superior (o con una de hasta
+   `PATTERN_CONTINUATION50_MAX_WICK_PCT` %) que esté **por debajo del 50 %**: su máximo bajo el nivel. Se identifica al cierre y
+   puede formarse fuera de la TBR.
+4. **Plazo:** como mucho la vela 10 contando la de activación; si no, se **anula**. Si no ocurre antes de que empiece la TBR
+   siguiente, **vence**.
+
+**Un patrón por TBR:** entre los patrones 1 y 2 solo se activa el que tenga el primer hecho (toma de un extremo: patrón 1; toma del
+50 % antes que un extremo: patrón 2). El otro se descarta sin avisar en el Registro. Si una vela toma el 50 % y el extremo de donde
+venía el precio, vale como toma de un extremo.
+
+Todavía no definen entrada, stop ni objetivo (se concretarán después): la orden que Cortex le pasa a Setup lleva el precio de
 cierre de la vela de disparo como referencia.
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick
@@ -214,12 +234,13 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
 | `LEVELS_MAX_TF_MINUTES` | `720` | Timeframe máximo (en minutos) con el que se dibujan (hasta H12). |
 | **PATTERN** — patrones dentro de la TBR activa | | |
-| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (de momento `continuacion_clasica`). |
+| `PATTERN_TYPES` | vacío | Claves de los patrones que se buscan. Vacío: todos los definidos (`continuacion_clasica` y `continuacion_50`). |
 | `PATTERN_ZONES` | vacío | Claves de las TBR en las que se buscan (p. ej. `LONDON, NY_AM`). Vacío: todas. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | `PATTERN_CONTINUATION_TF` | `5m` | Timeframe del patrón 1 (con el gráfico en ese timeframe o en uno menor que lo divida). |
 | `PATTERN_CONTINUATION_MAX_WICK_PCT` | `0` | Mecha superior máxima de la vela de disparo, en % de la vela (0 a 5). |
 | `PATTERN_CONTINUATION_MAX_CANDLES` | `10` | Velas máximas desde la reversión (incluida) hasta la vela de disparo; si no, se anula. |
+| `PATTERN_CONTINUATION50_TF` / `_MAX_WICK_PCT` / `_MAX_CANDLES` | `5m` / `0` / `10` | Los mismos tres ajustes para el patrón 2 (velas desde la toma del 50 %, incluida). |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
 | **SETUP** — ejecutor | | |

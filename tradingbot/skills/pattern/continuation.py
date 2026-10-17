@@ -18,6 +18,7 @@ Trabaja siempre con velas de `PATTERN_CONTINUATION_TF` (M5 al inicio), sea cual 
 from __future__ import annotations
 
 from ...timeframes import parse_timeframe
+from .activation import first_event
 from .patterns import ANNULLED, DETECTED, EXPIRED, INVALIDATED, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "5m"
@@ -33,20 +34,26 @@ class ClassicContinuation(Pattern):
 
     def __init__(self, settings=None) -> None:
         super().__init__(settings)
-        get = (lambda key, default: default) if settings is None else settings.get
-        self.tf = parse_timeframe(str(get("CONTINUATION_TF", DEFAULT_TF)))
-        self.max_wick_pct = float(str(get("CONTINUATION_MAX_WICK_PCT", DEFAULT_MAX_WICK_PCT)).replace(",", "."))
-        self.max_candles = int(get("CONTINUATION_MAX_CANDLES", DEFAULT_MAX_CANDLES))
-        if not 0 <= self.max_wick_pct <= MAX_WICK_PCT_LIMIT:
-            raise ValueError(f"PATTERN_CONTINUATION_MAX_WICK_PCT={self.max_wick_pct:g} debe estar entre 0 y {MAX_WICK_PCT_LIMIT:g}.")
-        if self.max_candles < 1:
-            raise ValueError(f"PATTERN_CONTINUATION_MAX_CANDLES={self.max_candles} debe ser 1 o más.")
+        self.tf, self.max_wick_pct, self.max_candles = read_options(settings, "CONTINUATION")
 
     def timeframe(self) -> str:
         return self.tf
 
     def detect(self, ctx: PatternContext) -> list[PatternHit]:
         return scan(ctx, self.max_wick_pct, self.max_candles)
+
+
+def read_options(settings, prefix: str) -> tuple[str, float, int]:
+    """(timeframe, mecha máxima en %, velas máximas) de un patrón de continuación, con los ajustes PATTERN_<prefix>_*."""
+    get = (lambda key, default: default) if settings is None else settings.get
+    tf = parse_timeframe(str(get(f"{prefix}_TF", DEFAULT_TF)))
+    wick = float(str(get(f"{prefix}_MAX_WICK_PCT", DEFAULT_MAX_WICK_PCT)).replace(",", "."))
+    candles = int(get(f"{prefix}_MAX_CANDLES", DEFAULT_MAX_CANDLES))
+    if not 0 <= wick <= MAX_WICK_PCT_LIMIT:
+        raise ValueError(f"PATTERN_{prefix}_MAX_WICK_PCT={wick:g} debe estar entre 0 y {MAX_WICK_PCT_LIMIT:g}.")
+    if candles < 1:
+        raise ValueError(f"PATTERN_{prefix}_MAX_CANDLES={candles} debe ser 1 o más.")
+    return tf, wick, candles
 
 
 def scan(ctx: PatternContext, max_wick_pct: float, max_candles: int) -> list[PatternHit]:
@@ -62,17 +69,15 @@ def scan(ctx: PatternContext, max_wick_pct: float, max_candles: int) -> list[Pat
         x = min(max(end, 0), len(ts) - 1)
         return hit(EXPIRED, direction, x, tbr.mid, f"{detail} antes de que empezara {ctx.next_zone} ({ctx.next_hours} NY)")
 
-    # 1) toma de un extremo de la TBR: define el lado
-    sweep = None
-    for i in range(start, end + 1):
-        took_low, took_high = l[i] < tbr.low, h[i] > tbr.high
-        if took_low and took_high:
-            return hit(INVALIDATED, "", i, tbr.mid, "una misma vela tomó el High y el Low de la TBR: sin patrón")
-        if took_low or took_high:
-            sweep = (i, took_low)
-            break
-    if sweep is None:
-        return expired("", "no hubo toma del High ni del Low de la TBR") if ctx.window_closed else []
+    # 1) toma de un extremo de la TBR: define el lado. Si antes se tomó el 50 %, el patrón 2 tiene la TBR (se descarta sin aviso)
+    event = first_event(ctx)
+    if event is None:
+        return expired("", "no hubo toma de un extremo ni del 50 % de la TBR") if ctx.window_closed else []
+    if event.kind == "mid":
+        return []
+    if event.side == "both":
+        return hit(INVALIDATED, "", event.index, tbr.mid, "una misma vela tomó el High y el Low de la TBR: sin patrón")
+    sweep = (event.index, event.side == "low")
     s, short = sweep
     direction = "short" if short else "long"
     side = "Low" if short else "High"

@@ -173,4 +173,4 @@ def window_for(tbr: ActiveTbr, order, ahead: int) -> TbrWindow | None:
                      session_end, _hhmm((last.start + last.minutes) % 1440))
 
 
-from . import continuation  # noqa: E402,F401  (registra los patrones definidos)
+from . import continuation, continuation50  # noqa: E402,F401  (registran los patrones definidos)

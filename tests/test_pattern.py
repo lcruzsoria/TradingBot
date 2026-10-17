@@ -205,7 +205,7 @@ def test_una_vela_que_toma_los_dos_lados_no_da_patron():
 def test_si_acaba_el_plazo_de_la_tbr_el_patron_vence_y_se_dice_por_que():
     assert hit_of([(100, 101, 99, 100)] * 3) == []                                               # sin toma, plazo abierto
     h = hit_of([(100, 101, 99, 100)] * 3, closed=True)[0]
-    assert h.status == EXPIRED and "no hubo toma" in h.detail and "NY-PM" in h.detail
+    assert h.status == EXPIRED and "no hubo toma de un extremo ni del 50 %" in h.detail and "NY-PM" in h.detail
     h = hit_of([SWEEP, REVERSAL, WICKED], closed=True)[0]
     assert h.status == EXPIRED and "reversión en" in h.detail and "sin vela de disparo" in h.detail
     assert hit_of([SWEEP, REVERSAL, TRIGGER], closed=True)[0].status == DETECTED                 # si disparó a tiempo, es válido
