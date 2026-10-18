@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QGraphicsRectItem
 from ..clock import NY_CLOSE_SERVER_AHEAD_HOURS
 from ..skills.bias.rules import fmt_price
 from . import theme
-from .fmt import fecha_hora
+from .fmt import DIAS, fecha_hora
 
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 NO_GO_OPACITY = 0.35       # fibos y posiciones de las entradas que Cortex no opera (NO GO)
@@ -138,16 +138,20 @@ class TimeAxis(ScaleAxis):
             self.picture = None                         # fuerza a redibujar las etiquetas
             self.update()
 
+    def ny_time(self, i: int) -> datetime:
+        return datetime.fromtimestamp(int(self._ts[i]) - self.ny_shift, tz=timezone.utc)
+
+    def cursor_label(self, i: int) -> str:
+        """Fecha y hora de Nueva York de la vela i con el día de la semana ("mar 06 oct 18:00"), para el cursor."""
+        dt = self.ny_time(i)
+        return f"{DIAS[dt.weekday()][:3]} {fecha_hora(dt)}"
+
     def tickStrings(self, values, scale, spacing):
         out = []
         n = len(self._ts)
         for v in values:
             i = int(round(v))
-            if 0 <= i < n:
-                dt = datetime.fromtimestamp(int(self._ts[i]) - self.ny_shift, tz=timezone.utc)
-                out.append(fecha_hora(dt))
-            else:
-                out.append("")
+            out.append(fecha_hora(self.ny_time(i)) if 0 <= i < n else "")
         return out
 
 
@@ -275,6 +279,7 @@ class ChartView(pg.PlotWidget):
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
         vb.sigRangeChanged.connect(lambda *_: (self.separators.prepareGeometryChange(), self.separators.update()))
+        self._init_crosshair()
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
@@ -291,6 +296,7 @@ class ChartView(pg.PlotWidget):
         self.setBackground(theme.CHART_BG)
         self._style_axes()
         self.item.set_colors()
+        self._style_crosshair()
         if self._last_value is not None:
             self.set_last_price(self._last_value)
         if self._levels:
@@ -313,12 +319,107 @@ class ChartView(pg.PlotWidget):
         self.set_sma(None)
         self.set_last_price(float(c[-1]))
         vb.setLimits(xMin=-5, xMax=self._n + 60)
+        self._update_crosshair()
         if keep_view and old_n:
             shift = self._n - old_n
             vb.setXRange(old_x0 + shift, old_x1 + shift, padding=0)
             return
         vb.setXRange(max(0, self._n - (view_bars or self.VIEW_BARS)), self._n + 8, padding=0)
         self.reset_price_scale()
+
+    # -- cursor en cruz (como en TradingView) -------------------------------------------------------
+    def _init_crosshair(self) -> None:
+        """Líneas que siguen al ratón (la vertical, pegada a la vela), su fecha en el eje de tiempo, su precio en el de
+        precio y, arriba a la izquierda, los datos de la vela marcada (sin ratón: la última)."""
+        pi = self.getPlotItem()
+        vb = pi.getViewBox()
+        self._mouse: QPointF | None = None             # posición del ratón en la escena (None: fuera del gráfico)
+        self.cursor_index: int | None = None           # vela bajo el cursor
+        self._cross_v = pg.InfiniteLine(angle=90, movable=False)
+        self._cross_h = pg.InfiniteLine(angle=0, movable=False)
+        for line in (self._cross_v, self._cross_h):
+            line.setZValue(20)
+            line.hide()
+            pi.addItem(line, ignoreBounds=True)
+        self._cross_time = pg.TextItem(anchor=(0.5, 0))
+        self._cross_time.setParentItem(self.time_axis)  # sobre el eje, en píxeles
+        self._cross_price = pg.TextItem(anchor=(0, 0.5))
+        self._cross_price.setParentItem(self.price_axis)
+        for tag in (self._cross_time, self._cross_price):
+            tag.setZValue(20)
+            tag.hide()
+        self.legend = pg.TextItem(anchor=(0, 0))
+        self.legend.setParentItem(vb)                   # fija en la esquina, no se mueve con las velas
+        self.legend.setPos(6, 4)
+        self.legend.setZValue(30)
+        self._style_crosshair()
+        self.scene().sigMouseMoved.connect(self._mouse_moved)
+        vb.sigRangeChanged.connect(lambda *_: self._update_crosshair())
+
+    def _style_crosshair(self) -> None:
+        pen = pg.mkPen(theme.MUTED, width=1, style=Qt.PenStyle.DashLine)
+        self._cross_v.setPen(pen)
+        self._cross_h.setPen(pen)
+        for tag in (self._cross_time, self._cross_price):
+            tag.setColor(theme.BG)
+            tag.fill = pg.mkBrush(theme.TEXT)
+            tag.update()
+        self._update_crosshair()
+
+    def _mouse_moved(self, pos) -> None:
+        vb = self.getPlotItem().getViewBox()
+        self._mouse = QPointF(pos) if vb.sceneBoundingRect().contains(pos) else None
+        self._update_crosshair()
+
+    def leaveEvent(self, event) -> None:
+        self._mouse = None
+        self._update_crosshair()
+        super().leaveEvent(event)
+
+    def _update_crosshair(self) -> None:
+        vb = self.getPlotItem().getViewBox()
+        parts = (self._cross_v, self._cross_h, self._cross_time, self._cross_price)
+        if self._mouse is None or not self._n:
+            self.cursor_index = None
+            for part in parts:
+                part.hide()
+            self._update_legend(self._n - 1)
+            return
+        pt = vb.mapSceneToView(self._mouse)
+        i = min(max(int(round(pt.x())), 0), self._n - 1)
+        price = pt.y()
+        self.cursor_index = i
+        self._cross_v.setPos(i)
+        self._cross_h.setPos(price)
+        scene = vb.mapViewToScene(QPointF(i, price))
+        self._cross_time.setText(self.time_axis.cursor_label(i))
+        self._cross_time.setPos(self.time_axis.mapFromScene(scene).x(), 0)
+        self._cross_price.setText(fmt_price(price))
+        self._cross_price.setPos(0, self.price_axis.mapFromScene(scene).y())
+        for part in parts:
+            part.show()
+        self._update_legend(i)
+
+    def _update_legend(self, i: int) -> None:
+        if not 0 <= i < self._n:
+            self.legend.setHtml("")
+            return
+        it = self.item
+        o, h, l, c = (float(a[i]) for a in (it._o, it._h, it._l, it._c))
+        prev = float(it._c[i - 1]) if i else o
+        change = c - prev
+        pct = change / prev * 100 if prev else 0.0
+        decimals = len(fmt_price(c).partition(".")[2])
+        color = theme.BULL if c >= o else theme.BEAR
+        muted = theme.CHART_TEXT or theme.MUTED
+
+        def value(name: str, v: float) -> str:
+            return f'<span style="color:{muted}">{name}</span>&nbsp;<span style="color:{color}">{fmt_price(v)}</span>'
+
+        self.legend.setHtml(
+            f'<span style="color:{muted}">{self.time_axis.cursor_label(i)}</span>&nbsp;&nbsp; '
+            + "&nbsp; ".join(value(n, v) for n, v in (("O", o), ("H", h), ("L", l), ("C", c)))
+            + f'&nbsp;&nbsp; <span style="color:{color}">{change:+,.{decimals}f} ({pct:+.2f}%)</span>')
 
     # -- escala de los ejes (arrastrando sobre ellos) -------------------------------------------------
     @property

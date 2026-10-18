@@ -91,3 +91,20 @@ def test_la_ventana_pasa_el_desfase_medido_al_eje(qapp, tmp_path, monkeypatch):
     win._on_quotes({"quotes": {}, "account": None, "server_offset": summer, "offset_source": "detectado"})
     assert win.chart.time_axis.ny_shift == win.ny_shift and not win.ny_estimated
     assert "estimada" not in win.chart_stats.text()
+
+
+def test_el_cursor_se_pega_a_la_vela_y_muestra_sus_datos(qapp):
+    from PySide6.QtCore import QEvent, QPointF
+    from tradingbot.ui.chart import ChartView
+    chart = ChartView()
+    chart.resize(800, 500)
+    chart.set_candles(candles())
+    assert chart.cursor_index is None and chart.time_axis.cursor_label(499) in chart.legend.textItem.toPlainText()   # sin ratón: la última vela
+    vb = chart.getPlotItem().getViewBox()
+    chart._mouse_moved(vb.mapViewToScene(QPointF(300.3, 1.10)))
+    assert chart.cursor_index == 300 and chart._cross_v.value() == 300
+    assert chart._cross_time.isVisible() and chart._cross_time.textItem.toPlainText() == chart.time_axis.cursor_label(300)
+    text = chart.legend.textItem.toPlainText()
+    assert chart.time_axis.cursor_label(300) in text and "O" in text and "C" in text
+    chart.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert chart.cursor_index is None and not chart._cross_v.isVisible()
