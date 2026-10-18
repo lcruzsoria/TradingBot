@@ -30,6 +30,10 @@ class CortexSkill(Skill):
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
+        self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
+        if self.scope not in ("global", "mercado"):
+            self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
+            raise ValueError(self.error)
 
     def handle(self, event: Event) -> None:
         if event.topic == "candles.loaded":
@@ -59,9 +63,15 @@ class CortexSkill(Skill):
             self.publish("trade.verdict", {"request_id": event.payload.get("request_id"),
                                            "direction": direction, "allowed": allowed, "reason": reason})
 
-    def _busy_reason(self, symbol: str) -> str:
-        order = self._open[symbol]
-        return f"ya hay una posición abierta en {symbol} ({order.pattern}): hasta que no cierre (stop, objetivo o tiempo) no se abre otra"
+    def _busy(self, symbol: str):
+        """La orden abierta que impide abrir otra en `symbol` (en toda la cuenta o solo en ese mercado), o None."""
+        if self.scope == "mercado":
+            return self._open.get(symbol)
+        return next(iter(self._open.values()), None)
+
+    def _busy_reason(self, order) -> str:
+        return (f"ya hay una posición abierta en {order.symbol} ({order.pattern}): hasta que no cierre (stop, objetivo o tiempo) "
+                f"no se abre otra")
 
     def _send(self, order) -> None:
         """Le pasa la orden a Setup y, si se puede seguir, marca el mercado como ocupado hasta que cierre."""
@@ -73,8 +83,9 @@ class CortexSkill(Skill):
         """Señal de calendario: GO sin consultar el sesgo (el backtest no lo usa), salvo CORTEX_CALENDAR_USE_BIAS=true."""
         direction = payload["direction"]
         result = self.filter.result
-        if payload["symbol"] in self._open:
-            allowed, reason = False, self._busy_reason(payload["symbol"])
+        busy = self._busy(payload["symbol"])
+        if busy is not None:
+            allowed, reason = False, self._busy_reason(busy)
         elif self.calendar_use_bias:
             allowed, reason = self.filter.check(Direction(direction.capitalize()))
         else:
@@ -94,8 +105,9 @@ class CortexSkill(Skill):
                 waiting.append(p)
                 continue
             result = bias["result"]
-            if p["symbol"] in self._open:                # una sola posición abierta por mercado
-                decision = Decision(False, self._busy_reason(p["symbol"]))
+            busy = self._busy(p["symbol"])
+            if busy is not None:                         # una sola posición abierta a la vez
+                decision = Decision(False, self._busy_reason(busy))
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],

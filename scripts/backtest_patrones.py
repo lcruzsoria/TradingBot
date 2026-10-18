@@ -44,15 +44,12 @@ SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "US2000.r")
 PATTERNS = {"Continuación": continuacion, "Reversión": reversion}
 ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
 MAIN_FILTERS = ["sin filtro de sesgo", "a favor del sesgo (Cortex)", "una posición a la vez (todas)", "una posición a la vez (GO de Cortex)"]
-NEW_UNTIL = {"ASIA": "@05:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot: Asia hasta las 05:00, London hasta el
-OLD_UNTIL = {"NY_AM": "@16:30"}                                                # final de NY Open y NY Open hasta las 18:00
-# BT_PLAZOS: "anterior" (NY Open hasta NY PM, lo demás normal), "solo_asia" / "solo_london" / "solo_ny" (un plazo nuevo sobre el
-# anterior) o, por defecto, los tres plazos nuevos juntos.
-_which = os.environ.get("BT_PLAZOS", "todos")
-UNTIL = dict(NEW_UNTIL) if _which == "todos" else dict(OLD_UNTIL)
-if _which.startswith("solo_"):
-    _zone = {"asia": "ASIA", "london": "LONDON", "ny": "NY_AM"}[_which[5:]]
-    UNTIL[_zone] = NEW_UNTIL[_zone]
+NEW_UNTIL = {"LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot: Asia hasta London (el normal), London hasta el final de
+OLD_UNTIL = {"NY_AM": "@16:30"}                              # NY Open y NY Open hasta las 18:00
+# BT_PLAZOS: "anterior" (NY Open hasta NY PM, lo demás normal) o, por defecto, los plazos del bot.
+UNTIL = dict(OLD_UNTIL) if os.environ.get("BT_PLAZOS") == "anterior" else dict(NEW_UNTIL)
+# BT_ALCANCE: "global" (por defecto, una sola posición abierta en toda la cuenta, como CORTEX_POSITION_SCOPE) o "mercado".
+GLOBAL_SCOPE = os.environ.get("BT_ALCANCE", "global") != "mercado"
 EXTEND = ()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
@@ -200,12 +197,13 @@ def with_all(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None) -> pd.Series:
-    """True en las operaciones que no se habrían abierto porque ya había otra abierta en el mismo mercado (hasta su stop, objetivo
+    """True en las operaciones que no se habrían abierto porque ya había otra abierta (en toda la cuenta o en el mismo mercado, según GLOBAL_SCOPE; hasta su stop, objetivo
     o cierre por tiempo). Solo cuentan como abiertas las de `take` (las que el bot sí abre); la entrada debe ser posterior a la
     vela de cierre de la anterior."""
     flags = pd.Series(False, index=trades.index)
     pool = trades if take is None else trades[take]
-    for _sym, g in pool.sort_values("entrada (NY)").groupby("mercado"):
+    groups = [pool.sort_values("entrada (NY)")] if GLOBAL_SCOPE else [g.sort_values("entrada (NY)") for _s, g in pool.groupby("mercado")]
+    for g in groups:
         free_at = pd.Timestamp.min
         for i, row in g.iterrows():
             if row["entrada (NY)"] <= free_at:
@@ -292,8 +290,8 @@ NOTES = [
               "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
-    ("Una posición a la vez", "Filtros «una posición a la vez»: en cada mercado no se abre otra operación hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
-    ("Plazos", "Cada TBR se busca hasta: Asia 05:00, London 12:00 (final de NY Open) y NY Open 18:00 (variantes con BT_PLAZOS)."),
+    ("Una posición a la vez", "Filtros «una posición a la vez»: no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
+    ("Plazos", "Cada TBR se busca hasta: Asia 02:00 (inicio de London), London 12:00 (final de NY Open) y NY Open 18:00 (variante anterior con BT_PLAZOS=anterior)."),
     ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
     ("Sesgo", "Reglas del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; lateralidad 6 h / 0,15) con velas M15, congelado "
               "al abrir cada bloque de 3 h. «A favor» = lo que dejaría pasar Cortex; «sin sesgo» incluye el mercado lateral."),

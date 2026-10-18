@@ -148,3 +148,26 @@ def test_con_una_posicion_abierta_no_se_abre_otra_hasta_que_cierre():
     wait(orders, 2)
     manager.stop()
     assert len(orders) == 2 and decisions[2].payload["decision"].allowed
+
+
+def _dos_mercados(env_text):
+    manager, bus, decisions, orders, executed = run_skills(env_text)
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    for sym in ("EURUSD", "GBPUSD"):
+        bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": sym, "timeframe": "15m"}, source="bias")
+        hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+        bus.publish("pattern.detected", {"symbol": sym, "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+        time.sleep(0.4)
+    manager.stop()
+    return decisions, orders
+
+
+def test_el_alcance_por_defecto_es_una_sola_posicion_en_toda_la_cuenta():
+    decisions, orders = _dos_mercados("")
+    assert [d.payload["decision"].allowed for d in decisions] == [True, False] and len(orders) == 1
+    assert "ya hay una posición abierta en EURUSD" in decisions[1].payload["decision"].reason          # GBPUSD queda bloqueado
+
+
+def test_con_alcance_mercado_cada_mercado_tiene_su_posicion():
+    decisions, orders = _dos_mercados("CORTEX_POSITION_SCOPE=mercado\n")
+    assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
