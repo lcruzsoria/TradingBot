@@ -977,11 +977,14 @@ class MainWindow(QMainWindow):
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]
         why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
-        lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)}   Salida: {fmt_price(c.exit_price)}",
+        opened = f"{self._ny(o.entry_ts):%d/%m %H:%M}" if o.entry_ts else "-"
+        closed = f"{self._ny(c.exit_ts):%d/%m %H:%M}"
+        lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)} ({opened} NY)   Salida: {fmt_price(c.exit_price)} ({closed} NY)",
                  f"Motivo:   {why}", f"Resultado: {c.r:+.2f} R ({c.pct:+.2f} % del precio, sin spread)",
                  "Modo simulación: no hubo posición real en MT5."]
-        self.log(f"setup: posición simulada cerrada - {o.label}: {c.r:+.2f} R ({c.result})", chr(10).join(lines),
-                 "go" if c.r > 0 else "nogo")
+        verdict = {"objetivo": "GANADA (objetivo)", "stop": "PERDIDA (stop)", "tiempo": "cerrada por tiempo"}[c.result]
+        self.log(f"setup: posición simulada {verdict} - {o.label}: {c.r:+.2f} R, {c.pct:+.2f} % ({opened} -> {closed} NY)",
+                 chr(10).join(lines), "go" if c.r > 0 else "nogo")
 
     def _on_bias_schedule(self, p: dict) -> None:
         start = p["day_start"]

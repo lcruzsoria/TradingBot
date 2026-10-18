@@ -30,6 +30,7 @@ class CortexSkill(Skill):
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
+        self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
         self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
         if self.scope not in ("global", "mercado"):
@@ -40,6 +41,7 @@ class CortexSkill(Skill):
         if event.topic == "candles.loaded":
             self.symbol, self.timeframe = event.payload["symbol"], event.payload["timeframe"]
             if event.payload.get("df") is not None:
+                self._candles[self.symbol] = event.payload["df"]
                 self.publish("setup.candles", {"symbol": self.symbol, "timeframe": self.timeframe, "df": event.payload["df"]})
             self.set_caption(self.symbol)
         elif event.topic == "bias.updated":
@@ -86,6 +88,9 @@ class CortexSkill(Skill):
         if trackable(order):
             self._open[order.symbol] = order
         self.publish("setup.order", {"order": order})
+        df = self._candles.get(order.symbol)
+        if df is not None:                              # si la operación ya terminó con las velas actuales, el resultado sale al momento
+            self.publish("setup.candles", {"symbol": order.symbol, "timeframe": order.timeframe, "df": df})
 
     def _calendar(self, payload: dict) -> None:
         """Señal de calendario: GO sin consultar el sesgo (el backtest no lo usa), salvo CORTEX_CALENDAR_USE_BIAS=true."""

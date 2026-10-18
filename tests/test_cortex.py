@@ -190,3 +190,20 @@ def test_una_misma_sesion_no_puede_dar_dos_trades_aunque_el_primero_ya_cerro():
     manager.stop()
     assert [d.payload["decision"].allowed for d in decisions] == [True, False] and len(orders) == 1
     assert "ya dio un trade" in decisions[1].payload["decision"].reason and "NY Open del 06/10" in decisions[1].payload["decision"].reason
+
+
+def test_si_la_operacion_ya_termino_con_las_velas_actuales_el_resultado_sale_al_momento():
+    import numpy as np
+    import pandas as pd
+    manager, bus, decisions, orders, executed = run_skills()
+    closed = []
+    bus.subscribe("t", "setup.closed", closed.append)
+    ts = 1_000_000 + np.arange(6) * 900
+    df = pd.DataFrame({"ts": ts, "open": 105.0, "high": [105.5, 106, 116, 106, 106, 106], "low": [104.5, 104, 104, 104, 104, 104], "close": 105.0})
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón de prueba", "long", 1, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, int(ts[1]))
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    wait(closed)
+    manager.stop()
+    assert len(closed) == 1 and closed[0].payload["closed"].result == "objetivo" and closed[0].payload["closed"].r == 1.0

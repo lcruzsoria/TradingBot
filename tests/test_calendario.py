@@ -53,7 +53,7 @@ def test_lunes_a_las_0200_da_senal_y_llega_simulada_a_setup():
     o = out["executed"][0].payload["order"]
     assert o.pattern_key == "calendario" and o.tbr_zone == "" and "10:00 NY" in o.close_at
     assert out["executed"][0].payload["sent"] is False         # simulación: no se envía a MT5
-    assert manager.skills["cortex"].caption == "GO Long calendario"
+    assert manager.skills["cortex"].caption in ("GO Long calendario", "NAS100.r: posición cerrada")      # cerrada si las velas ya la resuelven
 
 
 def test_no_da_senal_otro_dia_otro_mercado_u_otra_hora():

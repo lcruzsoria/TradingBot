@@ -42,8 +42,10 @@ class SetupSkill(Skill):
         if trackable(order):
             self.positions.append(order)
         self.set_caption(f"simulada: {order.direction.capitalize()} {order.symbol}")
-        self.publish("setup.executed", {"order": order, "sent": False,
-                                        "note": "Modo simulación: la orden está lista pero no se ha enviado a MT5."})
+        note = "Modo simulación: la orden está lista pero no se ha enviado a MT5."
+        if trackable(order):
+            note += " El resultado se anotará en el Registro cuando la posición cierre (stop, objetivo o 24 h)."
+        self.publish("setup.executed", {"order": order, "sent": False, "note": note})
 
     def _follow(self, payload: dict) -> None:
         """Comprueba stop, objetivo y cierre por tiempo de las posiciones abiertas del mercado cuyas velas llegan."""
