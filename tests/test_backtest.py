@@ -13,8 +13,7 @@ from tradingbot.core import Event, EventBus, Services, SkillManager
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.cortex.order import Order
 from tradingbot.skills.setup.positions import Closed
-from tradingbot.skills.stats.backtest import (BOT_FILTER, DEFAULT_FILE, FILTERS, MAIN_FILTERS, PATTERNS, Backtest, Group, load,
-                                              verdict)
+from tradingbot.skills.stats.backtest import BOT_FILTER, DEFAULT_FILE, Backtest, Group, load, verdict
 import tradingbot.skills  # noqa: F401
 
 ORDER = Order("NAS100", "15m", "long", "Continuación", "continuacion", "London", date(2026, 10, 6), 105.0, 95.0, 100.0, 105.0,
@@ -84,17 +83,23 @@ def test_ventana_backtest_con_el_resumen_real():
     from tradingbot.ui.backtest_dialog import BacktestDialog
     QApplication.instance() or QApplication([])
     bt = load()
-    assert [g.key for g in bt.groups] == ["indices", "forex", "oro", "cripto"]
+    assert [g.key for g in bt.groups] == ["indices", "forex", "oro", "cripto", "calendario"]
     dlg = BacktestDialog(None, bt)
     assert dlg.group_key == "indices" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values
     for g in bt.groups:                                                            # todas las combinaciones se pintan
         dlg.set_group(g.key)
-        for p in PATTERNS:
+        assert list(dlg.pattern_btns) == g.patterns and list(dlg.filter_btns) == list(g.filters)
+        for p in g.patterns:
             dlg.set_pattern(p)
-            for f in MAIN_FILTERS:
+            for f in g.filters:
                 dlg.set_filter(f)
-                assert len(dlg.by_filter.rows) == len(FILTERS)
+                assert len(dlg.by_filter.rows) == len(g.all_filters) and dlg.blocks["n"].value.text() != "-"
+    dlg.set_group("calendario")                                                    # su propio patrón, sin zonas ni embudo
+    assert dlg.pattern == "Calendario" and dlg.by_zone.isHidden() and dlg.funnel.isHidden() and dlg.compare.isHidden()
+    assert [r[0].text() for r in dlg.by_day.rows][0] == "Lunes" and "largos a hora fija" in dlg.subtitle.text()
+    dlg.set_group("indices")
+    assert dlg.pattern == "Ambos" and not dlg.by_zone.isHidden()
     dlg.set_backtest(None, "falta el fichero")
     assert dlg.empty.text() == "falta el fichero" and dlg.scroll.isHidden()
 

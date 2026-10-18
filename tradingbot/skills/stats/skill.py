@@ -11,8 +11,8 @@ class StatsSkill(Skill):
     title = "Stats"
     description = ("Las cifras del bot en un solo sitio. Sesión: anota cada GO / NO GO de Cortex y cada operación simulada que "
                    "Setup abre y cierra (acierto, R, drawdown, rachas...), y lo publica para la ventana Estadísticas. "
-                   "Backtest: carga el histórico de los patrones (2018-2026, índices, forex, oro y cripto) para la ventana "
-                   "Backtest. No opera ni decide nada.")
+                   "Backtest: carga el histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia "
+                   "Calendario para la ventana Backtest. No opera ni decide nada.")
     subscribes = ("cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload")
     publishes = ("stats.session", "stats.backtest")
     slot = "aux3"

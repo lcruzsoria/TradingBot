@@ -13,7 +13,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
-from ..skills.stats.backtest import FILTERS, MAIN_FILTERS, PATTERNS, Backtest, Group, verdict
+from ..skills.stats.backtest import BOT_FILTER, MAIN_FILTERS, PATTERNS, Backtest, Group, verdict
 from . import theme
 from .fmt import miles
 from .stats_dialog import Book, Tile
@@ -70,6 +70,14 @@ def metric_cells(r: dict | None) -> list[tuple[str, str | None]]:
             (_num(r.get("pf")), _pf_tone(r.get("pf"))),
             ("-" if r.get("dd") is None else f"{r['dd']:.0f} R", theme.BEAR if r.get("dd") else None),
             (_num(r.get("t"), 1, sign=True), _t_tone(r.get("t")))]
+
+
+def _unit(v, digits: int, unit: str = "") -> str:
+    return "-" if v is None else f"{v:.{digits}f}{unit}"
+
+
+def _count(v) -> str:
+    return "-" if v is None else miles(int(v))
 
 
 def _short_market(name: str) -> str:
@@ -165,16 +173,21 @@ class BacktestDialog(QDialog):
         outer.addLayout(self._labelled("Mercados", self.group_row))
         sel = QHBoxLayout()
         sel.setSpacing(6)
-        self.pattern_btns = self._chips(sel, PATTERNS, self.set_pattern, self.pattern)
+        self.pattern_row, self.filter_row = QHBoxLayout(), QHBoxLayout()      # sus chips dependen del grupo elegido
+        self.pattern_row.setSpacing(6)
+        self.filter_row.setSpacing(6)
+        self.pattern_btns: dict[str, QPushButton] = {}
+        self.filter_btns: dict[str, QPushButton] = {}
+        self._chip_groups: dict[str, QButtonGroup] = {}
+        sel.addLayout(self.pattern_row)
         sel.addSpacing(14)
         filt_label = QLabel("Filtro")
         filt_label.setObjectName("Tiny")
         sel.addWidget(filt_label)
-        self.filter_btns = self._chips(sel, MAIN_FILTERS, self.set_filter, self.filter, FILTERS)
-        self.filter_btns[MAIN_FILTERS[0]].setToolTip("No va contra el sesgo (GO de Cortex), una sola posición abierta a la vez "
-                                                    "y una TBR, un trade: lo que haría el bot")
+        sel.addLayout(self.filter_row)
         sel.addStretch(1)
         outer.addLayout(self._labelled("Patrón", sel))
+        self._chips_for = ""                                                    # grupo para el que están hechos los chips
 
         # Veredicto y cifras clave
         self.verdict = QLabel()
@@ -291,7 +304,14 @@ class BacktestDialog(QDialog):
         return out
 
     def _chips(self, row: QHBoxLayout, keys, slot, current, names: dict | None = None) -> dict[str, QPushButton]:
+        """Rehace los chips de `row` (uno por clave, exclusivos)."""
+        while row.count():
+            w = row.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
         group = QButtonGroup(self)
+        self._chip_groups[str(id(row))] = group
         btns = {}
         for key in keys:
             btn = QPushButton((names or {}).get(key, key))
@@ -348,12 +368,20 @@ class BacktestDialog(QDialog):
     def set_backtest(self, backtest: Backtest | None, error: str = "") -> None:
         self.backtest, self.error = backtest, error
         self._build_group_chips()
-        if backtest and backtest.groups and backtest.group(self.group_key) is None:
-            self.group_key = backtest.groups[0].key
-        self.refresh()
+        self._chips_for = ""
+        if backtest and backtest.groups:
+            self.set_group(self.group_key if backtest.group(self.group_key) else backtest.groups[0].key)
+        else:
+            self.refresh()
 
     def set_group(self, key: str) -> None:
         self.group_key = key
+        g = self.group
+        if g is not None:                                # cada grupo trae sus patrones y filtros: si no vale, el primero
+            if self.pattern not in g.patterns:
+                self.pattern = g.patterns[0]
+            if self.filter not in g.filters:
+                self.filter = next(iter(g.filters))
         self.refresh()
 
     def set_pattern(self, pattern: str) -> None:
@@ -382,6 +410,18 @@ class BacktestDialog(QDialog):
             return
         for key, btn in self.group_btns.items():
             btn.setChecked(key == self.group_key)
+        if self._chips_for != g.key:
+            self._chips_for = g.key
+            self.pattern_btns = self._chips(self.pattern_row, g.patterns, self.set_pattern, self.pattern)
+            self.filter_btns = self._chips(self.filter_row, g.filters, self.set_filter, self.filter, g.filters)
+            if BOT_FILTER in self.filter_btns:
+                self.filter_btns[BOT_FILTER].setToolTip("No va contra el sesgo (GO de Cortex), una sola posición abierta a "
+                                                        "la vez y una TBR, un trade: lo que haría el bot")
+        self.subtitle.setText(g.description)
+        own = "patrones" in g.raw
+        self.by_hour.base_note = "R medio por operación, hora de Nueva York" + ("" if own else " (sin filtro)")
+        self.by_day.note.setText("día de la entrada, misma hora, stop y RR" if own else "día de la entrada (sin filtro)")
+        self.outcomes.note.setText("con la configuración del bot" if own else "operaciones sin filtro")
         for key, btn in self.pattern_btns.items():
             btn.setChecked(key == self.pattern)
         for key, btn in self.filter_btns.items():
@@ -392,7 +432,7 @@ class BacktestDialog(QDialog):
         self._paint_curve(g.curve(self.pattern, self.filter))
         years = sorted(g.rows("por_anio", self.pattern, self.filter), key=lambda r: r.get("año") or 0)
         self.by_year.set_bars([str(r.get("año")) for r in years], [r.get("total") for r in years])
-        hours = sorted(g.breakdown("por_hora", "hora (NY)", self.pattern), key=lambda r: r.get("hora (NY)") or 0)
+        hours = sorted(g.breakdown("por_hora", "hora (NY)", self.pattern, self.filter), key=lambda r: r.get("hora (NY)") or 0)
         self.by_hour.set_bars([f"{r.get('hora (NY)'):02d}" for r in hours], [r.get("mean") for r in hours])
         self._fill_compare(g)
         self._fill_markets(g)
@@ -400,7 +440,7 @@ class BacktestDialog(QDialog):
         self._fill(self.by_side, g.breakdown("por_direccion", "dirección", self.pattern, self.filter), "dirección",
                    lambda n: _colored(SIDE_NAMES.get(n, n), theme.BULL if n == "long" else theme.BEAR))
         self._fill_filters(g)
-        days = sorted(g.breakdown("por_dia", "día semana", self.pattern),
+        days = sorted(g.breakdown("por_dia", "día semana", self.pattern, self.filter),
                       key=lambda r: DAY_ORDER.index(r["día semana"]) if r.get("día semana") in DAY_ORDER else 9)
         self._fill(self.by_day, days, "día semana", lambda n: n.capitalize())
         self._fill(self.halves, g.rows("mitades", self.pattern, self.filter), "mitad")
@@ -425,18 +465,21 @@ class BacktestDialog(QDialog):
                                    f"border-radius: 4px; padding: 7px 10px; background: {theme.mix(theme.PANEL, color, 0.10)}; }}")
         mean = r.get("mean") or 0
         per_100 = f"{mean * 100:+.1f} R cada 100 operaciones"
-        self.verdict.setText(f"<b style='color:{color}'>{text}</b>  ·  {self.pattern}, {FILTERS[self.filter].lower()}, "
+        self.verdict.setText(f"<b style='color:{color}'>{text}</b>  ·  {self.pattern}, {g.all_filters.get(self.filter, self.filter).lower()}, "
                              f"{g.name.lower()}: {per_100} (t {_num(r.get('t'), 2, sign=True)})")
         wr = r.get("wr")
         b["n"].set_value(miles(int(r["n"])), f"{len(g.markets)} mercado{'s' if len(g.markets) != 1 else ''} · {g.period}")
-        b["wr"].set_value("-" if wr is None else f"{wr:.1f} %", f"equilibrio {BREAKEVEN_2R:.1f} % con 2R",
+        own = "patrones" in g.raw                       # Calendario: cierres por tiempo, no hay un equilibrio fijo
+        b["wr"].set_value("-" if wr is None else f"{wr:.1f} %",
+                          "con R neto positivo" if own else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R",
                           theme.BULL if wr and wr > BREAKEVEN_2R + 1 else None)
         b["mean"].set_value(_r(r.get("mean")), f"t {_num(r.get('t'), 2, sign=True)}", _tone(r.get("mean")))
         b["total"].set_value(f"{r['total']:+.0f} R", "suma de todas", _tone(r.get("total")))
         b["pf"].set_value(_num(r.get("pf")), "ganado / perdido", _pf_tone(r.get("pf")))
         b["dd"].set_value(f"{r['dd']:.0f} R" if r.get("dd") else "0 R", f"racha perdedora {r.get('streak') or '-'}",
                           theme.BEAR if r.get("dd") else None)
-        gross = g.row(self.pattern, None, sheet="sensibilidad", variante="2R sin costes (R bruto)", filtro=self.filter)
+        gross = next((v for v in g.rows("sensibilidad", self.pattern, self.filter) if "sin costes" in v.get("variante", "")),
+                     None)
         outcomes = [o for o in g.table("resultados") if self.pattern in ("Ambos", o.get("patrón"))]
         cost = (sum((o.get("coste medio (R)") or 0) * (o.get("n") or 0) for o in outcomes) /
                 max(1, sum(o.get("n") or 0 for o in outcomes))) if outcomes else None
@@ -529,7 +572,7 @@ class BacktestDialog(QDialog):
 
     def _fill_filters(self, g: Group) -> None:
         rows = []
-        for filt, name in FILTERS.items():
+        for filt, name in g.all_filters.items():
             r = g.row(self.pattern, filt)
             label = f"<b>{name}</b>" if filt == self.filter else name
             rows.append([(label, None if r and r.get("n") else theme.MUTED)] + metric_cells(r))
@@ -573,14 +616,20 @@ class BacktestDialog(QDialog):
                 return f"{miles(int(r.get(k) or 0))} ({100 * (r.get(k) or 0) / n:.0f} %)" if n else "-"
 
             rows.append([(r.get("patrón", ""), None), (share("objetivo"), theme.BULL), (share("stop"), theme.BEAR),
-                         (share("tiempo"), theme.WARN), (f"{r.get('MAE medio (R)') or 0:.2f} R", None),
-                         (f"{r.get('MFE medio (R)') or 0:.2f} R", None),
-                         (f"{r.get('velas medias en la operación') or 0:.0f}", None),
-                         (f"{r.get('riesgo medio %') or 0:.2f} %", None),
-                         (f"{r.get('coste medio (R)') or 0:.3f} R", theme.BEAR)])
+                         (share("tiempo"), theme.WARN), (_unit(r.get("MAE medio (R)"), 2, " R"), None),
+                         (_unit(r.get("MFE medio (R)"), 2, " R"), None),
+                         (_unit(r.get("velas medias en la operación"), 0), None),
+                         (_unit(r.get("riesgo medio %"), 2, " %"), None),
+                         (_unit(r.get("coste medio (R)"), 3, " R"), theme.BEAR)])
         self.outcomes.set_rows(rows)
 
     def _fill_data(self, g: Group) -> None:
-        self.data_book.set_rows([[(_short_market(m.get("mercado", "")), None), (miles(int(m.get("velas M15") or 0)), None),
+        self.data_book.set_rows([[(_short_market(m.get("mercado", "")), None), (_count(m.get("velas M15")), None),
                                   (str(m.get("desde (NY)") or "-"), theme.MUTED), (str(m.get("hasta (NY)") or "-"), theme.MUTED),
-                                  (miles(int(m.get("TBR evaluadas") or 0)), None)] for m in g.markets])
+                                  (_count(m.get("TBR evaluadas")), None)] for m in g.markets])
+        # Libros sin datos en este grupo (p. ej. zonas o embudo en Calendario): fuera
+        for book, sheet in ((self.by_zone, "por_zona"), (self.funnel, "embudo"), (self.improvements, "mejoras"),
+                            (self.by_hour, "por_hora"), (self.by_day, "por_dia"), (self.outcomes, "resultados")):
+            book.setVisible(bool(g.table(sheet)))
+        comp = self.backtest.comparison if self.backtest else {}
+        self.compare.setVisible(any(r.get("grupo") == g.name for r in comp.get("bot") or []))

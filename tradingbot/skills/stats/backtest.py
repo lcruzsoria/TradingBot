@@ -80,6 +80,27 @@ class Group:
         return [(d, r) for d, r in self.raw.get("curvas", {}).get(f"{pattern}|{filt}", [])]
 
     @property
+    def patterns(self) -> list[str]:
+        """Patrones que se eligen arriba (los del backtest de patrones, o los que traiga el grupo, p. ej. Calendario)."""
+        return list(self.raw.get("patrones") or PATTERNS)
+
+    @property
+    def filters(self) -> dict[str, str]:
+        """Filtros que se eligen arriba -> nombre en la ventana."""
+        own = self.raw.get("filtros")
+        return dict(own) if own else {k: FILTERS[k] for k in MAIN_FILTERS}
+
+    @property
+    def all_filters(self) -> dict[str, str]:
+        """Todos los filtros del grupo, para el libro «Por filtro»."""
+        own = self.raw.get("filtros")
+        return dict(own) if own else dict(FILTERS)
+
+    @property
+    def description(self) -> str:
+        return self.raw.get("descripcion") or "patrones Continuación y Reversión en M15 · objetivo 2R · spread real"
+
+    @property
     def markets(self) -> list[dict]:
         return self.table("datos")
 
