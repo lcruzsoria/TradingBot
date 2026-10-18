@@ -63,3 +63,7 @@ slot = "aux2"
 [[skills]]
 type = "quotes"
 slot = 5
+
+[[skills]]
+type = "stats"
+slot = "aux3"
