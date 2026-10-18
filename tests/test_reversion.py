@@ -58,6 +58,20 @@ def test_si_antes_de_confirmar_la_mecha_una_vela_cierra_fuera_se_invalida():
     assert h.status == INVALIDATED and "ya no es reversión" in h.detail
 
 
+def test_si_ya_confirmada_la_mecha_una_vela_cierra_fuera_antes_de_la_entrada_se_anula():
+    rows = ROWS[:6] + [(102, 105.8, 100.5, 105.5)]                    # 6: cierra sobre el High (sin superar la mecha) antes del 0,5
+    hits, figs = run(rows)
+    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 6)] and figs == []
+    assert "rotura con cuerpo" in hits[0].detail
+    h = analyze(ctx_for(mirror(rows), first_bar=3), 1)[0][0]           # y su espejo: cierre bajo el Low
+    assert (h.status, h.direction, h.x) == (INVALIDATED, "long", 6)
+
+
+def test_una_rotura_con_cuerpo_despues_de_la_entrada_no_la_anula():
+    hits, _ = run(ROWS + [(101, 105.8, 100.5, 105.5)])
+    assert [(h.status, h.x) for h in hits] == [(DETECTED, 9)]
+
+
 def test_una_misma_vela_con_mecha_en_los_dos_lados_no_da_patron():
     h = run([ROWS[0], ROWS[1], ROWS[2], (100, 106, 94, 100)])[0][0]
     assert h.status == INVALIDATED and h.direction == "" and "High y el Low" in h.detail

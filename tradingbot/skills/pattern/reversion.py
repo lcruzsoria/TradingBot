@@ -11,6 +11,8 @@ Ejemplo bajista (el alcista es el espejo exacto, con el Low):
 4. Entrada: la primera vela que revierte hasta el 0,5 (su máximo lo toca). Stop en el 1 (la mecha pivote) y objetivo en el -0,5
    (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R. Si el precio supera la mecha pivote antes de la entrada, se
    invalida; si termina el plazo de la TBR sin reversión al 0,5, vence.
+5. Rotura con cuerpo: si, ya confirmada la mecha pivote, una vela CIERRA por encima del High tomado antes de la entrada, la reversión se
+   anula (el mercado ha roto ese lado: ahora es continuación). Una rotura en la misma vela de la entrada o después no la anula.
 
 Trabaja siempre con velas de `PATTERN_REVERSION_TF` (M15 al inicio), sea cual sea el timeframe del gráfico.
 """
@@ -108,6 +110,11 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
     half = (extreme + origin_price) / 2
     target = extreme + (extreme - origin_price) / 2
     levels = {"-0,5": sign * target, "0": sign * extreme, "0,5": sign * half, "1": sign * origin_price}
+    broke = next((t for t in range(confirmed + 1, end + 1) if (c[t] > tbr.high if up else c[t] < tbr.low)), None)
+    if broke is not None and (entry is None or broke < entry[0]) and (state.breach is None or broke < state.breach):
+        return [hit(INVALIDATED, direction, broke, tbr.mid,
+                    f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}; una vela cerró fuera del "
+                    f"{side} en {_when(ctx, broke)} antes del retroceso al 0,5: rotura con cuerpo, ya no es reversión")], []
     if state.breach is not None:
         return [hit(INVALIDATED, direction, state.breach, sign * origin_price,
                     f"toma con mecha del {side} en {_when(ctx, j)}; el precio superó la mecha pivote ({sign * origin_price:.5g}) antes de "

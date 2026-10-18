@@ -868,11 +868,6 @@ class MainWindow(QMainWindow):
             return
         ts = df["ts"].to_numpy()
         n = len(ts)
-        fibs = []
-        for f in self._fibs:
-            fibs.append({"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
-                         "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction})
-        self.chart.set_fibs(fibs)
         positions = []
         for f in sorted(self._positions, key=lambda f: f.x0_ts):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
@@ -893,6 +888,17 @@ class MainWindow(QMainWindow):
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
                 used.add(pos["session"])
+        fibs = []
+        for f in self._fibs:
+            fib = {"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
+                   "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction}
+            if f.state == "entrada":                            # el fibo lleva el GO / NO GO de su entrada: así se ve cuál se opera
+                pos = next((p for p in positions if p["label"] == f.label and p["direction"] == f.direction
+                            and fib["x0"] <= p["x0"] <= fib["x1"]), None)
+                if pos is not None and pos["decision"]:
+                    fib["decision"], fib["reason"] = pos["decision"], pos["reason"]
+            fibs.append(fib)
+        self.chart.set_fibs(fibs)
         self.chart.set_positions(positions)
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:

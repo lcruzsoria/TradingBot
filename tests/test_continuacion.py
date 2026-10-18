@@ -166,6 +166,42 @@ def test_el_grafico_dibuja_los_fibo_y_el_boton_los_apaga(tmp_path, monkeypatch):
     assert win.chart.fib_count == 0
 
 
+def test_la_segunda_entrada_de_una_sesion_se_ve_atenuada_y_tachada_con_su_no_go(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.pattern.patterns import Figure
+    from tradingbot.ui.chart import NO_GO_OPACITY
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}]), cfg, "t")
+    monkeypatch.setattr(win, "_entry_decision", lambda index, direction: ("GO", "sin sesgo +1"))   # el sesgo dejaría pasar las dos
+    df = m5_from_m15(ROWS)
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    day = DAY.isoformat()
+    figures = [Figure("fib", "reversion", "NY Open", "long", ny(DAY, 10, 0), ny(DAY, 12, 0), {"0": 104.0, "0,5": 100.0, "1": 96.0},
+                      "entrada", "NY Open ▲ Rev"),
+               Figure("pos", "reversion", "NY Open", "long", ny(DAY, 10, 30), ny(DAY, 10, 45),
+                      {"entrada": 100.0, "stop": 96.0, "objetivo": 108.0}, "stop", "NY Open ▲ Rev", day),
+               Figure("fib", "continuacion", "NY Open", "short", ny(DAY, 10, 15), ny(DAY, 13, 0), {"0": 92.0, "0,5": 98.0, "1": 104.0},
+                      "entrada", "NY Open ▼"),
+               Figure("pos", "continuacion", "NY Open", "short", ny(DAY, 11, 0), ny(DAY, 12, 0),
+                      {"entrada": 98.0, "stop": 104.0, "objetivo": 86.0}, "objetivo", "NY Open ▼", day)]
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures})
+    rev, cont = win.chart._fibs
+    assert rev["decision"] == "GO" and (cont["decision"], cont["reason"]) == ("NO GO", "sesión ya operada")
+    items = win.chart._fib_items
+    assert all(item.opacity() == 1 for item in items[:7])                                       # la que se opera, normal
+    assert all(item.opacity() == NO_GO_OPACITY for item in items[7:13])                        # la otra, atenuada...
+    assert "line-through" in items[13].toHtml() and "NO GO: sesión ya operada" in items[13].toPlainText()   # ...y tachada con el motivo
+    assert [p["decision"] for p in win.chart._positions] == ["GO", "NO GO"]
+    assert min(item.opacity() for item in win.chart._pos_items) == NO_GO_OPACITY
+
+
 def test_el_pico_justo_antes_de_la_vela_de_rotura_es_el_swing_y_no_el_maximo_de_la_tbr():
     rows = [(100, 104, 99, 101), (101, 105, 100, 104),                      # 1: el máximo de la TBR (105)
             (104, 104.5, 101, 102), (102, 102.8, 100, 101),                 # dentro de la TBR
