@@ -265,6 +265,7 @@ def test_la_posicion_se_dibuja_con_entrada_stop_y_objetivo_y_su_resultado():
 
 
 def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(tmp_path, monkeypatch):
+    from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication
     from tradingbot import settings
     from tradingbot.core import EventBus, Services, SkillManager
@@ -283,7 +284,24 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
                  {"entrada": 103.5, "stop": 97.0, "objetivo": 116.5}, "objetivo", "NY Open ▲")
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [pos]})
     assert win.chart.position_count == 1 and win.chart.fib_count == 0
-    assert len(win.chart._pos_items) == 2 + 1 + 3                                                           # dos zonas, la línea de entrada y tres etiquetas
+    assert len(win.chart._pos_items) == 2 + 1 + 1                                                           # dos zonas, la línea de entrada y su píldora
+    pill = win.chart._pos_pills[0]
+    assert pill.toPlainText().endswith("NY Open ▲ 2.0R") and not win.chart._pos_card.isVisible()        # el detalle, oculto
+    win.chart.resize(800, 500)
+    win.chart.getPlotItem().getViewBox().setXRange(0, 40, padding=0)
+    win.chart.getPlotItem().getViewBox().setYRange(90, 120, padding=0)
+    center = pill.sceneBoundingRect().center()
+    win.chart._mouse_moved(center)                                                                         # al pasar el ratón, la ficha
+    card = win.chart._pos_card
+    assert card.isVisible() and "Largo" in card.toPlainText() and "116.5" in card.toPlainText()
+    win.chart.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert not card.isVisible()
+    click = type("Click", (), {"scenePos": lambda self: center})()
+    win.chart._pos_clicked(click)                                                                          # al pulsar, se queda fija...
+    win.chart.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert card.isVisible()
+    win.chart._pos_clicked(click)                                                                          # ...hasta pulsarla otra vez
+    assert not card.isVisible()
     assert win.chart._positions[0]["x0"] == 12 and win.chart._positions[0]["x1"] > 12                      # 11:00 es la vela M5 número 12
     win.pos_btn.setChecked(False)
     assert win.chart.position_count == 0 and win.chart._pos_items == []
