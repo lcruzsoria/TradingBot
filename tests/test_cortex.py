@@ -207,3 +207,25 @@ def test_si_la_operacion_ya_termino_con_las_velas_actuales_el_resultado_sale_al_
     wait(closed)
     manager.stop()
     assert len(closed) == 1 and closed[0].payload["closed"].result == "objetivo" and closed[0].payload["closed"].r == 1.0
+
+
+def test_una_operacion_pasada_ya_cerrada_no_bloquea_a_la_siguiente_que_se_anuncia_a_la_vez():
+    import numpy as np
+    import pandas as pd
+    manager, bus, decisions, orders, executed = run_skills()
+    closed = []
+    bus.subscribe("t", "setup.closed", closed.append)
+    ts = 1_000_000 + np.arange(8) * 900
+    df = pd.DataFrame({"ts": ts, "open": 105.0, "high": [105.5, 106, 116, 106, 106, 106, 106, 106], "low": 104.0, "close": 105.0})
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
+    # los dos patrones llegan antes que el sesgo (como al arrancar el bot), el posterior primero
+    otra = ActiveTbr("LONDON", "London", date(2026, 10, 7), 105.0, 95.0, -0.5, 9.5)
+    tarde = PatternHit("q", "Patrón tarde", "long", 5, 105.0, "d", {"stop": 95.0, "target": 115.0}, int(ts[5]))
+    pronto = PatternHit("p", "Patrón pronto", "long", 1, 105.0, "d", {"stop": 95.0, "target": 115.0}, int(ts[1]))
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": otra, "hit": tarde}, source="pattern")
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": pronto}, source="pattern")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    wait(closed, 2)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2       # el primero ya cerró a las 00:30
+    assert decisions[0].payload["hit"].key == "p"                                                        # y se decide en orden de hora

@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..bias import Direction, TradeFilter
 from ...core import Event, Skill, register_skill
 from .order import build_calendar_order, build_order
-from ..setup.positions import trackable
+from ..setup.positions import resolve, trackable
 from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
 
 MAX_PENDING = 50
@@ -66,11 +66,22 @@ class CortexSkill(Skill):
             self.publish("trade.verdict", {"request_id": event.payload.get("request_id"),
                                            "direction": direction, "allowed": allowed, "reason": reason})
 
-    def _busy(self, symbol: str):
-        """La orden abierta que impide abrir otra en `symbol` (en toda la cuenta o solo en ese mercado), o None."""
-        if self.scope == "mercado":
-            return self._open.get(symbol)
-        return next(iter(self._open.values()), None)
+    def _busy(self, symbol: str, entry_ts: int | None = None):
+        """La orden abierta que impide abrir otra en `symbol` (en toda la cuenta o solo en ese mercado), o None.
+
+        Una orden que con las velas actuales ya cerró antes de `entry_ts` (la hora de la nueva entrada) no bloquea: así los patrones
+        pasados que se anuncian de golpe al arrancar el bot se juzgan en su orden, como habría pasado en directo.
+        """
+        for order in list(self._open.values()):
+            if self.scope == "mercado" and order.symbol != symbol:
+                continue
+            df = self._candles.get(order.symbol)
+            if df is not None and entry_ts:
+                closed = resolve(order, df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy())
+                if closed is not None and entry_ts > closed.exit_ts:
+                    continue
+            return order
+        return None
 
     def _session_reason(self, p: dict) -> str | None:
         """Motivo de NO GO si la sesión (TBR) del patrón ya dio un trade, o None."""
@@ -96,7 +107,7 @@ class CortexSkill(Skill):
         """Señal de calendario: GO sin consultar el sesgo (el backtest no lo usa), salvo CORTEX_CALENDAR_USE_BIAS=true."""
         direction = payload["direction"]
         result = self.filter.result
-        busy = self._busy(payload["symbol"])
+        busy = self._busy(payload["symbol"], payload.get("entry_ts"))
         if busy is not None:
             allowed, reason = False, self._busy_reason(busy)
         elif self.calendar_use_bias:
@@ -113,12 +124,12 @@ class CortexSkill(Skill):
         if bias is None:
             return
         waiting = []
-        for p in self._pending:
+        for p in sorted(self._pending, key=lambda p: p["hit"].ts or 0):       # en orden de hora: así se decidiría en directo
             if p["symbol"] != bias["symbol"]:
                 waiting.append(p)
                 continue
             result = bias["result"]
-            busy = self._busy(p["symbol"])
+            busy = self._busy(p["symbol"], p["hit"].ts)
             if busy is not None:                         # una sola posición abierta a la vez
                 decision = Decision(False, self._busy_reason(busy))
             elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
