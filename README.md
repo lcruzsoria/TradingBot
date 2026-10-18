@@ -379,6 +379,7 @@ Cómo personalizarlo:
 
 1. **`tradingbot.env`**: `UI_THEME` elige la paleta de arranque.
 2. **Botón "Skins"**, en la esquina superior derecha de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
+   A su izquierda, el botón **"Estadísticas"** abre (y, pulsado otra vez, cierra) una ventana flotante con las cifras de las operaciones simuladas de la sesión: acierto, resultado en R, expectativa, profit factor, drawdown, racha, GO / NO GO de Cortex, la curva de R acumulado y tablas por operación, mercado y patrón. Se reinicia al cerrar el bot (o con su botón «Reiniciar»).
    *Guardar* deja esa paleta como la de arranque (cambia `UI_THEME` en `tradingbot.env`) y guarda tus colores
    retocados en `theme.local.json` (no se sube a git).
 3. **`config.toml`**, sección `[theme]`: colores sueltos (`#RRGGBB`) que se aplican encima de la paleta de arranque.

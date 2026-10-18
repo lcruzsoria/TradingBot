@@ -325,6 +325,7 @@ QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {mix(BG, MUTED, 0.55)}; border-color: {mix(BG, BORDER, 0.6)}; }}
 QPushButton#Primary {{ background: {ACTIVE_BG}; border: 1px solid {ACTIVE_BORDER}; font-weight: 600; }}
 QPushButton#Primary:hover {{ background: {mix(ACTIVE_BG, ACCENT, 0.25)}; }}
+QPushButton:checked {{ background: {ACTIVE_BG}; border: 1px solid {ACTIVE_BORDER}; }}
 QPushButton[chip="true"] {{ padding: 4px 11px; font-weight: 600; color: {MUTED}; }}
 QPushButton[chip="true"]:checked {{ background: {ACTIVE_BG}; border: 1px solid {ACTIVE_BORDER}; color: {TEXT}; }}
 
@@ -336,6 +337,14 @@ QListWidget {{ background: {mix(BG, PANEL, 0.5)}; border: 1px solid {BORDER}; bo
 QListWidget::item {{ padding: 3px 6px; border-radius: 3px; }}
 QListWidget::item:hover {{ background: {PANEL_ALT}; }}
 QListWidget::item:selected {{ background: {ACTIVE_BG}; color: {TEXT}; }}
+
+QTabWidget::pane {{ border: 1px solid {BORDER}; border-radius: 4px; top: -1px; }}
+QTabBar::tab {{ background: {PANEL_ALT}; border: 1px solid {BORDER}; padding: 4px 12px; color: {MUTED}; }}
+QTabBar::tab:selected {{ background: {PANEL}; color: {TEXT}; }}
+QTableWidget {{ background: {mix(BG, PANEL, 0.5)}; border: none; gridline-color: {BORDER}; selection-background-color: {ACTIVE_BG};
+    selection-color: {TEXT}; alternate-background-color: {PANEL}; }}
+QHeaderView::section {{ background: {PANEL_ALT}; color: {MUTED}; border: none; border-bottom: 1px solid {BORDER}; padding: 4px 8px;
+    font-weight: 600; }}
 
 QProgressBar {{ background: transparent; border: none; max-height: 3px; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 1px; }}

@@ -30,6 +30,7 @@ from .fmt import fecha_corta, fecha_hora, miles
 from .logview import LogView
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .rules_dialog import RulesDialog
+from .stats_dialog import StatsDialog, TradeStats
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
 from .. import envconfig, settings
@@ -81,6 +82,9 @@ class MainWindow(QMainWindow):
         self.tbr_btn.toggled.connect(self.chart.show_tbr)
         self.recalc_btn.clicked.connect(lambda: self.bus.publish("bias.recalc", {}, source="ui"))
         self.colors_btn.clicked.connect(self.open_theme_editor)
+        self.stats = TradeStats()
+        self.stats_dialog: StatsDialog | None = None              # se crea la primera vez que se abre
+        self.stats_btn.toggled.connect(self.toggle_stats)
         self.edit_markets_btn.clicked.connect(self.edit_watchlist)
         self.markets.symbol_selected.connect(self._on_market_clicked)
         self.bias_card.probe.connect(self._probe_trade)
@@ -166,8 +170,12 @@ class MainWindow(QMainWindow):
                 h.addWidget(divider)
             h.addWidget(block)
 
-        # Las cifras van justo después de la cuenta; el botón Skins, solo en la esquina derecha.
+        # Las cifras van justo después de la cuenta; los botones Estadísticas y Skins, en la esquina derecha.
         h.addStretch(1)
+        self.stats_btn = QPushButton("Estadísticas")
+        self.stats_btn.setCheckable(True)
+        self.stats_btn.setToolTip("Abrir o cerrar la ventana de estadísticas de las operaciones simuladas de la sesión")
+        h.addWidget(self.stats_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         self.colors_btn = QPushButton("Skins")
         self.colors_btn.setToolTip("Cambiar la paleta (skin) y personalizar los colores de la interfaz")
         h.addWidget(self.colors_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
@@ -560,6 +568,22 @@ class MainWindow(QMainWindow):
                      f"se carga {self.current_symbol}.")
             self.load_candles()
 
+    # -- estadísticas -----------------------------------------------------------------------------
+    def toggle_stats(self, show: bool) -> None:
+        """El botón Estadísticas abre la ventana flotante y, pulsado otra vez, la cierra."""
+        if not show:
+            if self.stats_dialog is not None:
+                self.stats_dialog.hide()
+            return
+        if self.stats_dialog is None:
+            self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts))
+            self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
+        self.stats_dialog.popup_at(self.stats_btn)
+
+    def _refresh_stats(self) -> None:
+        if self.stats_dialog is not None and self.stats_dialog.isVisible():
+            self.stats_dialog.refresh()
+
     # -- tema -------------------------------------------------------------------------------------
     def open_theme_editor(self) -> None:
         dialog = ThemeDialog(self, self.theme_name, theme.current(), self.apply_theme)
@@ -578,6 +602,7 @@ class MainWindow(QMainWindow):
         self.ring.update()
         if self.ring.selected in self.manager.skills:
             self._show_skill(self.ring.selected)
+        self._refresh_stats()
 
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
     def _on_event(self, event: Event) -> None:
@@ -951,6 +976,8 @@ class MainWindow(QMainWindow):
     def _on_cortex_decision(self, p: dict) -> None:
         side, when, lines = self._pattern_lines(p)
         hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
+        self.stats.decision(decision.allowed)
+        self._refresh_stats()
         lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]
         lines += ["", "Con GO, Cortex le pasa la orden a Setup." if decision.allowed else "Con NO GO, Setup no recibe ninguna orden."]
         self.log(f"cortex: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "
@@ -958,6 +985,8 @@ class MainWindow(QMainWindow):
 
     def _on_setup_executed(self, p: dict) -> None:
         o = p["order"]
+        self.stats.executed(o)
+        self._refresh_stats()
         self.ring.celebrate(o.direction, o.symbol)
         lines = [f"Orden:    {o.label}", f"Activo:   {o.symbol}   Temporalidad: {display_label(o.timeframe)}",
                  f"Sesgo:    {o.bias} (puntuación {o.score:+g})"]
@@ -977,6 +1006,8 @@ class MainWindow(QMainWindow):
 
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]
+        self.stats.closed(o, c)
+        self._refresh_stats()
         if c.r > 0:
             self.ring.win(c.r, o.symbol)
         why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
