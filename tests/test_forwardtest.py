@@ -139,3 +139,25 @@ def test_en_modo_demo_el_diario_va_aparte(tmp_path):
     skill = SkillManager(bus, Services(DemoSource(), None, {"app": {}}, EnvConfig()), [{"type": "stats"}]).skills["stats"]
     skill.on_start()
     assert skill.journal.folder == journal.DEFAULT_DIR.parent / "forwardtest-demo"
+
+
+def test_los_patrones_pasados_que_se_repiten_al_arrancar_no_cuentan(tmp_path):
+    import pandas as pd
+    skill = skill_in(tmp_path)
+    skill.handle(Event("candles.loaded", {"symbol": "nas100", "timeframe": "15m",
+                                          "df": pd.DataFrame({"ts": [800_000, 950_000]})}, "feed"))
+    skill.handle(decision(True, ts=900_000))                                    # vela anterior al arranque: se ignora
+    skill.handle(Event("setup.executed", {"order": ORDER}, "setup"))            # ORDER entra en 1_000_000: en directo
+    old = replace(ORDER, entry_ts=900_000)
+    skill.handle(Event("setup.executed", {"order": old}, "setup"))
+    skill.handle(Event("setup.closed", {"order": old, "closed": WIN}, "setup"))
+    skill.handle(decision(False, ts=950_000))                                   # la vela del arranque sí cuenta
+    assert [r["t"] for r in lines(tmp_path)] == ["open", "signal"]
+    assert (skill.stats.go, skill.stats.nogo, len(skill.stats.trades)) == (0, 1, 1)
+    # una operación que ya estaba en el diario recibe su cierre aunque la anuncien al arrancar
+    again = skill_in(tmp_path)
+    again.handle(Event("candles.loaded", {"symbol": "NAS100", "timeframe": "15m",
+                                          "df": pd.DataFrame({"ts": [2_000_000]})}, "feed"))
+    again.handle(Event("setup.executed", {"order": ORDER}, "setup"))
+    again.handle(Event("setup.closed", {"order": ORDER, "closed": WIN}, "setup"))
+    assert [r["t"] for r in lines(tmp_path)] == ["open", "signal", "close"] and again.stats.total_r == 2.0
