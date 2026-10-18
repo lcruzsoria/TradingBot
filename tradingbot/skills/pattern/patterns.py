@@ -131,6 +131,7 @@ class Figure:
     levels: dict[str, float]    # {"0": precio, "0,5": precio, "1": precio}
     state: str = ""          # "en curso", "entrada"
     label: str = ""
+    day: str = ""            # día de la TBR (AAAA-MM-DD): con la zona identifica la sesión
 
 
 class Pattern(ABC):

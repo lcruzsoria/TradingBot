@@ -203,13 +203,16 @@ def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None) -> pd.Ser
     flags = pd.Series(False, index=trades.index)
     pool = trades if take is None else trades[take]
     groups = [pool.sort_values("entrada (NY)")] if GLOBAL_SCOPE else [g.sort_values("entrada (NY)") for _s, g in pool.groupby("mercado")]
+    used = set()                                                         # sesiones (mercado, TBR, día) que ya dieron un trade
     for g in groups:
         free_at = pd.Timestamp.min
         for i, row in g.iterrows():
-            if row["entrada (NY)"] <= free_at:
+            session = (row["mercado"], row["zona"], row["día"])
+            if row["entrada (NY)"] <= free_at or session in used:
                 flags[i] = True
             else:
                 free_at = row["cierre (NY)"]
+                used.add(session)
     return flags
 
 
@@ -290,7 +293,7 @@ NOTES = [
               "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
-    ("Una posición a la vez", "Filtros «una posición a la vez»: no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
+    ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
     ("Plazos", "Cada TBR se busca hasta: Asia 02:00 (inicio de London), London 12:00 (final de NY Open) y NY Open 18:00 (variante anterior con BT_PLAZOS=anterior)."),
     ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
     ("Sesgo", "Reglas del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; lateralidad 6 h / 0,15) con velas M15, congelado "

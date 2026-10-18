@@ -855,15 +855,19 @@ class MainWindow(QMainWindow):
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                               "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
-                              "reason": reason})
+                              "reason": reason, "session": (f.zone, f.day)})
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran
+        used = set()                                            # y una misma sesión no puede dar dos trades
         for pos in positions:
             if not pos["decision"]:
                 continue
             if pos["x0"] < busy_until:
                 pos["decision"], pos["reason"] = "NO GO", "posición abierta"
+            elif pos["session"] in used:
+                pos["decision"], pos["reason"] = "NO GO", "sesión ya operada"
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
+                used.add(pos["session"])
         self.chart.set_positions(positions)
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:

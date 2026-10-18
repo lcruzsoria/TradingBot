@@ -35,4 +35,4 @@ def position_figure(ctx, key: str, zone: str, direction: str, t: int, entry: flo
     tf_sec = ctx.tf_minutes * 60
     state = {"target": "objetivo", "stop": "stop"}.get(kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")
     return Figure("pos", key, zone, direction, int(ctx.ts[t]), int(ctx.ts[idx]) + tf_sec,
-                  {"entrada": float(entry), "stop": float(stop), "objetivo": float(target)}, state, label)
+                  {"entrada": float(entry), "stop": float(stop), "objetivo": float(target)}, state, label, ctx.tbr.day.isoformat())

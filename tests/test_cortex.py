@@ -143,7 +143,8 @@ def test_con_una_posicion_abierta_no_se_abre_otra_hasta_que_cierre():
     assert (o.entry_ts, o.close_ts) == (1_000_000, 1_000_000 + 24 * 3600)           # Setup puede seguirla: stop, objetivo o 24 h
     bus.publish("setup.closed", {"order": o, "closed": None, "sent": False}, source="setup")      # la posición cierra
     time.sleep(0.2)
-    bus.publish("pattern.detected", {**event, "hit": PatternHit("r", "Tercer patrón", "long", 30, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_002_000)},
+    otra = ActiveTbr("LONDON", "London", date(2026, 10, 7), 105.0, 95.0, -0.5, 9.5)                 # otra sesión
+    bus.publish("pattern.detected", {**event, "tbr": otra, "hit": PatternHit("r", "Tercer patrón", "long", 30, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_002_000)},
                 source="pattern")
     wait(orders, 2)
     manager.stop()
@@ -171,3 +172,21 @@ def test_el_alcance_por_defecto_es_una_sola_posicion_en_toda_la_cuenta():
 def test_con_alcance_mercado_cada_mercado_tiene_su_posicion():
     decisions, orders = _dos_mercados("CORTEX_POSITION_SCOPE=mercado\n")
     assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
+
+
+def test_una_misma_sesion_no_puede_dar_dos_trades_aunque_el_primero_ya_cerro():
+    manager, bus, decisions, orders, executed = run_skills("CORTEX_POSITION_SCOPE=mercado\n")
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    def event(key, ts, tbr=TBR):
+        hit = PatternHit(key, f"Patrón {key}", "long", 13, 105.0, "d", {"stop": 95.0, "target": 115.0}, ts)
+        return {"symbol": "EURUSD", "timeframe": "15m", "tbr": tbr, "hit": hit}
+    bus.publish("pattern.detected", event("a", 1_000_000), source="pattern")
+    wait(orders)
+    bus.publish("setup.closed", {"order": orders[0].payload["order"], "closed": None, "sent": False}, source="setup")   # cierra enseguida
+    time.sleep(0.2)
+    bus.publish("pattern.detected", event("b", 1_001_000), source="pattern")             # misma TBR: NO GO por la sesión
+    time.sleep(0.4)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, False] and len(orders) == 1
+    assert "ya dio un trade" in decisions[1].payload["decision"].reason and "NY Open del 06/10" in decisions[1].payload["decision"].reason

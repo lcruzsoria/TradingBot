@@ -30,6 +30,7 @@ class CortexSkill(Skill):
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
+        self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
         self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
         if self.scope not in ("global", "mercado"):
             self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
@@ -68,6 +69,13 @@ class CortexSkill(Skill):
         if self.scope == "mercado":
             return self._open.get(symbol)
         return next(iter(self._open.values()), None)
+
+    def _session_reason(self, p: dict) -> str | None:
+        """Motivo de NO GO si la sesión (TBR) del patrón ya dio un trade, o None."""
+        tbr = p["tbr"]
+        if (p["symbol"], tbr.zone, tbr.day) in self._used:
+            return f"la sesión {tbr.zone} del {tbr.day:%d/%m} en {p['symbol']} ya dio un trade: una misma sesión no puede dar dos"
+        return None
 
     def _busy_reason(self, order) -> str:
         return (f"ya hay una posición abierta en {order.symbol} ({order.pattern}): hasta que no cierre (stop, objetivo o tiempo) "
@@ -108,12 +116,15 @@ class CortexSkill(Skill):
             busy = self._busy(p["symbol"])
             if busy is not None:                         # una sola posición abierta a la vez
                 decision = Decision(False, self._busy_reason(busy))
+            elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
+                decision = Decision(False, self._session_reason(p))
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
                                              "hit": p["hit"], "decision": decision, "bias": result.bias,
                                              "bias_result": result})
             if decision.allowed:
+                self._used.add((p["symbol"], p["tbr"].zone, p["tbr"].day))
                 self._send(build_order(p, decision, result))
             self.set_caption(f"{decision.verdict} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
         self._pending = waiting
