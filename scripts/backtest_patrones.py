@@ -57,6 +57,8 @@ BIAS_MIN = 3.0
 MAX_HOLD = 96                                 # velas M15 (24 h)
 TP_MULTS = (1.0, 1.5, 2.0, 2.5, 3.0)
 HOLDS = (48, 96, 192)
+STOP_MULTS = (1.0, 1.5, 2.0, 3.0)             # mejoras: stop ampliado a k veces el original...
+IMPROVE_RRS = (1.0, 1.5, 2.0)                 # ...con el objetivo a RR veces el nuevo riesgo (RR reducido)
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
@@ -180,6 +182,14 @@ def run_symbol(source, sym: str, order, zones):
             for hold in HOLDS:                           # sensibilidad al tiempo máximo (objetivo 2R)
                 _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, target, hold)
                 row[f"R neto {hold // 4} h"] = rg - cost
+            for k in STOP_MULTS:                         # mejoras: stop ampliado y RR reducido (misma entrada en el 0,5)
+                stp = entry - k * risk if direction == "long" else entry + k * risk
+                for rr in IMPROVE_RRS:
+                    tgt = entry + rr * k * risk if direction == "long" else entry - rr * k * risk
+                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, MAX_HOLD)
+                    row[f"R bruto k{k:g} RR{rr:g}"] = rg
+                    row[f"R neto k{k:g} RR{rr:g}"] = rg - float(spread[t]) / (k * risk)
+                    row[f"cierre k{k:g} RR{rr:g}"] = pd.Timestamp(int(ts[min(t + bars_k, n - 1)]) - AHEAD, unit="s")
             trades.append(row)
     info = {"mercado": sym, "velas M15": n, "desde (NY)": pd.Timestamp(int(ts[0]) - AHEAD, unit="s"),
             "hasta (NY)": pd.Timestamp(int(ts[-1]) - AHEAD, unit="s"), "spread medio (precio)": float(np.mean(spread)),
@@ -201,7 +211,7 @@ def with_all(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([trades, both], ignore_index=True)
 
 
-def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None) -> pd.Series:
+def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None, exit_col: str = "cierre (NY)") -> pd.Series:
     """True en las operaciones que no se habrían abierto porque ya había otra abierta (en toda la cuenta o en el mismo mercado, según GLOBAL_SCOPE; hasta su stop, objetivo
     o cierre por tiempo). Solo cuentan como abiertas las de `take` (las que el bot sí abre); la entrada debe ser posterior a la
     vela de cierre de la anterior."""
@@ -216,9 +226,41 @@ def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None) -> pd.Ser
             if row["entrada (NY)"] <= free_at or session in used:
                 flags[i] = True
             else:
-                free_at = row["cierre (NY)"]
+                free_at = row[exit_col]
                 used.add(session)
     return flags
+
+
+IMPROVEMENTS = {
+    "bot actual (sin mejoras)": lambda d: pd.Series(True, index=d.index),
+    "solo largos de lunes (Asia y London)": lambda d: (d["entrada (NY)"].dt.dayofweek == 0) & (d["dirección"] == "long") & d["zona"].isin(["Asia", "London"]),
+    "solo NAS100 y DJ30": lambda d: d["mercado"].isin(["NAS100.r", "DJ30.r"]),
+    "largos de lunes (Asia y London) en NAS100 y DJ30": lambda d: (d["entrada (NY)"].dt.dayofweek == 0) & (d["dirección"] == "long") & d["zona"].isin(["Asia", "London"]) & d["mercado"].isin(["NAS100.r", "DJ30.r"]),
+    "solo riesgo del stop >= 0,15 % del precio": lambda d: d["riesgo %"] >= 0.15,
+}
+
+
+def improvements_sheet(trades: pd.DataFrame) -> pd.DataFrame:
+    """Mejoras con stop ampliado y RR reducido, con las reglas del bot (GO de Cortex, una posición abierta y una sesión un trade)."""
+    rows = []
+    go = trades["sesgo vs operación"] != "en contra"
+    for name, mask in IMPROVEMENTS.items():
+        pool = go & mask(trades)
+        for k in STOP_MULTS:
+            for rr in IMPROVE_RRS:
+                tag = f"k{k:g} RR{rr:g}"
+                flags = overlap_flags(trades, pool, f"cierre {tag}")
+                g = trades[pool & ~flags]
+                net, gross = g[f"R neto {tag}"], g[f"R bruto {tag}"]
+                n = len(g)
+                sd = net.std(ddof=1) if n > 2 else 0.0
+                half = g["entrada (NY)"].median() if n else None
+                rows.append({"mejora": name, "stop (x original)": k, "RR": rr, "operaciones": n, "win rate %": 100 * (gross > 0).mean() if n else np.nan,
+                             "R bruto medio": gross.mean() if n else np.nan, "R neto medio": net.mean() if n else np.nan,
+                             "R neto total": net.sum(), "estadístico t": net.mean() / (sd / np.sqrt(n)) if sd > 0 else 0.0,
+                             "R neto 1ª mitad": net[g["entrada (NY)"] <= half].mean() if n else np.nan,
+                             "R neto 2ª mitad": net[g["entrada (NY)"] > half].mean() if n else np.nan})
+    return pd.DataFrame(rows)
 
 
 def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -262,6 +304,7 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
         s = stats(g["R bruto"], g["cierre (NY)"])
         sens.append({"patrón": pat, "filtro": flt, "variante": "2R sin costes (R bruto)", **s})
     sheets["Sensibilidad"] = pd.DataFrame(sens)
+    sheets["Mejoras (stop y RR)"] = improvements_sheet(trades)
     out = trades.groupby(["patrón", "resultado"]).size().unstack(fill_value=0)
     out["operaciones"] = out.sum(axis=1)
     out["MAE medio (R)"] = trades.groupby("patrón")["MAE (R)"].mean()
@@ -299,6 +342,7 @@ NOTES = [
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
     ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
+    ("Mejoras (stop y RR)", "Hoja «Mejoras (stop y RR)»: la misma entrada en el 0,5 con el stop ampliado a k veces el original y el objetivo a RR veces el nuevo riesgo (RR 1, 1,5 y 2), y filtros: solo largos de lunes en Asia y London, solo NAS100 y DJ30, y riesgo mínimo del 0,15 %. Siempre con las reglas del bot (GO de Cortex, una posición abierta y una sesión un trade); win rate sobre el R bruto."),
     ("Plazos", "Cada TBR se busca hasta: Asia 02:00 (inicio de London), London 12:00 (final de NY Open) y NY Open 18:00 (variante anterior con BT_PLAZOS=anterior)."),
     ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
     ("Sesgo", "Reglas del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; lateralidad 6 h / 0,15) con velas M15, congelado "
