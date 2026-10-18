@@ -47,6 +47,26 @@ dónde entrar, pero no aportan una probabilidad mayor que el azar de llegar al -
 que cada operación cueste ~0,1 R. Lo que se haga a partir de aquí tendría que ganar más de ~0,1 R por operación solo para empatar. La
 búsqueda de subconjuntos (`SUBCONJUNTOS.md`) encuentra una pista en los largos de lunes.
 
+## Cambio del 18/10/2026: la Reversión se anula con una rotura con cuerpo antes de la entrada
+
+Desde ahora, si ya confirmada la mecha pivote una vela cierra fuera del lado tomado antes del retroceso al 0,5, la Reversión se anula (es
+continuación). Backtest regenerado con los plazos y filtros actuales del bot (mismo histórico) y comparado con el anterior:
+
+| Mercados | Reversiones antes → después | R medio Reversión (sin filtro) | Lo que opera el bot (R neto total) |
+|---|---:|---:|---:|
+| Índices americanos | 3.441 → 3.408 | -0,098 → -0,094 | -295,5 → -290,9 |
+| Forex (EURUSD, GBPUSD) | 6.671 → 6.567 | -0,218 → -0,223 | -1.944,4 → -2.029,9 |
+| Oro (XAUUSD) | 1.007 → 996 | -0,098 → -0,100 | -168,0 → -169,8 |
+| Cripto (BTCUSD; ETH, con spread poco fiable, aparte) | 1.829 → 1.802 | -0,845 → -0,849 | -40,4 → -28,4 |
+
+- Quita en torno al 1-1,5 % de las reversiones. En índices, las 33 que desaparecen ganaban el 21 % (-0,51 R de media).
+- **No cambia la conclusión:** ningún grupo pasa a tener ventaja. En lo que opera el bot (GO de Cortex, una posición a la vez, una sesión
+  un trade) la sesión que deja libre la reversión anulada la ocupa a veces otra entrada, y el total queda prácticamente igual (-2.448 →
+  -2.519 R sin ETH; la diferencia es casi toda de forex). El motivo del cambio es de coherencia: no dar en la misma sesión un largo de
+  Reversión y un corto de Continuación por la misma rotura.
+- No evita todos los casos de entradas opuestas en una sesión: si la Reversión ya entró antes de la rotura (SP500, London del 16/10/2026),
+  las dos siguen siendo válidas. Ahí Cortex solo opera la primera, y el gráfico marca la otra como NO GO.
+
 ## Límites
 
 Un solo broker, ~8 años y entradas simuladas con velas M15 (sin ver el recorrido interno de la vela). Cada operación vale 1R y se cuenta por
