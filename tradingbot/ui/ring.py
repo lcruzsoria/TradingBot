@@ -21,7 +21,8 @@ from . import theme
 
 FLOW_SECONDS = 0.8
 GLOW_SECONDS = 1.2           # el brillo de una entrada o un cierre se apaga en este tiempo
-LABEL_SECONDS = 4.0          # el texto («▲ Long US100», «+1.80 R») se queda este tiempo y luego se desvanece
+RING_DEG_PER_SEC = 6.0       # giro de los anillos de fondo: 6 grados por segundo = una vuelta por minuto
+LABEL_SECONDS = 4.0         # el texto («▲ Long US100», «+1.80 R») se queda este tiempo y luego se desvanece
 
 
 @dataclass
@@ -217,14 +218,18 @@ class RingView(QWidget):
         occupied = {info.slot: key for key, info in self.infos.items()}
         self.highlights = {k: h for k, h in self.highlights.items() if now - h.t0 < LABEL_SECONDS}
 
-        # anillos de fondo que giran despacio en sentidos opuestos
+        # anillos de fondo que giran despacio en sentidos opuestos (una vuelta por minuto, más o menos)
+        ring_color = QColor(theme.mix(theme.RING_DOT, theme.ACCENT, 0.35))
         for i, r in enumerate((1.95 * s, 2.55 * s)):
-            pen = QPen(QColor(theme.RING_DOT)); pen.setWidthF(1.0)
-            pen.setDashPattern([1.0, 5.0] if i == 0 else [6.0, 6.0])
-            pen.setDashOffset(now * (1.5 if i == 0 else -0.9))
+            pen = QPen(ring_color); pen.setWidthF(1.3)
+            pen.setDashPattern([1.0, 4.0] if i == 0 else [5.0, 5.0])
+            p.save()
+            p.translate(center)
+            p.rotate(now * (RING_DEG_PER_SEC if i == 0 else -0.7 * RING_DEG_PER_SEC))
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(center, r, r)
+            p.drawEllipse(QPointF(0, 0), r, r)
+            p.restore()
 
         # conexiones en reposo, con un punto de luz que recorre cada radio hacia fuera
         edge_pen = QPen(QColor(theme.EDGE)); edge_pen.setWidthF(1.2)
