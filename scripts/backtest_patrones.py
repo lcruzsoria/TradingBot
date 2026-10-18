@@ -36,6 +36,7 @@ from tradingbot.skills.bias.history import block_ids, lateral_flags, score_histo
 from tradingbot.skills.feed.mt5_client import Mt5Source                              # noqa: E402
 from tradingbot.skills.pattern import continuacion, reversion                        # noqa: E402
 from tradingbot.skills.pattern.patterns import (ActiveTbr, DETECTED, EXPIRED, PatternContext, window_for)   # noqa: E402
+from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index          # noqa: E402
 from tradingbot.skills.tbr.zones import compute, zones_from_settings                 # noqa: E402
 
 AHEAD = 7 * 3600                              # servidor del broker = NY + 7 h (Vantage)
@@ -124,8 +125,12 @@ def run_symbol(source, sym: str, order, zones):
     o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
     n = len(ts)
     # sesgo del bot en cada vela (congelado al abrirse cada bloque de 3 h)
-    score = score_history(ts, o, h, l, c, BIAS_RULES, AHEAD, 18 * 60, 3, 3, 30)
-    ids = block_ids(ts - AHEAD, 18 * 3600, 3)
+    # el sesgo se calcula como en el bot: índices USA con día de trading desde las 18:00 NY y recálculo cada 3 h; el resto (forex, oro...) desde
+    # las 17:00 y cada 4 h
+    us_index = is_us_index(sym, DEFAULT_US_INDICES)
+    day_start, recalc = (18 * 60, 3) if us_index else (17 * 60, 4)
+    score = score_history(ts, o, h, l, c, BIAS_RULES, AHEAD, day_start, recalc, recalc, 30)
+    ids = block_ids(ts - AHEAD, day_start * 60, recalc)
     lateral = lateral_flags(ts, c, 6.0, 0.15, ids)
     bias = np.where(lateral, 0, np.where(score >= BIAS_MIN, 1, np.where(score <= -BIAS_MIN, -1, 0)))
     sessions = compute(ts, h, l, zones, AHEAD, TF_MIN, days=int((ts[-1] - ts[0]) // 86400) + 3)
@@ -350,8 +355,10 @@ def write_excel(path: Path, sheets: dict[str, pd.DataFrame]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--simbolos", nargs="+", default=list(SYMBOLS))
+    ap.add_argument("--etiqueta", default="los índices americanos", help="cómo se nombran los mercados en la hoja de metodología")
     ap.add_argument("--salida", default="analisis/backtest_patrones.xlsx")
     args = ap.parse_args()
+    NOTES[0] = ("Qué es", f"Backtest de los patrones Continuación y Reversión del bot (con sus fibonacci) en M15 sobre {args.etiqueta}.")
     profiles, default = load_profiles()
     source = Mt5Source(select_profile(profiles, default, None), 2_000_000)
     print("conectado:", source.connect())
