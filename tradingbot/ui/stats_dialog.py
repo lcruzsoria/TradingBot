@@ -1,7 +1,8 @@
-"""Estadísticas de la sesión: decisiones de Cortex y resultado de las operaciones simuladas de Setup, en una ventana flotante.
+"""Forwardtest: lo que hace el bot desde que opera (señales de Cortex y operaciones simuladas de Setup), en una ventana flotante.
 
-Arriba, las cifras clave y una línea de resumen; debajo, la curva de R acumulado y los «libros»: el mismo resultado partido por
-patrón, lado, sesión, mercado y sesgo, y el diario con cada operación.
+Arriba, el periodo (o un mes guardado), las cifras clave y una línea de resumen; debajo, la curva de R acumulado y los «libros»:
+el mismo resultado partido por patrón, lado, sesión, mercado y sesgo, las señales de Cortex y el diario con cada operación.
+El backtest (análisis del histórico) tiene su propia ventana.
 """
 from __future__ import annotations
 
@@ -9,19 +10,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import pyqtgraph as pg
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..clock import NY
-from ..skills.stats.session import ALIGNMENTS, SESSIONS, Group, Trade, TradeStats, alignment_of, session_of  # noqa: F401
+from ..skills.stats.journal import month_label
+from ..skills.stats.session import (ALIGNMENTS, SESSIONS, Group, Signal, Trade, TradeStats, alignment_of,  # noqa: F401
+                                    reason_of, session_of)
 from ..timeframes import display_label
 from . import theme
 from .fmt import fecha_hora
 
 RESULT_NAMES = {"objetivo": "Objetivo", "stop": "Stop", "tiempo": "Tiempo"}
-WINDOWS = (("Hoy", 0), ("7 días", 7), ("Todo", None))       # días hacia atrás (en fecha de Nueva York) o None: todo
+WINDOWS = (("Hoy", 0), ("7 días", 7), ("30 días", 30), ("Todo", None))   # días hacia atrás (fecha de NY) o None: todo
+DEFAULT_WINDOW = 30
+LIVE = ""                                                  # en el selector: lo que lleva la skill (frente a un mes guardado)
 
 
 # -- formato ---------------------------------------------------------------------------------------
@@ -179,20 +185,24 @@ def group_cells(g: Group) -> list[tuple[str, str | None]]:
 
 # -- ventana ---------------------------------------------------------------------------------------
 class StatsDialog(QDialog):
-    """Ventana flotante (no modal) con las estadísticas; se abre y se cierra con el botón Estadísticas de la cabecera."""
+    """Ventana flotante (no modal) del forwardtest; se abre y se cierra con el botón Forwardtest del área Stats."""
 
-    hidden = Signal()
-    reset_requested = Signal()           # «Reiniciar»: las cifras las lleva la skill Stats, que es quien las borra
+    hidden = QtSignal()
+    reset_requested = QtSignal()         # «Nueva etapa»: las cifras las lleva la skill Stats, que es quien la anota
 
     def __init__(self, parent, stats: TradeStats, to_ny: Callable[[int], datetime],
-                 symbols: Callable[[], list[str]] = lambda: [], today: Callable[[], datetime] = _ny_today) -> None:
+                 symbols: Callable[[], list[str]] = lambda: [], today: Callable[[], datetime] = _ny_today,
+                 months: Callable[[], list[str]] = lambda: [], load_month: Callable[[str], TradeStats] | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Estadísticas")
+        self.setWindowTitle("Forwardtest")
         self.setWindowFlag(Qt.WindowType.Tool, True)      # flota sobre la ventana principal sin bloquearla
         self.setModal(False)
         self.resize(720, 880)
         self.stats, self._to_ny, self._symbols, self._today = stats, to_ny, symbols, today
-        self.window_days: int | None = None
+        self._months, self._load_month = months, load_month
+        self.window_days: int | None = DEFAULT_WINDOW
+        self.month = LIVE                                       # LIVE o el mes guardado que se está viendo (AAAA-MM)
+        self.archive: TradeStats | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
@@ -200,14 +210,20 @@ class StatsDialog(QDialog):
 
         # Cabecera: título y periodo
         head = QHBoxLayout()
-        title = QLabel("Estadísticas · Simulación")
+        title = QLabel("Forwardtest · Simulación")
         title.setObjectName("Brand")
-        sub = QLabel("operaciones de Setup tras el GO de Cortex")
+        sub = QLabel("lo que hace el bot desde que opera")
         sub.setObjectName("Tiny")
         head.addWidget(title)
         head.addSpacing(8)
         head.addWidget(sub)
         head.addStretch(1)
+        self.month_box = QComboBox()
+        self.month_box.setToolTip("En vivo: lo que lleva la skill Stats (mes actual y anterior). O un mes guardado del diario "
+                                  "(data/forwardtest), completo")
+        self.month_box.activated.connect(lambda _i: self.set_month(self.month_box.currentData()))
+        head.addWidget(self.month_box)
+        head.addSpacing(6)
         period = QLabel("Periodo")
         period.setObjectName("Tiny")
         head.addWidget(period)
@@ -218,8 +234,8 @@ class StatsDialog(QDialog):
             btn.setCheckable(True)
             btn.setProperty("chip", "true")
             btn.setToolTip("Operaciones con entrada " + ("hoy (fecha de Nueva York)" if days == 0 else
-                                                          f"en los últimos {days} días" if days else "en toda la sesión del bot"))
-            btn.setChecked(days is None)
+                                                          f"en los últimos {days} días" if days else "en todo lo cargado"))
+            btn.setChecked(days == DEFAULT_WINDOW)
             btn.clicked.connect(lambda _=False, d=days: self.set_window(d))
             self.window_group.addButton(btn)
             self.window_btns[name] = btn
@@ -266,7 +282,11 @@ class StatsDialog(QDialog):
         self.by_session = Book("Por sesión", "la sesión a la hora de entrada (NY)", ("Sesión",) + GROUP_HEADERS)
         self.by_symbol = Book("Por mercado", "todos los mercados de la lista", ("Mercado",) + GROUP_HEADERS)
         self.by_bias = Book("Por sesgo", "el sesgo vigente al entrar", ("Sesgo",) + GROUP_HEADERS)
-        for book in (self.by_pattern, self.by_side, self.by_session, self.by_symbol, self.by_bias):
+        self.by_reason = Book("Señales de Cortex", "por qué dio GO o NO GO", ("Motivo", "Veredicto", "Señales", "% del total"))
+        self.signals_by_pattern = Book("Señales por patrón", "cuántas pasan el filtro de Cortex",
+                                       ("Patrón", "Señales", "GO", "NO GO", "% GO"))
+        for book in (self.by_pattern, self.by_side, self.by_session, self.by_symbol, self.by_bias, self.by_reason,
+                     self.signals_by_pattern):
             lay.addWidget(book)
 
         journal = Book("Diario", "las más recientes arriba", ())
@@ -285,11 +305,13 @@ class StatsDialog(QDialog):
         outer.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
-        note = QLabel("Resultados en R, sin spread. G · P · N: ganadas, perdidas y neutras (0 R). Se reinician al cerrar el bot.")
+        note = QLabel("Resultados en R, sin spread. G · P · N: ganadas, perdidas y neutras (0 R). Todo queda en el diario "
+                      "mensual de data/forwardtest, que no se borra al reiniciar el bot.")
         note.setObjectName("Tiny")
         note.setWordWrap(True)
-        self.reset_btn = QPushButton("Reiniciar")
-        self.reset_btn.setToolTip("Borra las estadísticas de la sesión (las posiciones abiertas siguen su curso en Setup)")
+        self.reset_btn = QPushButton("Nueva etapa")
+        self.reset_btn.setToolTip("Empieza las cifras en vivo desde cero (por ejemplo, tras cambiar una regla del bot). El diario "
+                                  "no se borra: los meses guardados se siguen viendo completos")
         self.reset_btn.clicked.connect(self._reset)
         close_btn = QPushButton("Cerrar")
         close_btn.clicked.connect(self.hide)
@@ -334,7 +356,7 @@ class StatsDialog(QDialog):
 
     def _reset(self) -> None:
         self.stats.reset()                # se vacía ya la copia; la skill confirma con su próximo stats.session
-        self.refresh()
+        self.set_month(LIVE)
         self.reset_requested.emit()
 
     def set_window(self, days: int | None) -> None:
@@ -343,14 +365,37 @@ class StatsDialog(QDialog):
             self.window_btns[name].setChecked(d == days)
         self.refresh()
 
+    def set_month(self, month: str | None) -> None:
+        """LIVE: lo que lleva la skill, con el periodo elegido. Un mes (AAAA-MM): ese mes del diario, completo."""
+        month = month or LIVE
+        self.archive = self._load_month(month) if month and self._load_month else None
+        self.month = month if self.archive is not None else LIVE
+        for btn in self.window_btns.values():
+            btn.setEnabled(self.month == LIVE)
+        self.reset_btn.setEnabled(self.month == LIVE)
+        self.refresh()
+
+    def _fill_months(self) -> None:
+        box = self.month_box
+        box.blockSignals(True)
+        box.clear()
+        box.addItem("En vivo", LIVE)
+        for m in self._months():
+            box.addItem(month_label(m), m)
+        box.setCurrentIndex(max(0, box.findData(self.month)))
+        box.blockSignals(False)
+
     # -- pintar ------------------------------------------------------------------------------
     def _ny_of(self, t: Trade) -> datetime | None:
         return self._to_ny(t.order.entry_ts) if t.order.entry_ts else None
 
     def _in_window(self, t: Trade) -> bool:
-        if self.window_days is None:
+        return self._recent(t.order.entry_ts)
+
+    def _recent(self, ts: int | None) -> bool:
+        if self.window_days is None or self.month != LIVE:
             return True
-        ny = self._ny_of(t)
+        ny = self._to_ny(ts) if ts else None
         return ny is not None and (self._today().date() - ny.date()).days <= self.window_days
 
     def _session(self, t: Trade) -> str:
@@ -358,10 +403,14 @@ class StatsDialog(QDialog):
         return session_of(ny) if ny else "Sin hora"
 
     def refresh(self) -> None:
-        s = self.stats.only(self._in_window)
+        self._fill_months()
+        source = self.archive if self.month != LIVE and self.archive is not None else self.stats
+        s = source.only(self._in_window, lambda x: self._recent(x.ts))
         done, opened = s.done, s.open
         b = self.blocks
-        b["trades"].set_value(str(len(done)), f"{len(opened)} abierta{'s' if len(opened) != 1 else ''}  ·  {s.by_time} por tiempo")
+        extra = f"  ·  {len(s.stale)} sin seguimiento" if s.stale else ""
+        b["trades"].set_value(str(len(done)), f"{len(opened)} abierta{'s' if len(opened) != 1 else ''}  ·  "
+                                              f"{s.by_time} por tiempo{extra}")
         b["wlb"].set_value(f"{s.wins} · {s.losses} · {s.flat}", "ganadas · perdidas · neutras")
         wr = s.win_rate
         b["win"].set_value("-" if wr is None else f"{wr:.0f} %", f"de {len(done)} cerradas" if done else "sin cerradas")
@@ -378,9 +427,38 @@ class StatsDialog(QDialog):
         self._fill(self.by_session, s.groups(self._session, SESSIONS))
         self._fill(self.by_symbol, s.groups(lambda t: t.order.symbol, self._symbols()))
         self._fill(self.by_bias, s.groups(lambda t: alignment_of(t.order), ALIGNMENTS))
+        self._fill_signals(s)
         self._fill_history(s.trades)
 
+    def _fill_signals(self, s: TradeStats) -> None:
+        total = len(s.signals)
+        rows = []
+        for name, go, nogo in s.signal_groups(lambda x: reason_of(x.reason)):
+            n = go + nogo
+            if not nogo:
+                verdict = _colored("GO", theme.BULL)
+            elif not go:
+                verdict = _colored("NO GO", theme.BEAR)
+            else:
+                verdict = _colored(f"{go} GO", theme.BULL) + " / " + _colored(f"{nogo} NO GO", theme.BEAR)
+            rows.append([(name, None), (verdict, None), (str(n), None), (f"{100 * n / total:.0f} %", None)])
+        self.by_reason.set_rows(rows)
+        rows = []
+        for name, go, nogo in s.signal_groups(lambda x: x.pattern or "Sin patrón"):
+            rows.append([(name, None), (str(go + nogo), None), (str(go), theme.BULL if go else theme.MUTED),
+                         (str(nogo), theme.BEAR if nogo else theme.MUTED), (f"{100 * go / (go + nogo):.0f} %", None)])
+        self.signals_by_pattern.set_rows(rows)
+
     def _summary(self, s: TradeStats) -> str:
+        if self.month != LIVE:
+            where = f"{month_label(self.month)} (diario guardado)"
+        elif s.since:
+            where = f"En vivo desde la etapa del {s.since.replace('T', ' ')[:16]}"
+        else:
+            where = "En vivo"
+        return f"<b>{where}</b>  ·  " + self._figures(s)
+
+    def _figures(self, s: TradeStats) -> str:
         if not s.done:
             parts = ["Aún no hay operaciones cerradas en este periodo"]
         else:
@@ -461,6 +539,10 @@ class StatsDialog(QDialog):
                 self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result))
                 self._cell(self.history, i, 6, _span(t.duration))
                 self._cell(self.history, i, 7, _r(t.r), _tone(t.r))
+            elif t.stale:
+                self._cell(self.history, i, 5, "Sin seguimiento", theme.MUTED)
+                self._cell(self.history, i, 6, "-")
+                self._cell(self.history, i, 7, "-")
             else:
                 self._cell(self.history, i, 5, "Abierta", theme.WARN)
                 self._cell(self.history, i, 6, "-")

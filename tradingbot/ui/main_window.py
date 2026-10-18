@@ -32,10 +32,14 @@ from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .rules_dialog import RulesDialog
 from .backtest_dialog import BacktestDialog
 from .stats_dialog import StatsDialog, TradeStats
+from ..skills.stats.journal import Journal
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
 from .. import envconfig, settings
 from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesList, StatBlock, repolish
+
+
+RIGHT_WIDTH = 392                    # columna de la derecha (Skills y debajo) y área Stats, encima: mismo ancho
 
 
 class MainWindow(QMainWindow):
@@ -69,13 +73,19 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(12, 10, 12, 12)
         outer.setSpacing(10)
-        outer.addWidget(self._build_header(subtitle, demo))
+        # Arriba, la cabecera y el área de la skill Stats, con el mismo ancho que la columna de Skills que tiene debajo.
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        top.addWidget(self._build_header(subtitle, demo), 1)
+        top.addWidget(self._build_stats_area())
+        self.stats_area.setVisible("stats" in self.manager.skills)        # ya con padre: si no, sería una ventana suelta
+        outer.addLayout(top)
 
         body = QHBoxLayout()
         body.setSpacing(10)
         body.addLayout(self._build_left(app_cfg), 1)
         right = self._build_right()
-        right.setFixedWidth(392)
+        right.setFixedWidth(RIGHT_WIDTH)
         body.addWidget(right)
         outer.addLayout(body, 1)
 
@@ -84,6 +94,7 @@ class MainWindow(QMainWindow):
         self.recalc_btn.clicked.connect(lambda: self.bus.publish("bias.recalc", {}, source="ui"))
         self.colors_btn.clicked.connect(self.open_theme_editor)
         self.stats = TradeStats()                                 # copia de la skill Stats (stats.session)
+        self.stats_journal: Journal | None = None                 # diario mensual del forwardtest (para abrir meses guardados)
         self.stats_dialog: StatsDialog | None = None              # se crea la primera vez que se abre
         self.stats_btn.toggled.connect(self.toggle_stats)
         self.backtest, self.backtest_error = None, ""             # lo carga la skill Stats (stats.backtest)
@@ -175,25 +186,31 @@ class MainWindow(QMainWindow):
                 h.addWidget(divider)
             h.addWidget(block)
 
-        # Las cifras van justo después de la cuenta; los botones de la skill Stats (Estadísticas y Backtest) y Skins, en la
-        # esquina derecha.
+        # Las cifras van justo después de la cuenta; el botón Skins, en la esquina derecha.
         h.addStretch(1)
-        has_stats = "stats" in self.manager.skills
-        self.stats_btn = QPushButton("Estadísticas")
-        self.stats_btn.setCheckable(True)
-        self.stats_btn.setToolTip("Abrir o cerrar la ventana de estadísticas de las operaciones simuladas de la sesión "
-                                  "(skill Stats)")
-        self.stats_btn.setVisible(has_stats)
-        h.addWidget(self.stats_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
-        self.backtest_btn = QPushButton("Backtest")
-        self.backtest_btn.setCheckable(True)
-        self.backtest_btn.setToolTip("Abrir o cerrar la ventana con los resultados del backtest de los patrones (skill Stats)")
-        self.backtest_btn.setVisible(has_stats)
-        h.addWidget(self.backtest_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         self.colors_btn = QPushButton("Skins")
         self.colors_btn.setToolTip("Cambiar la paleta (skin) y personalizar los colores de la interfaz")
         h.addWidget(self.colors_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         return bar
+
+    def _build_stats_area(self) -> QFrame:
+        """Área de la skill Stats: Forwardtest (lo que hace el bot desde que opera) y Backtest (análisis del histórico)."""
+        area = Panel("Stats", "resultados del bot")
+        area.setFixedWidth(RIGHT_WIDTH)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.stats_btn = QPushButton("Forwardtest")
+        self.stats_btn.setCheckable(True)
+        self.stats_btn.setToolTip("Abrir o cerrar el forwardtest: las señales de Cortex y las operaciones simuladas desde que el "
+                                  "bot opera, guardadas por meses (skill Stats)")
+        self.backtest_btn = QPushButton("Backtest")
+        self.backtest_btn.setCheckable(True)
+        self.backtest_btn.setToolTip("Abrir o cerrar el backtest: los resultados de los patrones en el histórico (skill Stats)")
+        row.addWidget(self.stats_btn, 1)
+        row.addWidget(self.backtest_btn, 1)
+        area.body.addLayout(row)
+        self.stats_area = area
+        return area
 
     def _build_left(self, app_cfg: dict) -> QVBoxLayout:
         left = QVBoxLayout()
@@ -584,13 +601,15 @@ class MainWindow(QMainWindow):
 
     # -- estadísticas -----------------------------------------------------------------------------
     def toggle_stats(self, show: bool) -> None:
-        """El botón Estadísticas abre la ventana flotante y, pulsado otra vez, la cierra."""
+        """El botón Forwardtest abre la ventana flotante y, pulsado otra vez, la cierra."""
         if not show:
             if self.stats_dialog is not None:
                 self.stats_dialog.hide()
             return
         if self.stats_dialog is None:
-            self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts), lambda: list(self.watchlist))
+            self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts), lambda: list(self.watchlist),
+                                            months=lambda: self.stats_journal.months() if self.stats_journal else [],
+                                            load_month=self._load_stats_month)
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
             self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
         self.stats_dialog.popup_at(self.stats_btn)
@@ -601,9 +620,21 @@ class MainWindow(QMainWindow):
             if self.stats_dialog.isVisible():
                 self.stats_dialog.refresh()
 
+    def _load_stats_month(self, month: str) -> TradeStats | None:
+        """Un mes guardado del diario del forwardtest (lo lee la interfaz: la skill sigue con lo suyo)."""
+        if self.stats_journal is None:
+            return None
+        try:
+            return self.stats_journal.load_month(month)
+        except OSError as exc:
+            self.log(f"stats: no se pudo leer el diario de {month}: {exc}", tone="warn")
+            return None
+
     def _on_stats_session(self, p: dict) -> None:
-        """La skill Stats publica una copia de las cifras de la sesión cada vez que cambian."""
+        """La skill Stats publica una copia de las cifras del forwardtest cada vez que cambian."""
         self.stats = p["stats"]
+        if p.get("folder") and (self.stats_journal is None or str(self.stats_journal.folder) != p["folder"]):
+            self.stats_journal = Journal(p["folder"])
         self._refresh_stats()
 
     def _on_stats_backtest(self, p: dict) -> None:

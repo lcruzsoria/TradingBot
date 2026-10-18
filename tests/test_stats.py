@@ -74,7 +74,9 @@ def test_el_boton_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
 
     win.stats_btn.click()                                               # abre
     dlg = win.stats_dialog
-    assert dlg.isVisible() and win.stats_btn.isChecked()
+    assert dlg.isVisible() and win.stats_btn.isChecked() and win.stats_btn.text() == "Forwardtest"
+    assert dlg.window_days == 30                                        # por defecto, los últimos 30 días
+    dlg.set_window(None)                                                # la operación de prueba es de 1970
     assert dlg.blocks["trades"].value.text() == "1" and dlg.blocks["win"].value.text() == "100 %"
     assert dlg.history.rowCount() == 1 and dlg.history.item(0, 7).text() == "+1.00 R"
     assert dlg.by_symbol.rows[0][0].text() == "EURUSD" and dlg.by_symbol.rows[0][4].text() == "+1.00 R"

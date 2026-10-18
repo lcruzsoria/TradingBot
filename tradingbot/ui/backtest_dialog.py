@@ -1,4 +1,4 @@
-"""Backtest de los patrones en una ventana flotante, con el mismo estilo que Estadísticas.
+"""Backtest de los patrones en una ventana flotante, con el mismo estilo que Forwardtest.
 
 Arriba se eligen el grupo de mercados, el patrón y el filtro (lo que opera el bot, a favor del sesgo o sin filtro); debajo, el
 veredicto, las cifras clave, la curva de R acumulado, las barras por año y por hora, y los «libros»: comparativa entre mercados,

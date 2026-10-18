@@ -1,6 +1,7 @@
-"""Lo que ha pasado en la sesión del bot: GO / NO GO de Cortex y el resultado de las operaciones simuladas de Setup.
+"""Forwardtest: GO / NO GO de Cortex y el resultado de las operaciones simuladas de Setup desde que el bot opera.
 
-Lo lleva la skill Stats (en su hilo) y la ventana Estadísticas lo pinta a partir de las copias que publica en `stats.session`.
+Lo lleva la skill Stats (en su hilo), que lo guarda en el diario mensual (journal.py), y la ventana Forwardtest lo pinta a partir
+de las copias que publica en `stats.session`.
 """
 from __future__ import annotations
 
@@ -34,10 +35,50 @@ def alignment_of(order) -> str:
     return "Sin sesgo"
 
 
+REASONS = (("ya hay una posición abierta", "Posición abierta en el mercado"), ("ya dio un trade", "Sesión TBR ya usada"),
+           ("contra el sesgo", "Contra el sesgo"), ("a favor del sesgo", "A favor del sesgo"),
+           ("permitido por CORTEX_ALLOW_NO_BIAS", "Sin sesgo (permitido)"), ("mercado lateral", "Mercado lateral"),
+           ("sin sesgo claro", "Sin sesgo claro"), ("aún no está calculado", "Sesgo sin calcular"))
+
+
+def reason_of(reason: str) -> str:
+    """Motivo del GO / NO GO de Cortex agrupado (el texto completo lleva mercado, fechas y puntuación)."""
+    for needle, name in REASONS:
+        if needle in reason:
+            return name
+    head = reason.split(":", 1)[0].strip()
+    return head[:1].upper() + head[1:] if head else "Sin motivo"
+
+
+def trade_key(order) -> tuple | None:
+    """Lo que identifica una operación: al arrancar, Cortex vuelve a anunciar los patrones recientes y no deben contar dos veces."""
+    if not order.entry_ts:
+        return None
+    return (order.symbol, order.timeframe, order.direction, order.pattern_key, int(order.entry_ts))
+
+
+@dataclass
+class Signal:
+    """Una señal que evalúa Cortex (un patrón detectado) y su veredicto."""
+    allowed: bool
+    symbol: str = ""
+    timeframe: str = ""
+    pattern: str = ""
+    direction: str = ""
+    reason: str = ""
+    ts: int | None = None                # hora (servidor) de la vela del patrón
+    zone: str = ""                       # TBR del patrón
+
+    @property
+    def key(self) -> tuple | None:
+        return (self.symbol, self.timeframe, self.pattern, self.direction, self.ts, self.zone) if self.ts else None
+
+
 @dataclass
 class Trade:
     order: object                        # Order de Cortex
     closed: object | None = None         # Closed de Setup, o None mientras sigue abierta
+    stale: bool = False                  # abierta en el diario de un arranque anterior y que Setup ya no sigue
 
     @property
     def r(self) -> float:
@@ -76,41 +117,70 @@ class Group:
 
 @dataclass
 class TradeStats:
-    """Lo que ha pasado en la sesión: GO / NO GO de Cortex y las operaciones simuladas (se pierde al reiniciar el bot)."""
-    go: int = 0
-    nogo: int = 0
+    """Señales de Cortex y operaciones simuladas (las de los últimos meses, que la skill recupera del diario al arrancar)."""
+    signals: list[Signal] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
+    since: str | None = None             # inicio de la etapa (fecha y hora local) si se empezó una con «Nueva etapa»
 
     # -- registro ----------------------------------------------------------------------------
-    def decision(self, allowed: bool) -> None:
-        if allowed:
-            self.go += 1
-        else:
-            self.nogo += 1
+    def decision(self, allowed: bool, signal: Signal | None = None) -> bool:
+        """Anota un GO / NO GO; False si esa misma señal ya estaba (repetida al arrancar)."""
+        signal = signal or Signal(allowed)
+        signal.allowed = allowed
+        if signal.key is not None and any(x.key == signal.key for x in self.signals):
+            return False
+        self.signals.append(signal)
+        return True
 
-    def executed(self, order) -> None:
-        self.trades.append(Trade(order))
-
-    def closed(self, order, closed) -> None:
-        if closed is None:
-            return
+    def find(self, order) -> Trade | None:
+        key = trade_key(order)
         for t in self.trades:
-            if t.order is order and t.closed is None:
-                t.closed = closed
-                return
-        self.trades.append(Trade(order, closed))        # no la vimos entrar (p. ej. ventana creada después)
+            if t.order is order or (key is not None and trade_key(t.order) == key):
+                return t
+        return None
 
-    def reset(self) -> None:
-        self.go = self.nogo = 0
+    def executed(self, order) -> bool:
+        """Anota una operación nueva; False si ya estaba (y entonces vuelve a contar como seguida por Setup)."""
+        known = self.find(order)
+        if known is not None:
+            known.stale = False
+            return False
+        self.trades.append(Trade(order))
+        return True
+
+    def closed(self, order, closed) -> bool:
+        """Anota el cierre; False si no hay cierre o si ya estaba anotado."""
+        if closed is None:
+            return False
+        t = self.find(order)
+        if t is None:
+            self.trades.append(Trade(order, closed))    # no la vimos entrar (p. ej. ventana creada después)
+            return True
+        if t.closed is not None:
+            return False
+        t.closed, t.stale = closed, False
+        return True
+
+    def reset(self, since: str | None = None) -> None:
+        self.signals.clear()
         self.trades.clear()
+        self.since = since
 
     def snapshot(self) -> TradeStats:
         """Copia independiente (para pasarla a otro hilo: la skill sigue anotando sobre la suya)."""
-        return TradeStats(self.go, self.nogo, [Trade(t.order, t.closed) for t in self.trades])
+        return TradeStats(list(self.signals), [Trade(t.order, t.closed, t.stale) for t in self.trades], self.since)
 
-    def only(self, keep: Callable[[Trade], bool]) -> TradeStats:
-        """Las mismas cifras con solo las operaciones que cumplan `keep` (los GO / NO GO de Cortex no se filtran)."""
-        return TradeStats(self.go, self.nogo, [t for t in self.trades if keep(t)])
+    def only(self, keep: Callable[[Trade], bool], keep_signal: Callable[[Signal], bool] = lambda s: True) -> TradeStats:
+        """Las mismas cifras con solo las operaciones (y señales) que cumplan el filtro."""
+        return TradeStats([x for x in self.signals if keep_signal(x)], [t for t in self.trades if keep(t)], self.since)
+
+    @property
+    def go(self) -> int:
+        return sum(1 for x in self.signals if x.allowed)
+
+    @property
+    def nogo(self) -> int:
+        return sum(1 for x in self.signals if not x.allowed)
 
     # -- cifras ------------------------------------------------------------------------------
     @property
@@ -120,7 +190,12 @@ class TradeStats:
 
     @property
     def open(self) -> list[Trade]:
-        return [t for t in self.trades if t.closed is None]
+        """Abiertas que Setup sigue (sin las que quedaron sin seguimiento tras reiniciar el bot)."""
+        return [t for t in self.trades if t.closed is None and not t.stale]
+
+    @property
+    def stale(self) -> list[Trade]:
+        return [t for t in self.trades if t.closed is None and t.stale]
 
     @property
     def wins(self) -> int:
@@ -232,7 +307,7 @@ class TradeStats:
         for t in self.trades:
             g = rows.setdefault(key(t), Group(key(t)))
             if t.closed is None:
-                g.open += 1
+                g.open += not t.stale
                 continue
             g.wins += t.r > 0
             g.losses += t.r < 0
@@ -241,6 +316,14 @@ class TradeStats:
             g.pct += t.closed.pct
         fixed = [rows.pop(name) for name in names]
         return fixed + sorted(rows.values(), key=lambda g: (-g.r, -g.n, g.name))
+
+    def signal_groups(self, key: Callable[[Signal], str]) -> list[tuple[str, int, int]]:
+        """(nombre, GO, NO GO) de las señales de Cortex por grupo, de más a menos señales."""
+        rows: dict[str, list[int]] = {}
+        for x in self.signals:
+            row = rows.setdefault(key(x), [0, 0])
+            row[0 if x.allowed else 1] += 1
+        return sorted(((k, go, nogo) for k, (go, nogo) in rows.items()), key=lambda r: (-(r[1] + r[2]), r[0]))
 
     def breakdown(self, key: Callable[[object], str]) -> list[tuple[str, int, int, float]]:
         """(nombre, cerradas, ganadas, R total) por grupo con alguna cerrada, de más a menos R."""
