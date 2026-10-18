@@ -4,7 +4,8 @@ from __future__ import annotations
 from ..bias import Direction, TradeFilter
 from ...core import Event, Skill, register_skill
 from .order import build_calendar_order, build_order
-from .validation import DEFAULT_ALLOW_NO_BIAS, validate
+from ..setup.positions import trackable
+from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
 
 MAX_PENDING = 50
 
@@ -16,7 +17,7 @@ class CortexSkill(Skill):
                    "patrón de entrada en la TBR activa lo contrasta con el sesgo (a favor: GO; en contra, sin sesgo o "
                    "lateral: NO GO) y, si es GO, le pasa toda la información a Setup, que es quien opera. También "
                    "responde a las peticiones de operar (Bullish solo Long, Bearish solo Short).")
-    subscribes = ("bias.updated", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal")
+    subscribes = ("bias.updated", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal", "setup.closed")
     publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
 
@@ -28,11 +29,13 @@ class CortexSkill(Skill):
         self._pending: list[dict] = []                 # patrones que esperan a que llegue el sesgo de su mercado
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
+        self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
 
     def handle(self, event: Event) -> None:
         if event.topic == "candles.loaded":
             self.symbol, self.timeframe = event.payload["symbol"], event.payload["timeframe"]
-            self.publish("setup.candles", {"symbol": self.symbol, "timeframe": self.timeframe, "df": event.payload["df"]})
+            if event.payload.get("df") is not None:
+                self.publish("setup.candles", {"symbol": self.symbol, "timeframe": self.timeframe, "df": event.payload["df"]})
             self.set_caption(self.symbol)
         elif event.topic == "bias.updated":
             self._bias = event.payload
@@ -43,6 +46,9 @@ class CortexSkill(Skill):
         elif event.topic == "pattern.detected":
             self._pending = (self._pending + [event.payload])[-MAX_PENDING:]
             self._decide()
+        elif event.topic == "setup.closed":
+            self._open.pop(event.payload["order"].symbol, None)
+            self.set_caption(f"{event.payload['order'].symbol}: posición cerrada")
         elif event.topic == "calendar.signal":
             self._calendar(event.payload)
         elif event.topic == "trade.request":
@@ -53,16 +59,28 @@ class CortexSkill(Skill):
             self.publish("trade.verdict", {"request_id": event.payload.get("request_id"),
                                            "direction": direction, "allowed": allowed, "reason": reason})
 
+    def _busy_reason(self, symbol: str) -> str:
+        order = self._open[symbol]
+        return f"ya hay una posición abierta en {symbol} ({order.pattern}): hasta que no cierre (stop, objetivo o tiempo) no se abre otra"
+
+    def _send(self, order) -> None:
+        """Le pasa la orden a Setup y, si se puede seguir, marca el mercado como ocupado hasta que cierre."""
+        if trackable(order):
+            self._open[order.symbol] = order
+        self.publish("setup.order", {"order": order})
+
     def _calendar(self, payload: dict) -> None:
         """Señal de calendario: GO sin consultar el sesgo (el backtest no lo usa), salvo CORTEX_CALENDAR_USE_BIAS=true."""
         direction = payload["direction"]
         result = self.filter.result
-        if self.calendar_use_bias:
+        if payload["symbol"] in self._open:
+            allowed, reason = False, self._busy_reason(payload["symbol"])
+        elif self.calendar_use_bias:
             allowed, reason = self.filter.check(Direction(direction.capitalize()))
         else:
             allowed, reason = True, "estrategia de calendario: no depende del sesgo (CORTEX_CALENDAR_USE_BIAS=false)"
         if allowed:
-            self.publish("setup.order", {"order": build_calendar_order(payload, result, reason)})
+            self._send(build_calendar_order(payload, result, reason))
         self.set_caption(f"{'GO' if allowed else 'NO GO'} {direction.capitalize()} calendario")
 
     def _decide(self) -> None:
@@ -76,11 +94,14 @@ class CortexSkill(Skill):
                 waiting.append(p)
                 continue
             result = bias["result"]
-            decision = validate(p["hit"].direction, result, self.allow_no_bias)
+            if p["symbol"] in self._open:                # una sola posición abierta por mercado
+                decision = Decision(False, self._busy_reason(p["symbol"]))
+            else:
+                decision = validate(p["hit"].direction, result, self.allow_no_bias)
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
                                              "hit": p["hit"], "decision": decision, "bias": result.bias,
                                              "bias_result": result})
             if decision.allowed:
-                self.publish("setup.order", {"order": build_order(p, decision, result)})
+                self._send(build_order(p, decision, result))
             self.set_caption(f"{decision.verdict} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
         self._pending = waiting

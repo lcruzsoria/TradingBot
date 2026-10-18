@@ -12,7 +12,7 @@ from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
-DEFAULT_UNTIL = ("ASIA@08:00", "LONDON:NY_AM:FIN", "NY_AM@18:00")   # Asia hasta las 08:00, London hasta el final de NY Open, NY Open hasta las 18:00
+DEFAULT_UNTIL = ("ASIA@05:00", "LONDON:NY_AM:FIN", "NY_AM@18:00")   # Asia hasta las 05:00, London hasta el final de NY Open, NY Open hasta las 18:00
 DEFAULT_EXTEND = ()                     # TBR cuyo plazo llega hasta el final de la última zona del ciclo
 DEFAULT_HISTORY_DAYS = 30                      # días de TBR pasadas de las que se dibujan fibos y entradas
 RECENT_SECONDS = 24 * 3600                      # solo se evalúan las TBR que cerraron en el último día

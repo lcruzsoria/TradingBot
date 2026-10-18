@@ -124,3 +124,27 @@ def test_el_registro_anota_el_go_y_el_no_go_de_cortex(tmp_path, monkeypatch):
     text = win.log_view.toPlainText()
     assert "cortex: GO Long (Patrón de prueba, NY Open" in text and "Long a favor del sesgo Bullish" in text
     assert "cortex: NO GO Long" in text and "Long contra el sesgo Bearish" in text          # el denegado también se muestra
+
+
+def test_con_una_posicion_abierta_no_se_abre_otra_hasta_que_cierre():
+    manager, bus, decisions, orders, executed = run_skills()
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+    event = {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}
+    bus.publish("pattern.detected", event, source="pattern")
+    wait(orders)
+    bus.publish("pattern.detected", {**event, "hit": PatternHit("q", "Otro patrón", "long", 20, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_001_000)},
+                source="pattern")
+    time.sleep(0.4)
+    assert [d.payload["decision"].allowed for d in decisions] == [True, False]
+    assert "ya hay una posición abierta en EURUSD" in decisions[1].payload["decision"].reason and len(orders) == 1
+    o = orders[0].payload["order"]
+    assert (o.entry_ts, o.close_ts) == (1_000_000, 1_000_000 + 24 * 3600)           # Setup puede seguirla: stop, objetivo o 24 h
+    bus.publish("setup.closed", {"order": o, "closed": None, "sent": False}, source="setup")      # la posición cierra
+    time.sleep(0.2)
+    bus.publish("pattern.detected", {**event, "hit": PatternHit("r", "Tercer patrón", "long", 30, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_002_000)},
+                source="pattern")
+    wait(orders, 2)
+    manager.stop()
+    assert len(orders) == 2 and decisions[2].payload["decision"].allowed

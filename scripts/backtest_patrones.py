@@ -43,7 +43,8 @@ TF_MIN = 15
 SYMBOLS = ("NAS100.r", "SP500.r", "DJ30.r", "US2000.r")
 PATTERNS = {"Continuación": continuacion, "Reversión": reversion}
 ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
-NEW_UNTIL = {"ASIA": "@08:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot: Asia hasta las 08:00, London hasta el
+MAIN_FILTERS = ["sin filtro de sesgo", "a favor del sesgo (Cortex)", "una posición a la vez (todas)", "una posición a la vez (GO de Cortex)"]
+NEW_UNTIL = {"ASIA": "@05:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot: Asia hasta las 05:00, London hasta el
 OLD_UNTIL = {"NY_AM": "@16:30"}                                                # final de NY Open y NY Open hasta las 18:00
 # BT_PLAZOS: "anterior" (NY Open hasta NY PM, lo demás normal), "solo_asia" / "solo_london" / "solo_ny" (un plazo nuevo sobre el
 # anterior) o, por defecto, los tres plazos nuevos juntos.
@@ -198,13 +199,36 @@ def with_all(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([trades, both], ignore_index=True)
 
 
+def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None) -> pd.Series:
+    """True en las operaciones que no se habrían abierto porque ya había otra abierta en el mismo mercado (hasta su stop, objetivo
+    o cierre por tiempo). Solo cuentan como abiertas las de `take` (las que el bot sí abre); la entrada debe ser posterior a la
+    vela de cierre de la anterior."""
+    flags = pd.Series(False, index=trades.index)
+    pool = trades if take is None else trades[take]
+    for _sym, g in pool.sort_values("entrada (NY)").groupby("mercado"):
+        free_at = pd.Timestamp.min
+        for i, row in g.iterrows():
+            if row["entrada (NY)"] <= free_at:
+                flags[i] = True
+            else:
+                free_at = row["cierre (NY)"]
+    return flags
+
+
 def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    trades = trades.copy()
+    trades["solapada (todas)"] = overlap_flags(trades)
+    go = trades["sesgo vs operación"] != "en contra"                      # con CORTEX_ALLOW_NO_BIAS=true, GO = no ir contra el sesgo (las de "sin sesgo" también)
+    trades["solapada (GO de Cortex)"] = overlap_flags(trades, go)
     t = with_all(trades)
     t["filtro"] = "sin filtro de sesgo"
     aligned = t[t["sesgo vs operación"] == "a favor"].assign(filtro="a favor del sesgo (Cortex)")
     against = t[t["sesgo vs operación"] == "en contra"].assign(filtro="en contra del sesgo")
     none = t[t["sesgo vs operación"] == "sin sesgo"].assign(filtro="sin sesgo / lateral")
-    f = pd.concat([t, aligned, against, none], ignore_index=True)
+    one_all = t[~t["solapada (todas)"]].assign(filtro="una posición a la vez (todas)")
+    one_go = t[(t["sesgo vs operación"] != "en contra") & ~t["solapada (GO de Cortex)"]].assign(
+        filtro="una posición a la vez (GO de Cortex)")
+    f = pd.concat([t, aligned, against, none, one_all, one_go], ignore_index=True)
     f["año"] = f["entrada (NY)"].dt.year
     f["hora (NY)"] = f["entrada (NY)"].dt.hour
     f["día semana"] = f["entrada (NY)"].dt.dayofweek.map(dict(enumerate(DAYS)))
@@ -213,16 +237,16 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
     sheets["Por mercado"] = table(f, ["mercado", "patrón", "filtro"])
     sheets["Por zona"] = table(f[f["patrón"] != "Ambos"], ["patrón", "zona", "filtro"])
     sheets["Por dirección"] = table(f[f["patrón"] != "Ambos"], ["patrón", "dirección", "filtro"])
-    sheets["Por año"] = table(f[f["filtro"].isin(["sin filtro de sesgo", "a favor del sesgo (Cortex)"])], ["patrón", "filtro", "año"])
+    sheets["Por año"] = table(f[f["filtro"].isin(MAIN_FILTERS)], ["patrón", "filtro", "año"])
     base = f[(f["patrón"] != "Ambos") & (f["filtro"] == "sin filtro de sesgo")]
     sheets["Por hora"] = table(base, ["patrón", "hora (NY)"])
     sheets["Por día semana"] = table(base, ["patrón", "día semana"])
     half = trades["entrada (NY)"].median()
     halves = pd.concat([f[f["entrada (NY)"] <= half].assign(mitad="1ª mitad"), f[f["entrada (NY)"] > half].assign(mitad="2ª mitad")])
-    sheets["Mitades (robustez)"] = table(halves[halves["filtro"].isin(["sin filtro de sesgo", "a favor del sesgo (Cortex)"])],
+    sheets["Mitades (robustez)"] = table(halves[halves["filtro"].isin(MAIN_FILTERS)],
                                          ["patrón", "filtro", "mitad"])
     sens = []
-    for (pat, flt), g in f[f["filtro"].isin(["sin filtro de sesgo", "a favor del sesgo (Cortex)"])].groupby(["patrón", "filtro"]):
+    for (pat, flt), g in f[f["filtro"].isin(MAIN_FILTERS)].groupby(["patrón", "filtro"]):
         for m in TP_MULTS:
             s = stats(g[f"R neto TP {m:g}R"], g["cierre (NY)"])
             sens.append({"patrón": pat, "filtro": flt, "variante": f"objetivo {m:g}R", **s})
@@ -252,7 +276,9 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
     sheets["Operaciones"] = trades.sort_values("entrada (NY)")
     equity = []
     for pat, g in with_all(trades).groupby("patrón"):
-        for flt, gg in (("sin filtro de sesgo", g), ("a favor del sesgo (Cortex)", g[g["sesgo vs operación"] == "a favor"])):
+        for flt, gg in (("sin filtro de sesgo", g), ("a favor del sesgo (Cortex)", g[g["sesgo vs operación"] == "a favor"]),
+                        ("una posición a la vez (todas)", g[~g["solapada (todas)"]]),
+                        ("una posición a la vez (GO de Cortex)", g[(g["sesgo vs operación"] != "en contra") & ~g["solapada (GO de Cortex)"]])):
             gg = gg.sort_values("cierre (NY)")
             equity.append(pd.DataFrame({"patrón": pat, "filtro": flt, "cierre (NY)": gg["cierre (NY)"].to_numpy(),
                                         "R neto": gg["R neto"].to_numpy(), "R acumulado": gg["R neto"].cumsum().to_numpy()}))
@@ -266,6 +292,8 @@ NOTES = [
               "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
+    ("Una posición a la vez", "Filtros «una posición a la vez»: en cada mercado no se abre otra operación hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
+    ("Plazos", "Cada TBR se busca hasta: Asia 05:00, London 12:00 (final de NY Open) y NY Open 18:00 (variantes con BT_PLAZOS)."),
     ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
     ("Sesgo", "Reglas del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; lateralidad 6 h / 0,15) con velas M15, congelado "
               "al abrir cada bloque de 3 h. «A favor» = lo que dejaría pasar Cortex; «sin sesgo» incluye el mercado lateral."),

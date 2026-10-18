@@ -308,7 +308,7 @@ def test_plazo_de_asia_hasta_el_inicio_de_ny_open():
 def test_pattern_until_por_defecto_y_validacion():
     manager, _bus, _found, *_ = run_skill("")
     manager.stop()
-    assert manager.skills["pattern"].until == {"ASIA": "@08:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}
+    assert manager.skills["pattern"].until == {"ASIA": "@05:00", "LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}
     assert manager.skills["pattern"].extend == []
     for text in ("PATTERN_UNTIL=ASIA\n", "PATTERN_UNTIL=ASIA:NO_EXISTE\n"):
         manager, _bus, found, *_ = run_skill(text)
@@ -356,3 +356,17 @@ def test_plazo_de_ny_open_hasta_las_1800():
     manager, _bus, found, *_ = run_skill("PATTERN_UNTIL=NY_AM@25:00\n")
     manager.stop()
     assert manager.skills["pattern"].state.value == "error" and "HH:MM" in manager.skills["pattern"].note
+
+
+def test_la_posicion_dibujada_se_cierra_por_tiempo_a_las_24_h():
+    import numpy as np
+    from tradingbot.skills.pattern.trade import position_figure
+    n = 120
+    ts = np.arange(n) * 900
+    flat = np.full(n, 100.0)
+    ctx = PatternContext("X", "15m", 15, ts, flat, flat + 0.1, flat - 0.1, flat, TBR, 0, n - 1, True)
+    pos = position_figure(ctx, "p", "NY Open", "long", 2, 100.0, 90.0, 120.0, "Patrón")
+    assert pos.state == "tiempo" and pos.x1_ts == int(ts[2 + 95]) + 900              # 96 velas M15 (de la 2 a la 97) = 24 h; ya no sigue abierta
+    corta = position_figure(PatternContext("X", "15m", 15, ts[:50], flat[:50], flat[:50] + 0.1, flat[:50] - 0.1, flat[:50], TBR, 0, 49, True),
+                            "p", "NY Open", "long", 2, 100.0, 90.0, 120.0, "Patrón")
+    assert corta.state == "abierta"                                                  # los datos acaban antes de las 24 h

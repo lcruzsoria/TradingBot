@@ -849,13 +849,21 @@ class MainWindow(QMainWindow):
                          "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction})
         self.chart.set_fibs(fibs)
         positions = []
-        for f in self._positions:
+        for f in sorted(self._positions, key=lambda f: f.x0_ts):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
             decision, reason = self._entry_decision(x0, f.direction)
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                               "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
                               "reason": reason})
+        busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran
+        for pos in positions:
+            if not pos["decision"]:
+                continue
+            if pos["x0"] < busy_until:
+                pos["decision"], pos["reason"] = "NO GO", "posición abierta"
+            elif pos["decision"] == "GO":
+                busy_until = pos["x1"]
         self.chart.set_positions(positions)
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:

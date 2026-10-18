@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+MAX_HOLD_SECONDS = 24 * 3600          # un trade de patrón se cierra por tiempo 24 h después de la entrada (como en el backtest)
+
 
 @dataclass(frozen=True)
 class Order:
@@ -38,7 +40,8 @@ def build_order(payload: dict, decision, bias_result) -> Order:
     hit, tbr = payload["hit"], payload["tbr"]
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
-                 bias_result.bias.value, float(bias_result.score), decision.reason)
+                 bias_result.bias.value, float(bias_result.score), decision.reason, "24 h tras la entrada",
+                 hit.ts or None, (hit.ts + MAX_HOLD_SECONDS) if hit.ts else None)
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:

@@ -527,9 +527,9 @@ class ChartView(pg.PlotWidget):
             self._pos_items.append(line)
             ratio = reward / risk if risk > 0 else 0.0
             long = pos["direction"] == "long"
-            tags = ((target, f"Objetivo {fmt_price(target)}  ({ratio:.2f}R)", QColor(38, 166, 154, 230), 0.0 if long else 1.0),
-                    (stop, f"Stop {fmt_price(stop)}", QColor(239, 83, 80, 230), 1.0 if long else 0.0),
-                    (entry, f"{pos['label']}  {'Largo' if long else 'Corto'} {fmt_price(entry)}  R:R {ratio:.2f}  ({pos['state']})",
+            tags = ((target, f"Objetivo  ({ratio:.2f}R)", QColor(38, 166, 154, 230), 0.0 if long else 1.0),
+                    (stop, "Stop", QColor(239, 83, 80, 230), 1.0 if long else 0.0),
+                    (entry, f"{pos['label']}  {'Largo' if long else 'Corto'}  R:R {ratio:.2f}  ({pos['state']})",
                      QColor(66, 133, 244, 230), 0.5))
             for price, text, fill, anchor_y in tags:
                 tag = pg.TextItem(text, color="#FFFFFF", fill=pg.mkBrush(fill), anchor=(0, anchor_y))
