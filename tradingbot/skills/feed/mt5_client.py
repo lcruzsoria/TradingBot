@@ -163,6 +163,17 @@ class Mt5Source:
             df = aggregate_candles(df, minutes(timeframe) * 60)
         return df
 
+    def last_bar_ts(self, symbol: str, timeframe: str) -> int | None:
+        """Hora (servidor) de la vela más reciente que tiene el terminal, en la temporalidad base: para saber si hay velas
+        nuevas sin recargarlo todo. None si no hay datos."""
+        with self._lock:
+            mt5 = self._require()
+            exact = self.resolve_symbol(symbol)
+            if exact is None:
+                return None
+            rates = mt5.copy_rates_from_pos(exact, mt5_constant(mt5, base_timeframe(timeframe)), 0, 1)
+            return int(rates[-1]["time"]) if rates is not None and len(rates) else None
+
     # -- nombres de símbolo -----------------------------------------------
     def _broker_names(self, mt5) -> dict[str, str]:
         if self._names is None:

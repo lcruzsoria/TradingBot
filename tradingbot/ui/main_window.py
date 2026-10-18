@@ -729,7 +729,9 @@ class MainWindow(QMainWindow):
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self._update_chart_stats()
         first, last = self._ny(df["ts"].iloc[0]), self._ny(df["ts"].iloc[-1])
-        if refresh:
+        if refresh and p.get("reason") == "live":
+            pass                                             # vela nueva en directo: se ve en el gráfico, sin llenar el registro
+        elif refresh:
             self.log(f"feed: velas de {symbol} {display_label(tf)} actualizadas (última {last:%d/%m %H:%M} NY) "
                      f"en {p['seconds']:.1f}s")
         else:
