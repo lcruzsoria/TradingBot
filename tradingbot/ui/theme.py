@@ -281,6 +281,18 @@ QLabel#CardTitle {{ font-size: 13px; font-weight: 700; }}
 QLabel#CardNote {{ color: {MUTED}; font-size: 11px; }}
 QLabel#SkillDetail {{ font-size: 11px; background: transparent; }}
 
+/* Ventana de estadísticas */
+QFrame#StatTile {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 6px; }}
+QFrame#StatTile QLabel {{ background: transparent; }}
+QLabel#TileValue {{ font-size: 17px; font-weight: 700; }}
+QLabel#BookTitle {{ font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }}
+QLabel#BookHead {{ color: {MUTED}; font-size: 10px; padding: 2px 0 4px 0; }}
+QLabel#BookStrong {{ font-weight: 700; }}
+QLabel#BookName {{ font-weight: 700; padding: 5px 0; }}
+QLabel#BookCell {{ padding: 5px 0; }}
+QFrame#BookRule {{ background: {BORDER}; border: none; }}
+QScrollArea#StatsScroll, QScrollArea#StatsScroll > QWidget > QWidget {{ background: transparent; }}
+
 /* Tarjetas de mercado */
 QFrame#MarketCard {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 6px; }}
 QFrame#MarketCard:hover {{ border-color: {mix(BORDER, ACCENT, 0.5)}; }}

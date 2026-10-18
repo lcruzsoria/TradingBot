@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
                 self.stats_dialog.hide()
             return
         if self.stats_dialog is None:
-            self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts))
+            self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts), lambda: list(self.watchlist))
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
         self.stats_dialog.popup_at(self.stats_btn)
 
