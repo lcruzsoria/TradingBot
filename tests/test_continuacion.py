@@ -166,7 +166,7 @@ def test_el_grafico_dibuja_los_fibo_y_el_boton_los_apaga(tmp_path, monkeypatch):
     assert win.chart.fib_count == 0
 
 
-def test_la_segunda_entrada_de_una_sesion_se_ve_atenuada_y_tachada_con_su_no_go(tmp_path, monkeypatch):
+def test_el_grafico_dibuja_una_sola_entrada_por_tbr_la_que_opera_cortex(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
     from tradingbot import settings
     from tradingbot.core import EventBus, Services, SkillManager
@@ -192,14 +192,24 @@ def test_la_segunda_entrada_de_una_sesion_se_ve_atenuada_y_tachada_con_su_no_go(
                Figure("pos", "continuacion", "NY Open", "short", ny(DAY, 11, 0), ny(DAY, 12, 0),
                       {"entrada": 98.0, "stop": 104.0, "objetivo": 86.0}, "objetivo", "NY Open ▼", day)]
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures})
-    rev, cont = win.chart._fibs
-    assert rev["decision"] == "GO" and (cont["decision"], cont["reason"]) == ("NO GO", "sesión ya operada")
+    titles = lambda: [f["label"] for f in win.chart._fibs]                                      # noqa: E731
+    assert titles() == ["NY Open ▲ Rev"] and win.chart._fibs[0]["decision"] == "GO"           # solo la que opera Cortex
+    assert [p["label"] for p in win.chart._positions] == ["NY Open ▲ Rev"]
+    assert all(item.opacity() == 1 for item in win.chart._fib_items)
+    verdicts = {"long": ("NO GO", "Bearish -4"), "short": ("GO", "Bearish -4")}               # el largo va contra el sesgo
+    monkeypatch.setattr(win, "_entry_decision", lambda index, direction: verdicts[direction])
+    win._apply_fibs()
+    assert titles() == ["NY Open ▼"] and [p["label"] for p in win.chart._positions] == ["NY Open ▼"]
+    en_curso = Figure("fib", "otro", "NY Open", "long", ny(DAY, 11, 30), ny(DAY, 13, 0), {"0": 99.0, "0,5": 97.0, "1": 95.0},
+                      "en curso", "NY Open ▲ Otro", day)
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures + [en_curso]})
+    assert titles() == ["NY Open ▼"]                                                          # la TBR ya dio su entrada
+    monkeypatch.setattr(win, "_entry_decision", lambda index, direction: ("NO GO", "lateral +0"))
+    win._apply_fibs()                                                                          # ninguna se opera: la primera, atenuada
+    assert titles() == ["NY Open ▲ Rev"]
     items = win.chart._fib_items
-    assert all(item.opacity() == 1 for item in items[:7])                                       # la que se opera, normal
-    assert all(item.opacity() == NO_GO_OPACITY for item in items[7:13])                        # la otra, atenuada...
-    assert "line-through" in items[13].toHtml() and "NO GO: sesión ya operada" in items[13].toPlainText()   # ...y tachada con el motivo
-    assert [p["decision"] for p in win.chart._positions] == ["GO", "NO GO"]
-    assert min(item.opacity() for item in win.chart._pos_items) == NO_GO_OPACITY
+    assert all(item.opacity() == NO_GO_OPACITY for item in items[:-1])
+    assert "line-through" in items[-1].toHtml() and "NO GO: lateral +0" in items[-1].toPlainText()
 
 
 def test_el_pico_justo_antes_de_la_vela_de_rotura_es_el_swing_y_no_el_maximo_de_la_tbr():
