@@ -958,6 +958,7 @@ class MainWindow(QMainWindow):
 
     def _on_setup_executed(self, p: dict) -> None:
         o = p["order"]
+        self.ring.celebrate(o.direction, o.symbol)
         lines = [f"Orden:    {o.label}", f"Activo:   {o.symbol}   Temporalidad: {display_label(o.timeframe)}",
                  f"Sesgo:    {o.bias} (puntuación {o.score:+g})"]
         if o.tbr_zone:
@@ -976,6 +977,8 @@ class MainWindow(QMainWindow):
 
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]
+        if c.r > 0:
+            self.ring.win(c.r, o.symbol)
         why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
         opened = f"{self._ny(o.entry_ts):%d/%m %H:%M}" if o.entry_ts else "-"
         closed = f"{self._ny(c.exit_ts):%d/%m %H:%M}"
