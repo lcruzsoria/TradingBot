@@ -63,10 +63,14 @@ def test_el_boton_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
-    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    bus = EventBus()
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "stats"}]), cfg, "t")
+    assert win.stats_btn.isVisibleTo(win) and win.backtest_btn.isVisibleTo(win)
     o = order()
-    win._on_setup_executed({"order": o, "sent": False, "note": "simulación"})
-    win._on_setup_closed({"order": o, "closed": Closed("objetivo", 115.0, 1_010_000, 1.0, 9.5), "sent": False})
+    s = TradeStats()                                                    # lo que publica la skill Stats
+    s.executed(o)
+    s.closed(o, Closed("objetivo", 115.0, 1_010_000, 1.0, 9.5))
+    win._on_stats_session({"stats": s.snapshot()})
 
     win.stats_btn.click()                                               # abre
     dlg = win.stats_dialog
@@ -84,3 +88,43 @@ def test_el_boton_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
     win.stats_btn.click()
     dlg.reject()                                                        # cerrar con Esc / la X desmarca el botón
     assert not dlg.isVisible() and not win.stats_btn.isChecked()
+
+
+def _window(tmp_path, monkeypatch, skills, bus=None):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    bus = bus or EventBus()
+    return MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig()), skills), cfg, "t")
+
+
+def test_reiniciar_avisa_a_la_skill(tmp_path, monkeypatch):
+    from tradingbot.core import EventBus
+    bus = EventBus()
+    seen = []
+    bus.subscribe("test", "stats.reset", seen.append)
+    win = _window(tmp_path, monkeypatch, [{"type": "stats"}], bus)
+    win.stats_btn.click()
+    win.stats_dialog.reset_btn.click()
+    assert [e.topic for e in seen] == ["stats.reset"]
+
+
+def test_sin_skill_stats_no_hay_botones(tmp_path, monkeypatch):
+    win = _window(tmp_path, monkeypatch, [])
+    assert not win.stats_btn.isVisibleTo(win) and not win.backtest_btn.isVisibleTo(win)
+
+
+def test_el_boton_backtest_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
+    from tradingbot.skills.stats.backtest import Backtest, Group
+    win = _window(tmp_path, monkeypatch, [{"type": "stats"}])
+    win._on_stats_backtest({"backtest": Backtest([Group("oro", "Oro", {"resumen": []})], {}), "error": ""})
+    win.backtest_btn.click()
+    dlg = win.backtest_dialog
+    assert dlg.isVisible() and win.backtest_btn.isChecked() and dlg.group_key == "oro"
+    win.backtest_btn.click()
+    assert not dlg.isVisible() and not win.backtest_btn.isChecked()

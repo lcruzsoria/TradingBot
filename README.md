@@ -379,7 +379,9 @@ Cómo personalizarlo:
 
 1. **`tradingbot.env`**: `UI_THEME` elige la paleta de arranque.
 2. **Botón "Skins"**, en la esquina superior derecha de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
-   A su izquierda, el botón **"Estadísticas"** abre (y, pulsado otra vez, cierra) una ventana flotante con las cifras de las operaciones simuladas de la sesión: acierto, resultado en R, expectativa, profit factor, drawdown, racha, GO / NO GO de Cortex, la curva de R acumulado y tablas por operación, mercado y patrón. Se reinicia al cerrar el bot (o con su botón «Reiniciar»).
+   A su izquierda, los botones de la skill **Stats** (satélite `aux3` del anillo; sin ella no aparecen):
+   - **"Estadísticas"** abre (y, pulsado otra vez, cierra) una ventana flotante con las cifras de las operaciones simuladas de la sesión: acierto, resultado en R, expectativa, profit factor, drawdown, racha, GO / NO GO de Cortex, la curva de R acumulado y tablas por operación, mercado y patrón. Las lleva la skill Stats, que escucha a Cortex y a Setup; se reinician al cerrar el bot (o con su botón «Reiniciar»).
+   - **"Backtest"** abre una ventana con el mismo estilo y todos los resultados del backtest de los patrones (2018-2026) y de la estrategia Calendario: eliges grupo (índices, forex, oro, cripto o Calendario), patrón (Ambos, Continuación, Reversión) y filtro (lo que opera el bot, a favor del sesgo, sin filtro; en Calendario, los mercados del bot o los 4 índices, con la configuración del bloque CALENDARIO al exportar) y muestra el veredicto (según el estadístico t), las cifras clave, la curva de R, barras por año y por hora, y tablas: comparativa entre mercados, por mercado, zona, lado, filtro, día, mitades, sensibilidad, mejoras de stop y RR, embudo, cómo terminan las operaciones, datos y metodología. Lee `tradingbot/skills/stats/backtest.json` (o `STATS_BACKTEST_FILE`), un resumen de los Excel de `analisis/` y de `analisis/lunes_hora_fija.pkl`: tras regenerar el backtest, ejecuta `uv run --with openpyxl python scripts/exportar_backtest.py` y pulsa «Recargar».
    *Guardar* deja esa paleta como la de arranque (cambia `UI_THEME` en `tradingbot.env`) y guarda tus colores
    retocados en `theme.local.json` (no se sube a git).
 3. **`config.toml`**, sección `[theme]`: colores sueltos (`#RRGGBB`) que se aplican encima de la paleta de arranque.
@@ -429,8 +431,9 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `pattern` | 4 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %) hasta que empieza la siguiente; avisa de cada uno que identifica y de los que se invalidan, anulan o vencen (`candles.loaded` + `tbr.updated` + `clock.offset` -> `pattern.updated` / `pattern.detected` / `pattern.discarded` / `pattern.session`). Lee el bloque PATTERN. |
 | `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo y cierre por tiempo -> `setup.closed`, que se anota en el Registro); por ahora en modo simulación. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
+| `stats` | aux3 | Estadísticas: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` y `stats.reload`. Alimenta los botones Estadísticas y Backtest. Lee el bloque STATS. |
 
-El anillo está completo; Setup ocupa el satélite `aux1` y quedan libres `aux2` y `aux3`.
+El anillo está completo; los satélites los ocupan Setup (`aux1`), Calendario (`aux2`) y Stats (`aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + pattern + cortex -> bias.updated -> cortex`;

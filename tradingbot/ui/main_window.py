@@ -30,6 +30,7 @@ from .fmt import fecha_corta, fecha_hora, miles
 from .logview import LogView
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .rules_dialog import RulesDialog
+from .backtest_dialog import BacktestDialog
 from .stats_dialog import StatsDialog, TradeStats
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
@@ -82,9 +83,12 @@ class MainWindow(QMainWindow):
         self.tbr_btn.toggled.connect(self.chart.show_tbr)
         self.recalc_btn.clicked.connect(lambda: self.bus.publish("bias.recalc", {}, source="ui"))
         self.colors_btn.clicked.connect(self.open_theme_editor)
-        self.stats = TradeStats()
+        self.stats = TradeStats()                                 # copia de la skill Stats (stats.session)
         self.stats_dialog: StatsDialog | None = None              # se crea la primera vez que se abre
         self.stats_btn.toggled.connect(self.toggle_stats)
+        self.backtest, self.backtest_error = None, ""             # lo carga la skill Stats (stats.backtest)
+        self.backtest_dialog: BacktestDialog | None = None
+        self.backtest_btn.toggled.connect(self.toggle_backtest)
         self.edit_markets_btn.clicked.connect(self.edit_watchlist)
         self.markets.symbol_selected.connect(self._on_market_clicked)
         self.bias_card.probe.connect(self._probe_trade)
@@ -100,7 +104,8 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed, "pattern.updated": self._on_pattern_updated,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed,
+            "stats.session": self._on_stats_session, "stats.backtest": self._on_stats_backtest, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected, "pattern.discarded": self._on_pattern_discarded,
             "pattern.session": self._on_pattern_session,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
@@ -170,12 +175,21 @@ class MainWindow(QMainWindow):
                 h.addWidget(divider)
             h.addWidget(block)
 
-        # Las cifras van justo después de la cuenta; los botones Estadísticas y Skins, en la esquina derecha.
+        # Las cifras van justo después de la cuenta; los botones de la skill Stats (Estadísticas y Backtest) y Skins, en la
+        # esquina derecha.
         h.addStretch(1)
+        has_stats = "stats" in self.manager.skills
         self.stats_btn = QPushButton("Estadísticas")
         self.stats_btn.setCheckable(True)
-        self.stats_btn.setToolTip("Abrir o cerrar la ventana de estadísticas de las operaciones simuladas de la sesión")
+        self.stats_btn.setToolTip("Abrir o cerrar la ventana de estadísticas de las operaciones simuladas de la sesión "
+                                  "(skill Stats)")
+        self.stats_btn.setVisible(has_stats)
         h.addWidget(self.stats_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
+        self.backtest_btn = QPushButton("Backtest")
+        self.backtest_btn.setCheckable(True)
+        self.backtest_btn.setToolTip("Abrir o cerrar la ventana con los resultados del backtest de los patrones (skill Stats)")
+        self.backtest_btn.setVisible(has_stats)
+        h.addWidget(self.backtest_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         self.colors_btn = QPushButton("Skins")
         self.colors_btn.setToolTip("Cambiar la paleta (skin) y personalizar los colores de la interfaz")
         h.addWidget(self.colors_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
@@ -578,11 +592,40 @@ class MainWindow(QMainWindow):
         if self.stats_dialog is None:
             self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts), lambda: list(self.watchlist))
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
+            self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
         self.stats_dialog.popup_at(self.stats_btn)
 
     def _refresh_stats(self) -> None:
-        if self.stats_dialog is not None and self.stats_dialog.isVisible():
-            self.stats_dialog.refresh()
+        if self.stats_dialog is not None:
+            self.stats_dialog.stats = self.stats
+            if self.stats_dialog.isVisible():
+                self.stats_dialog.refresh()
+
+    def _on_stats_session(self, p: dict) -> None:
+        """La skill Stats publica una copia de las cifras de la sesión cada vez que cambian."""
+        self.stats = p["stats"]
+        self._refresh_stats()
+
+    def _on_stats_backtest(self, p: dict) -> None:
+        self.backtest, self.backtest_error = p["backtest"], p.get("error", "")
+        if self.backtest_error:
+            self.log(f"stats: {self.backtest_error}", tone="warn")
+        elif self.backtest is not None:
+            self.log(f"stats: backtest cargado ({', '.join(g.name for g in self.backtest.groups)})")
+        if self.backtest_dialog is not None:
+            self.backtest_dialog.set_backtest(self.backtest, self.backtest_error)
+
+    def toggle_backtest(self, show: bool) -> None:
+        """El botón Backtest abre la ventana flotante y, pulsado otra vez, la cierra."""
+        if not show:
+            if self.backtest_dialog is not None:
+                self.backtest_dialog.hide()
+            return
+        if self.backtest_dialog is None:
+            self.backtest_dialog = BacktestDialog(self, self.backtest, self.backtest_error)
+            self.backtest_dialog.hidden.connect(lambda: self.backtest_btn.setChecked(False))
+            self.backtest_dialog.reload_requested.connect(lambda: self.bus.publish("stats.reload", {}, source="ui"))
+        self.backtest_dialog.popup_at(self.backtest_btn)
 
     # -- tema -------------------------------------------------------------------------------------
     def open_theme_editor(self) -> None:
@@ -603,6 +646,8 @@ class MainWindow(QMainWindow):
         if self.ring.selected in self.manager.skills:
             self._show_skill(self.ring.selected)
         self._refresh_stats()
+        if self.backtest_dialog is not None:
+            self.backtest_dialog.refresh()
 
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
     def _on_event(self, event: Event) -> None:
@@ -982,8 +1027,6 @@ class MainWindow(QMainWindow):
     def _on_cortex_decision(self, p: dict) -> None:
         side, when, lines = self._pattern_lines(p)
         hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
-        self.stats.decision(decision.allowed)
-        self._refresh_stats()
         lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]
         lines += ["", "Con GO, Cortex le pasa la orden a Setup." if decision.allowed else "Con NO GO, Setup no recibe ninguna orden."]
         self.log(f"cortex: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "
@@ -991,8 +1034,6 @@ class MainWindow(QMainWindow):
 
     def _on_setup_executed(self, p: dict) -> None:
         o = p["order"]
-        self.stats.executed(o)
-        self._refresh_stats()
         self.ring.celebrate(o.direction, o.symbol)
         lines = [f"Orden:    {o.label}", f"Activo:   {o.symbol}   Temporalidad: {display_label(o.timeframe)}",
                  f"Sesgo:    {o.bias} (puntuación {o.score:+g})"]
@@ -1012,8 +1053,6 @@ class MainWindow(QMainWindow):
 
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]
-        self.stats.closed(o, c)
-        self._refresh_stats()
         if c.r > 0:
             self.ring.win(c.r, o.symbol)
         why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
