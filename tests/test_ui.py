@@ -70,20 +70,21 @@ def test_anillo_estado_y_mensajes(qapp):
     assert "con error" in html and "ValueError: x" in html and "feed.load" in html
 
 
-def test_anillo_celebra_la_entrada_y_la_ganancia(qapp):
+def test_anillo_avisa_de_la_entrada_y_del_cierre(qapp):
     from tradingbot.core import SkillInfo
+    from tradingbot.ui import theme
     from tradingbot.ui.ring import RingView
 
     ring = RingView()
     ring.resize(392, 330)
     ring.set_skills([SkillInfo("cortex", "Cortex", "", "center", (), ()),
                      SkillInfo("setup", "Setup", "", 2, (), ())])
-    ring.celebrate("short", "EURUSD")
-    ring.win(1.5, "EURUSD")
-    assert [b.title for b in ring._bursts] == ["SHORT", "+1.50 R"] and ring._particles
+    ring.trade_opened("short", "EURUSD")
+    ring.trade_closed("tiempo", 0.4, "EURUSD")
+    assert ring.highlights["cortex"].text == "▼ Short EURUSD" and ring.highlights["cortex"].color == theme.BEAR
+    assert ring.highlights["setup"].text == "+0.40 R" and ring.highlights["setup"].color == theme.MUTED
     ring.grab()                                                    # pinta un fotograma sin fallar
-    ring._bursts[0].t0 -= 10; ring._bursts[1].t0 -= 10
-    for pt in ring._particles:
-        pt.t0 -= 10
+    for h in ring.highlights.values():
+        h.t0 -= 10
     ring.grab()
-    assert not ring._bursts and not ring._particles                # el efecto se apaga solo
+    assert not ring.highlights                                     # el aviso se apaga solo
