@@ -1,6 +1,7 @@
 """Gráfico de velas rápido (pyqtgraph) con eje X por índice (hora de Nueva York) y ejes redimensionables."""
 from __future__ import annotations
 
+import html
 import math
 from datetime import datetime, timezone
 
@@ -16,6 +17,7 @@ from . import theme
 from .fmt import fecha_hora
 
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
+NO_GO_OPACITY = 0.35       # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
 LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
@@ -509,6 +511,7 @@ class ChartView(pg.PlotWidget):
         if not self._pos_visible:
             return
         for pos in self._positions:
+            first = len(self._pos_items)
             x0, x1 = float(pos["x0"]), float(pos["x1"])
             entry, stop, target = float(pos["entry"]), float(pos["stop"]), float(pos["target"])
             risk = abs(entry - stop)
@@ -544,6 +547,9 @@ class ChartView(pg.PlotWidget):
                                       anchor=(1, 0.5))
                 verdict.setPos(x1, entry)
                 verdict.setZValue(9)
+                if not go:                                           # la que Cortex no opera se ve atenuada (su motivo, no)
+                    for item in self._pos_items[first:]:
+                        item.setOpacity(NO_GO_OPACITY)
                 pi.addItem(verdict, ignoreBounds=True)
                 self._pos_items.append(verdict)
 
@@ -569,6 +575,7 @@ class ChartView(pg.PlotWidget):
         if not self._fib_visible:
             return
         for fib in self._fibs:
+            first = len(self._fib_items)
             x0, x1 = float(fib["x0"]), float(fib["x1"])
             for name, price in fib["levels"].items():
                 half = name == "0,5"
@@ -582,7 +589,15 @@ class ChartView(pg.PlotWidget):
                 pi.addItem(text, ignoreBounds=True)
                 self._fib_items += [line, text]
             top = max(fib["levels"].values())
-            tag = pg.TextItem(f"{fib['label']} fibo ({fib['state']})", color=theme.TEXT, anchor=(0, 1))
+            title = html.escape(f"{fib['label']} fibo ({fib['state']})")
+            if fib.get("decision") == "NO GO":                       # entrada detectada que Cortex no opera: atenuada y tachada
+                for item in self._fib_items[first:]:
+                    item.setOpacity(NO_GO_OPACITY)
+                tag = pg.TextItem(anchor=(0, 1))
+                tag.setHtml(f'<span style="color:{theme.MUTED}"><s>{title}</s></span>'
+                            f'<span style="color:#E24B4A">  NO GO: {html.escape(fib.get("reason", ""))}</span>')
+            else:
+                tag = pg.TextItem(f"{fib['label']} fibo ({fib['state']})", color=theme.TEXT, anchor=(0, 1))
             tag.setPos(x0, top)
             pi.addItem(tag, ignoreBounds=True)
             self._fib_items.append(tag)
