@@ -153,7 +153,8 @@ def test_el_grafico_dibuja_los_fibo_y_el_boton_los_apaga(tmp_path, monkeypatch):
     fig = Figure("fib", "continuacion", "NY Open", "long", ny(DAY, 10, 30), ny(DAY, 13, 15),
                  {"-0,5": 116.5, "0": 110.0, "0,5": 103.5, "1": 97.0}, "entrada", "NY Open ▲")
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [fig]})
-    assert win.chart.fib_count == 1 and len(win.chart._fib_items) == 4 * 2 + 1                 # cuatro niveles con su etiqueta y el título
+    assert win.chart.fib_count == 1 and len(win.chart._fib_items) == 4 * 2                     # cuatro niveles con su etiqueta, sin título
+    assert [t.toPlainText() for t in win.chart._fib_items[1::2]] == ["-0,5", "0", "0,5", "1"]       # el nivel, sin el precio
     assert win.chart._fibs[0]["x0"] == 6 and win.chart._fibs[0]["x1"] > win.chart._fibs[0]["x0"]   # 10:30 es la vela M5 número 6
     win.fibo_btn.setChecked(False)
     assert win.chart.fib_count == 0 and win.chart._fib_items == []
@@ -195,11 +196,14 @@ def test_la_segunda_entrada_de_una_sesion_se_ve_atenuada_y_tachada_con_su_no_go(
     rev, cont = win.chart._fibs
     assert rev["decision"] == "GO" and (cont["decision"], cont["reason"]) == ("NO GO", "sesión ya operada")
     items = win.chart._fib_items
-    assert all(item.opacity() == 1 for item in items[:7])                                       # la que se opera, normal
-    assert all(item.opacity() == NO_GO_OPACITY for item in items[7:13])                        # la otra, atenuada...
-    assert "line-through" in items[13].toHtml() and "NO GO: sesión ya operada" in items[13].toPlainText()   # ...y tachada con el motivo
+    assert len(items) == 12 and all(item.opacity() == 1 for item in items[:6])                 # la que se opera, normal
+    assert all(item.opacity() == NO_GO_OPACITY for item in items[6:])                          # la otra, atenuada
     assert [p["decision"] for p in win.chart._positions] == ["GO", "NO GO"]
     assert min(item.opacity() for item in win.chart._pos_items) == NO_GO_OPACITY
+    go, no_go = win.chart._pos_pills                                                            # la píldora: veredicto primero, resultado al final
+    assert go.opacity() == no_go.opacity() == 1
+    assert go.toPlainText().strip().startswith("✓") and go.result == "SL" and go.border.color().name().upper() == "#EF5350"
+    assert no_go.toPlainText().strip().startswith("✕") and no_go.result == "TP" and no_go.border.color().name().upper() == "#26A69A"
 
 
 def test_el_pico_justo_antes_de_la_vela_de_rotura_es_el_swing_y_no_el_maximo_de_la_tbr():
@@ -286,21 +290,22 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
     assert win.chart.position_count == 1 and win.chart.fib_count == 0
     assert len(win.chart._pos_items) == 2 + 1 + 1                                                           # dos zonas, la línea de entrada y su píldora
     pill = win.chart._pos_pills[0]
-    assert pill.toPlainText().endswith("NY Open ▲ 2.0R") and not win.chart._pos_card.isVisible()        # el detalle, oculto
+    assert "NY Open ▲ 2.0R" in pill.toPlainText() and pill.result == "TP" and not win.chart._card.isVisible()   # el detalle, oculto
     win.chart.resize(800, 500)
     win.chart.getPlotItem().getViewBox().setXRange(0, 40, padding=0)
     win.chart.getPlotItem().getViewBox().setYRange(90, 120, padding=0)
+    win.chart.getPlotItem().getViewBox().updateMatrix()
     center = pill.sceneBoundingRect().center()
     win.chart._mouse_moved(center)                                                                         # al pasar el ratón, la ficha
-    card = win.chart._pos_card
+    card = win.chart._card
     assert card.isVisible() and "Largo" in card.toPlainText() and "116.5" in card.toPlainText()
     win.chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not card.isVisible()
     click = type("Click", (), {"scenePos": lambda self: center})()
-    win.chart._pos_clicked(click)                                                                          # al pulsar, se queda fija...
+    win.chart._chart_clicked(click)                                                                          # al pulsar, se queda fija...
     win.chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert card.isVisible()
-    win.chart._pos_clicked(click)                                                                          # ...hasta pulsarla otra vez
+    win.chart._chart_clicked(click)                                                                          # ...hasta pulsarla otra vez
     assert not card.isVisible()
     assert win.chart._positions[0]["x0"] == 12 and win.chart._positions[0]["x1"] > 12                      # 11:00 es la vela M5 número 12
     win.pos_btn.setChecked(False)

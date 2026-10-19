@@ -35,6 +35,49 @@ def _verdict_color(pos: dict) -> str:
     return {"GO": "#26A69A", "NO GO": "#EF5350"}.get(pos.get("decision"), theme.MUTED)
 
 
+def _ratio(pos: dict) -> float:
+    risk = abs(float(pos["entry"]) - float(pos["stop"]))
+    return abs(float(pos["target"]) - float(pos["entry"])) / risk if risk > 0 else 0.0
+
+
+# Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
+RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", "gray"),
+           "tiempo": ("T", None), "abierta": ("…", None)}
+
+
+class PositionPill(pg.TextItem):
+    """Etiqueta de una posición: barra y símbolo del veredicto de Cortex (✓ GO, ✕ NO GO), patrón y R, y al final el
+    resultado (TP, SL, BE, T o … si sigue abierta). El borde va del color del resultado: verde TP, rojo SL, gris BE."""
+
+    def __init__(self, pos: dict) -> None:
+        result, color = RESULTS.get(str(pos["state"]), (str(pos["state"]), None))
+        color = theme.MUTED if color == "gray" else color
+        super().__init__(anchor=(0, 0.5), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
+                         border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
+        decision = pos.get("decision")
+        self._bar = QColor(_verdict_color(pos)) if decision else None
+        symbol = {"GO": "✓", "NO GO": "✕"}.get(decision, "")
+        self.result = result
+        self.setHtml(f'<span style="font-size:8pt">&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
+                     f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {_ratio(pos):.1f}R</span>'
+                     f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
+                     f'<b style="color:{color or theme.MUTED}">{result}</b></span>')
+        self.setZValue(8)
+
+    def paint(self, p, *args) -> None:
+        super().paint(p, *args)
+        if self._bar is not None:                       # barra fina del veredicto en el borde izquierdo
+            rect = self.textItem.mapRectToParent(self.textItem.boundingRect())
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(self._bar)
+            p.drawRect(QRectF(rect.left(), rect.top(), 3, rect.height()))
+
+
+def _fib_color(name: str) -> str:
+    """Color de cada nivel del fibo: el 0,5 (la entrada) en ámbar, el -0,5 (el objetivo) en rojo, el resto apagado."""
+    return "#BA7517" if name == "0,5" else "#E24B4A" if name == "-0,5" else theme.MUTED
+
+
 class DaySeparators(pg.GraphicsObject):
     """Líneas verticales punteadas al empezar cada día y su nombre abajo, centrado entre su separador y el siguiente.
 
@@ -284,22 +327,22 @@ class ChartView(pg.PlotWidget):
         self._pos_visible = True
         self._pos_items: list = []
         self._pos_pills: list = []                # la píldora de cada posición, en el mismo orden que _positions
-        self._pos_hover: int | None = None        # posición bajo el ratón
-        self._pos_pinned: int | None = None       # posición con la ficha fijada por un clic
         self._fibs: list[dict] = []               # fibonacci de los patrones: {x0, x1, levels, label, state, direction}
         self._fib_visible = True
         self._fib_items: list = []
+        self._hover: int | None = None            # posición bajo el ratón
+        self._pinned: int | None = None           # posición con la ficha fijada por un clic
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
         pi.addItem(self.separators, ignoreBounds=True)
         vb.sigRangeChanged.connect(lambda *_: (self.separators.prepareGeometryChange(), self.separators.update()))
         self._init_crosshair()
-        self._pos_card = pg.TextItem(anchor=(0, 0))     # ficha de detalle de una posición (al pasar o pulsar)
-        self._pos_card.setParentItem(vb)                # en píxeles del gráfico, como la leyenda
-        self._pos_card.setZValue(31)
-        self._pos_card.hide()
-        self.scene().sigMouseClicked.connect(self._pos_clicked)
-        vb.sigRangeChanged.connect(lambda *_: self._update_pos_card())
+        self._card = pg.TextItem(anchor=(0, 0))         # ficha de detalle de una posición (al pasar o pulsar)
+        self._card.setParentItem(vb)                    # en píxeles del gráfico, como la leyenda
+        self._card.setZValue(31)
+        self._card.hide()
+        self.scene().sigMouseClicked.connect(self._chart_clicked)
+        vb.sigRangeChanged.connect(lambda *_: self._update_card())
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
@@ -392,16 +435,16 @@ class ChartView(pg.PlotWidget):
         self._mouse = QPointF(pos) if vb.sceneBoundingRect().contains(pos) else None
         self._update_crosshair()
         hover = self._position_at(pos)
-        if hover != self._pos_hover:
-            self._pos_hover = hover
-            self._update_pos_card()
+        if hover != self._hover:
+            self._hover = hover
+            self._update_card()
 
     def leaveEvent(self, event) -> None:
         self._mouse = None
         self._update_crosshair()
-        if self._pos_hover is not None:
-            self._pos_hover = None
-            self._update_pos_card()
+        if self._hover is not None:
+            self._hover = None
+            self._update_card()
         super().leaveEvent(event)
 
     def _update_crosshair(self) -> None:
@@ -639,14 +682,12 @@ class ChartView(pg.PlotWidget):
         self._pos_items.clear()
         self._pos_pills.clear()
         if not self._pos_visible:
-            self._update_pos_card()
+            self._update_card()
             return
         for pos in self._positions:
             first = len(self._pos_items)
             x0, x1 = float(pos["x0"]), float(pos["x1"])
             entry, stop, target = float(pos["entry"]), float(pos["stop"]), float(pos["target"])
-            risk = abs(entry - stop)
-            reward = abs(target - entry)
             for lo, hi, color in ((min(entry, target), max(entry, target), QColor(38, 166, 154, 70)),
                                   (min(entry, stop), max(entry, stop), QColor(239, 83, 80, 70))):
                 box = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
@@ -659,30 +700,27 @@ class ChartView(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
-            ratio = reward / risk if risk > 0 else 0.0
             if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada (su píldora, no)
                 for item in self._pos_items[first:]:
                     item.setOpacity(NO_GO_OPACITY)
-            # Píldora discreta en la entrada: patrón, R y un punto con el veredicto de Cortex; el resto, en la ficha.
-            pill = pg.TextItem(anchor=(0, 0.5), fill=pg.mkBrush(_alpha(theme.PANEL, 215)), border=pg.mkPen(theme.BORDER))
-            pill.setHtml(f'<span style="font-size:8pt"><span style="color:{_verdict_color(pos)}">●</span>&nbsp;'
-                         f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {ratio:.1f}R</span></span>')
+            pill = PositionPill(pos)
             pill.setPos(x0, entry)
-            pill.setZValue(8)
             pi.addItem(pill, ignoreBounds=True)
             self._pos_items.append(pill)
             self._pos_pills.append(pill)
-        self._update_pos_card()
+        self._update_card()
+
+    @property
+    def position_count(self) -> int:
+        return 0 if not self._pos_visible else len(self._positions)
 
     def _position_at(self, scene_pos) -> int | None:
         """Posición bajo el ratón (su caja o su píldora); la última dibujada gana si se solapan."""
-        if not self._pos_visible or not self._pos_pills:
-            return None
         vb = self.getPlotItem().getViewBox()
         if not vb.sceneBoundingRect().contains(scene_pos):
             return None
         pt = vb.mapSceneToView(scene_pos)
-        for i in reversed(range(len(self._positions))):
+        for i in reversed(range(len(self._pos_pills))):
             pos = self._positions[i]
             x0, x1 = float(pos["x0"]), float(pos["x1"])
             lo, hi = sorted((float(pos["stop"]), float(pos["target"])))
@@ -691,28 +729,25 @@ class ChartView(pg.PlotWidget):
                 return i
         return None
 
-    def _pos_clicked(self, event) -> None:
+    def _chart_clicked(self, event) -> None:
         """Pulsar una posición deja su ficha fija; pulsarla otra vez (o fuera de las posiciones) la quita."""
         i = self._position_at(event.scenePos())
-        self._pos_pinned = None if i == self._pos_pinned else i
-        self._update_pos_card()
+        self._pinned = None if i == self._pinned else i
+        self._update_card()
 
-    def _update_pos_card(self) -> None:
+    def _update_card(self) -> None:
         """Ficha con el detalle de la posición fijada (o, si no hay, la que está bajo el ratón), bajo su píldora."""
-        n = len(self._positions) if self._pos_visible else 0
-        if self._pos_pinned is not None and self._pos_pinned >= n:
-            self._pos_pinned = None
-        i = self._pos_pinned if self._pos_pinned is not None else self._pos_hover
-        card = self._pos_card
+        n = len(self._pos_pills)
+        if self._pinned is not None and self._pinned >= n:
+            self._pinned = None                                 # ya no está dibujada
+        i = self._pinned if self._pinned is not None else self._hover
+        card = self._card
         vb = self.getPlotItem().getViewBox()
         if i is None or i >= n or not vb.sceneBoundingRect().intersects(self._pos_pills[i].sceneBoundingRect()):
-            card.hide()                                 # sin posición, o con su píldora fuera de la vista
+            card.hide()                                         # sin posición, o con su píldora fuera de la vista
             return
         pos = self._positions[i]
-        long = pos["direction"] == "long"
         entry, stop, target = float(pos["entry"]), float(pos["stop"]), float(pos["target"])
-        risk = abs(entry - stop)
-        ratio = abs(target - entry) / risk if risk > 0 else 0.0
         muted = theme.MUTED
 
         def row(name: str, value: str, color: str = muted) -> str:
@@ -720,28 +755,24 @@ class ChartView(pg.PlotWidget):
                     f'<td align="right" style="color:{theme.TEXT}">{value}</td></tr>')
 
         rows = (row("Entrada", fmt_price(entry)) + row("Stop", fmt_price(stop), "#EF5350")
-                + row("Objetivo", fmt_price(target), "#26A69A") + row("R:R", f"{ratio:.2f}"))
+                + row("Objetivo", fmt_price(target), "#26A69A") + row("R:R", f"{_ratio(pos):.2f}"))
         verdict = ""
         if pos.get("decision"):
             verdict = (f'<div style="margin-top:3px"><span style="color:{_verdict_color(pos)}">Cortex {pos["decision"]}</span>'
                        f'<span style="color:{muted}">&nbsp; {html.escape(pos.get("reason", ""))}</span></div>')
         card.setHtml(f'<div style="font-size:8pt"><div style="color:{theme.TEXT}"><b>{html.escape(pos["label"])}</b>'
-                     f' · {"Largo" if long else "Corto"} · {html.escape(str(pos["state"]))}</div>'
+                     f' · {"Largo" if pos["direction"] == "long" else "Corto"} · {html.escape(str(pos["state"]))}</div>'
                      f'<table cellspacing="0" cellpadding="0">{rows}</table>{verdict}</div>')
         card.fill = pg.mkBrush(_alpha(theme.PANEL, 245))
         card.border = pg.mkPen(theme.BORDER)
-        pill = self._pos_pills[i].sceneBoundingRect()
-        below, above = vb.mapFromScene(pill.bottomLeft()), vb.mapFromScene(pill.topLeft())   # bordes de la píldora
+        rect = self._pos_pills[i].sceneBoundingRect()
+        below, above = vb.mapFromScene(rect.bottomLeft()), vb.mapFromScene(rect.topLeft())   # bordes de la píldora
         size = card.textItem.boundingRect()
         x = min(max(below.x(), 4.0), vb.width() - size.width() - 4)
         y = below.y() + 4 if below.y() + 4 + size.height() <= vb.height() else above.y() - 4 - size.height()
         card.setPos(x, y)
         card.show()
         card.update()
-
-    @property
-    def position_count(self) -> int:
-        return 0 if not self._pos_visible else len(self._positions)
 
     # -- fibonacci de los patrones ---------------------------------------------------------------------------
     def set_fibs(self, fibs: list[dict]) -> None:
@@ -754,6 +785,7 @@ class ChartView(pg.PlotWidget):
         self._draw_fibs()
 
     def _draw_fibs(self) -> None:
+        """Solo los niveles con su nombre (sin precio ni título): el detalle de la entrada está en su posición."""
         pi = self.getPlotItem()
         for item in self._fib_items:
             pi.removeItem(item)
@@ -765,28 +797,19 @@ class ChartView(pg.PlotWidget):
             x0, x1 = float(fib["x0"]), float(fib["x1"])
             for name, price in fib["levels"].items():
                 half = name == "0,5"
-                color = "#BA7517" if half else "#E24B4A" if name == "-0,5" else theme.MUTED
+                color = _fib_color(name)
                 pen = pg.mkPen(color, width=2 if half else 1.2, style=Qt.PenStyle.DashLine if half else Qt.PenStyle.SolidLine)
                 line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([price, price]), pen=pen)
                 line.setZValue(-2)
                 pi.addItem(line, ignoreBounds=True)
-                text = pg.TextItem(f"{name}  {fmt_price(price)}", color=color, anchor=(0, 0.5))
+                text = pg.TextItem(anchor=(0, 0.5))
+                text.setHtml(f'<span style="font-size:8pt; color:{color}">{name}</span>')
                 text.setPos(x1, price)
                 pi.addItem(text, ignoreBounds=True)
                 self._fib_items += [line, text]
-            top = max(fib["levels"].values())
-            title = html.escape(f"{fib['label']} fibo ({fib['state']})")
-            if fib.get("decision") == "NO GO":                       # entrada detectada que Cortex no opera: atenuada y tachada
+            if fib.get("decision") == "NO GO":                       # entrada detectada que Cortex no opera: atenuada
                 for item in self._fib_items[first:]:
                     item.setOpacity(NO_GO_OPACITY)
-                tag = pg.TextItem(anchor=(0, 1))
-                tag.setHtml(f'<span style="color:{theme.MUTED}"><s>{title}</s></span>'
-                            f'<span style="color:#E24B4A">  NO GO: {html.escape(fib.get("reason", ""))}</span>')
-            else:
-                tag = pg.TextItem(f"{fib['label']} fibo ({fib['state']})", color=theme.TEXT, anchor=(0, 1))
-            tag.setPos(x0, top)
-            pi.addItem(tag, ignoreBounds=True)
-            self._fib_items.append(tag)
 
     @property
     def fib_count(self) -> int:
