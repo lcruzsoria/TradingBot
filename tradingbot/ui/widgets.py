@@ -28,12 +28,20 @@ class ClickableLabel(QLabel):
 
 
 class StatBlock(QWidget):
-    """Cifra destacada de la cabecera: etiqueta, valor y nota."""
+    """Cifra destacada de la cabecera: etiqueta, valor y nota. Con `clickable`, es una zona pulsable (clicked)."""
 
-    def __init__(self, label: str, value: str = "-", sub: str = "") -> None:
+    clicked = Signal()
+
+    def __init__(self, label: str, value: str = "-", sub: str = "", clickable: bool = False) -> None:
         super().__init__()
+        self.clickable = clickable
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(*((6, 2, 6, 2) if clickable else (0, 0, 0, 0)))
+        if clickable:
+            self.setObjectName("StatLink")                  # borde y fondo al pasar el ratón (theme)
+            self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            label = f"{label}  ›"
         lay.setSpacing(0)
         self.label = QLabel(label)
         self.label.setObjectName("StatLabel")
@@ -43,6 +51,12 @@ class StatBlock(QWidget):
         self.sub.setObjectName("StatSub")
         for w in (self.label, self.value, self.sub):
             lay.addWidget(w)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self.clickable and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            return
+        super().mousePressEvent(event)
 
     def set_value(self, value: str, sub: str = "", color: str | None = None) -> None:
         self.value.setText(value)

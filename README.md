@@ -252,6 +252,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `SETUP_SEND_ORDERS` | `false` | Enviar las órdenes de Cortex a MT5. Aún no implementado: `true` da error; ahora solo se simulan. |
 | `SETUP_RISK_PCT` | `1` | Riesgo de cada operación simulada, en % del saldo virtual del perfil (resultado en dinero = R x riesgo). |
 | `SETUP_BE_TRIGGER_PCT` | `1` | Ganancia flotante, en % del saldo, que al cierre de una vela de 15 min pasa el stop a la entrada (breakeven). `0`: sin breakeven. |
+| `SETUP_CONSOLIDATE_INDEX_HOURS` / `SETUP_CONSOLIDATE_HOURS` | `3` / `4` | Las cerradas del Forwardtest pasan al saldo virtual del perfil al terminar la vela de estas horas (índices USA / resto) en la que cerraron. Deben dividir el día. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
@@ -294,8 +295,11 @@ Al conectar, el Registro dice qué nombres se han traducido y cuáles no tiene e
 abiertas (`abiertas.json`), diario del forwardtest (`forwardtest/`) y **saldo virtual** (`cuenta.json`). Solo opera el
 perfil activo. El selector de la cabecera, junto a «TradingBot», cambia de perfil: el bot vuelve a arrancar con esa cuenta
 y recuerda la elección (en `settings.local.json`). El saldo virtual empieza con el saldo de la cuenta de MT5 el primer día
-que se usa el perfil (capital inicial) y cada operación cerrada suma o resta su resultado en R por el riesgo
-(`SETUP_RISK_PCT`, 1 % del saldo). Si una vela de 15 min cierra con la posición `SETUP_BE_TRIGGER_PCT` % del saldo a
+que se usa el perfil (capital inicial) y cada operación cerrada del Forwardtest del perfil suma o resta su resultado en R
+por el riesgo (`SETUP_RISK_PCT`, 1 % del saldo). No se apunta al cerrar sino al **consolidar**: al terminar la vela de 3 h
+(índices USA) o de 4 h (resto) en la que cerró, en hora del servidor; hasta entonces la cabecera la cuenta como «por
+consolidar» con la hora de la próxima consolidación, y al consolidar el Registro lo anota con el saldo nuevo. Así todo lo
+que hay en el diario cuenta, también lo anotado antes de existir el saldo virtual. Si una vela de 15 min cierra con la posición `SETUP_BE_TRIGGER_PCT` % del saldo a
 favor (1 %: +1 R), el stop pasa a la entrada; si lo toca, cierra a 0 y cuenta como breakeven. La cabecera muestra el
 **Saldo** (capital + simulado), el **P&L abierto** de las simuladas, el **Resultado del perfil** (% frente al capital
 inicial) y las **Operaciones** ganadas (G, punto verde), perdidas (P, rojo) y en breakeven (B, gris). Los datos de antes
@@ -455,7 +459,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
 | `pattern` | 4 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %) hasta que empieza la siguiente; avisa de cada uno que identifica y de los que se invalidan, anulan o vencen (`candles.loaded` + `tbr.updated` + `clock.offset` -> `pattern.updated` / `pattern.detected` / `pattern.discarded` / `pattern.session`). Lee el bloque PATTERN. |
-| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo, stop a breakeven y cierre por tiempo -> `setup.closed`, que se anota en el Registro y en el saldo virtual del perfil, publicado como `setup.account` para la cabecera); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/perfiles/<perfil>/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
+| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo, stop a breakeven y cierre por tiempo -> `setup.closed`, que se anota en el Registro; al terminar su vela de 3 h (índices) o 4 h (resto) se consolida en el saldo virtual del perfil, `setup.consolidated`, publicado como `setup.account` para la cabecera); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/perfiles/<perfil>/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 | `stats` | aux3 | Forwardtest y backtest: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) en un diario mensual por perfil (`data/perfiles/<perfil>/forwardtest`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` (nueva etapa) y `stats.reload`. Alimenta los botones Forwardtest y Backtest del área Stats. Lee el bloque STATS. |
 

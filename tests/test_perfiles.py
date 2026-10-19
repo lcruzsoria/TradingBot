@@ -12,7 +12,7 @@ import pytest
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.cortex.order import Order
 from tradingbot.skills.feed.datasource import AccountSnapshot, Quote
-from tradingbot.skills.setup.account import VirtualAccount, outcome
+from tradingbot.skills.setup.account import Schedule, VirtualAccount, outcome
 from tradingbot.skills.setup.positions import Closed, resolve
 
 M15 = 900
@@ -79,31 +79,96 @@ class FakeSource:
         return AccountSnapshot(50_000.0, 50_000.0, 0.0, "USD")
 
 
-def test_setup_fija_el_capital_al_conectar_y_lleva_el_saldo_al_cerrar(tmp_path):
+def wait_for(items, n=1, seconds=3.0):
+    deadline = time.time() + seconds
+    while len(items) < n and time.time() < deadline:
+        time.sleep(0.02)
+
+
+def test_setup_fija_el_capital_al_conectar_y_consolida_el_forwardtest(tmp_path):
+    """Setup cierra la operación, Stats la anota en el diario del perfil y, con la hora del servidor, la vela de 3 h del
+    cierre ya terminó (todo ocurrió en 1970): pasa al saldo virtual."""
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
-    bus, accounts, closed = EventBus(), [], []
+    bus, accounts, closed, consolidated = EventBus(), [], [], []
     bus.subscribe("t", "setup.account", accounts.append)
     bus.subscribe("t", "setup.closed", closed.append)
-    cfg = {"app": {"data_dir": str(tmp_path / "perfiles" / "puprime")}}
-    manager = SkillManager(bus, Services(FakeSource(), None, cfg, EnvConfig(parse(""))), [{"type": "setup"}])
+    bus.subscribe("t", "setup.consolidated", consolidated.append)
+    folder = tmp_path / "perfiles" / "puprime"
+    cfg = {"app": {"data_dir": str(folder)}}
+    manager = SkillManager(bus, Services(FakeSource(), None, cfg, EnvConfig(parse(""))),
+                           [{"type": "setup"}, {"type": "stats"}])
     manager.start()
     bus.publish("feed.connected", {"info": "", "symbols": []}, source="feed")
     bus.publish("setup.order", {"order": order()}, source="cortex")
     df = pd.DataFrame({"ts": [0, M15, 2 * M15], "high": [105.5, 106.0, 101.0], "low": [99.0, 99.9, 98.0],
                        "close": [105.2, 100.5, 99.0]})
     bus.publish("setup.candles", {"symbol": "NAS100", "timeframe": "15m", "df": df}, source="cortex")
+    wait_for(closed)
     deadline = time.time() + 3
-    while not closed and time.time() < deadline:
+    while not list(folder.glob("forwardtest/*.jsonl")) and time.time() < deadline:
         time.sleep(0.02)
-    time.sleep(0.15)
+    time.sleep(0.1)
+    bus.publish("clock.offset", {"server_offset": 3 * 3600, "offset_source": "detectado"}, source="quotes")
+    wait_for(consolidated)
+    time.sleep(0.1)
     manager.stop()
     p = closed[0].payload
-    assert p["closed"].result == "breakeven" and p["amount"] == 0.0 and p["balance"] == 50_000.0
+    assert p["closed"].result == "breakeven" and p["consolidate_at"] == 3 * 3600 and p["consolidate_hours"] == 3
+    c = consolidated[0].payload
+    assert [t["result"] for t in c["trades"]] == ["breakeven"] and c["balance"] == 50_000.0
     last = accounts[-1].payload
     assert last["started"] and last["initial"] == 50_000 and last["breakeven"] == 1 and last["open"] == []
-    assert (tmp_path / "perfiles" / "puprime" / "cuenta.json").exists()                  # los datos van en su perfil
-    assert (tmp_path / "perfiles" / "puprime" / "abiertas.json").exists()
+    assert last["pending"] == 0
+    assert (folder / "cuenta.json").exists() and (folder / "abiertas.json").exists()   # los datos van en su perfil
+
+
+# -- consolidación del forwardtest ------------------------------------------------------------
+H = 3600
+
+
+def closing(symbol, exit_ts, r, entry_ts):
+    from dataclasses import replace
+    o = replace(order(entry_ts=entry_ts), symbol=symbol)
+    return o,Closed("objetivo" if r > 0 else "stop" if r < 0 else "breakeven", 100.0, exit_ts, r, 0.0)
+
+
+def test_cada_cierre_se_consolida_al_terminar_su_vela_de_3h_indices_o_4h_resto():
+    sched = Schedule()
+    assert sched.due("NAS100", 10 * H + 5) == 12 * H and sched.due("USTEC.s", 12 * H) == 15 * H     # índices: 3 h
+    assert sched.due("EURUSD", 10 * H + 5) == 12 * H and sched.due("XAUUSD", 12 * H + 1) == 16 * H  # resto: 4 h
+    with pytest.raises(ValueError, match="SETUP_CONSOLIDATE_HOURS"):
+        Schedule(3, 5)
+
+
+def test_la_cuenta_consolida_lo_que_toca_y_deja_lo_demas_pendiente(tmp_path):
+    acc = VirtualAccount(tmp_path / "cuenta.json")
+    closes = [closing("NAS100", 10 * H, -1.0, 9 * H), closing("EURUSD", 13 * H, 2.0, 11 * H),
+              closing("US500", 11 * H, 0.0, 10 * H)]
+    assert acc.consolidate(closes, 20 * H, 1.0, Schedule()) == [] and len(acc.pending) == 3    # sin capital: nada
+    acc.start(100_000, "USD")
+    new = acc.consolidate(closes, 12 * H, 1.0, Schedule())        # a las 12: la vela de 9-12 de los índices terminó
+    assert [t["symbol"] for t in new] == ["NAS100", "US500"] and acc.balance == 99_000
+    assert acc.pending == [16 * H]                                # EURUSD (cerró a las 13): al acabar la vela de 12-16
+    assert acc.summary(1.0)["pending"] == 1 and acc.summary(1.0)["next_at"] == 16 * H
+    assert acc.consolidate(closes, 15 * H, 1.0, Schedule()) == []
+    assert [t["symbol"] for t in acc.consolidate(closes, 16 * H, 1.0, Schedule())] == ["EURUSD"]
+    assert acc.balance == 99_000 + 1_980 and acc.pending == []    # +2 R con el 1 % de 99.000
+    assert acc.consolidate(closes, 30 * H, 1.0, Schedule()) == []                     # nunca dos veces la misma
+    again = VirtualAccount(tmp_path / "cuenta.json")
+    assert again.balance == 100_980 and (again.count("G"), again.count("P"), again.count("B")) == (1, 1, 1)
+
+
+def test_el_diario_da_todas_las_cerradas_sin_repetir(tmp_path):
+    from tradingbot.skills.stats.journal import Journal
+    months = iter([datetime(2026, 9, 30, 22), datetime(2026, 10, 1, 9), datetime(2026, 10, 1, 9, 5)])
+    j = Journal(tmp_path, now=lambda: next(months))
+    a, b = closing("NAS100", 10 * H, -1.0, 9 * H), closing("EURUSD", 13 * H, 2.0, 11 * H)
+    j.closed(*a)
+    j.closed(*b)
+    j.closed(*b)                                                  # repetida (p. ej. tras reiniciar): una sola vez
+    got = j.closes()
+    assert sorted((o.symbol, c.r) for o, c in got) == [("EURUSD", 2.0), ("NAS100", -1.0)]
 
 
 # -- configuración -----------------------------------------------------------------------------

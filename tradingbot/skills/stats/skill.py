@@ -1,8 +1,6 @@
 """Skill Stats: el forwardtest (lo que hace el bot desde que opera, guardado por meses) y los resultados del backtest."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from ...core import Event, Skill, register_skill
 from .backtest import BOT_FILTER, load
 from . import journal
@@ -23,13 +21,9 @@ class StatsSkill(Skill):
     slot = "aux3"
 
     def on_start(self) -> None:
-        folder = self.settings.get("FORWARD_DIR", "") or None                      # tradingbot.env, bloque STATS
-        data_dir = (self.services.app_cfg or {}).get("app", {}).get("data_dir")
-        if folder is None and data_dir:
-            folder = Path(data_dir) / "forwardtest"                       # cada perfil (cuenta) tiene su diario
-        if folder is None and _is_demo(self.services.source):
-            folder = journal.DEFAULT_DIR.parent / "forwardtest-demo"      # datos sintéticos (--demo, capturas): aparte
-        self.journal = Journal(folder)
+        # STATS_FORWARD_DIR o el diario del perfil (cada cuenta el suyo); datos sintéticos sin perfil: aparte
+        self.journal = Journal(journal.folder_for(self.services.app_cfg, self.settings.get("FORWARD_DIR", "") or None,
+                                                  _is_demo(self.services.source)))
         self._start: dict[str, int] = {}               # mercado -> última vela de su primera carga (el arranque, en hora del servidor)
         try:
             self.stats = self.journal.load_recent()

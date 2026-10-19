@@ -301,6 +301,8 @@ QLabel#DemoBadge {{ background: {WARN}; color: {BG}; border-radius: 4px; padding
 QLabel#StatLabel {{ color: {MUTED}; font-size: 11px; }}
 QLabel#StatValue {{ font-size: 19px; font-weight: 700; }}
 QLabel#StatSub {{ color: {MUTED}; font-size: 11px; }}
+QWidget#StatLink {{ border: 1px solid transparent; border-radius: 6px; }}
+QWidget#StatLink:hover {{ border-color: {mix(BORDER, ACCENT, 0.5)}; background: {PANEL_ALT}; }}
 QFrame#StatDivider {{ background: {BORDER}; max-width: 1px; min-width: 1px; border: none; }}
 
 /* Paneles */

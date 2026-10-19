@@ -29,6 +29,17 @@ MONTH_NAMES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "
                "diciembre")
 
 
+def folder_for(app_cfg: dict | None, override: str | None = None, demo: bool = False) -> Path:
+    """Carpeta del diario: STATS_FORWARD_DIR; si no, la del perfil (data/perfiles/<perfil>/forwardtest); con datos
+    sintéticos sin perfil, una aparte; y si no, la de antes de los perfiles."""
+    if override:
+        return Path(override)
+    data_dir = ((app_cfg or {}).get("app") or {}).get("data_dir")
+    if data_dir:
+        return Path(data_dir) / "forwardtest"
+    return DEFAULT_DIR.parent / "forwardtest-demo" if demo else DEFAULT_DIR
+
+
 def month_of(when: datetime) -> str:
     return f"{when.year:04d}-{when.month:02d}"
 
@@ -132,6 +143,22 @@ class Journal:
         for rec in records[stages[-1] + 1 if stages else 0:]:
             self._replay(stats, rec, stale=True)
         return stats
+
+    def closes(self) -> list[tuple]:
+        """Todas las operaciones cerradas del diario, de todos los meses y sin repetir: (orden, cierre). Es lo que la cuenta
+        virtual del perfil consolida (las «Nueva etapa» no cuentan aquí: la cuenta es la de todo el perfil)."""
+        from .session import trade_key
+        found: dict = {}
+        for month in sorted(self.months()):
+            for rec in self._records(month):
+                if rec["t"] != "close":
+                    continue
+                try:
+                    order, closed = _order_from_json(rec["order"]), Closed(**_pick(Closed, rec["closed"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                found[trade_key(order) or id(order)] = (order, closed)
+        return list(found.values())
 
     def load_month(self, month: str) -> TradeStats:
         """Un mes guardado completo: sus señales y las operaciones que se abrieron en él (con su cierre aunque caiga en el
