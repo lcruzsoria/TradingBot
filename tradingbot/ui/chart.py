@@ -45,6 +45,7 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 # Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None)}
+RESULT_TEXT = {"TP": "#2ECC71"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
 
@@ -63,7 +64,7 @@ class PositionPill(pg.TextItem):
         self.setHtml(f'<span style="font-size:9pt">&nbsp;&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
                      f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {_ratio(pos):.1f}R</span>'
                      f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
-                     f'<b style="color:{color or theme.MUTED}">{result}</b></span>')
+                     f'<b style="color:{RESULT_TEXT.get(result, color or theme.MUTED)}">{result}</b></span>')
         self.setZValue(8)
 
     def paint(self, p, *args) -> None:
