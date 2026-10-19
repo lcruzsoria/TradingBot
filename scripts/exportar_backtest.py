@@ -165,7 +165,7 @@ def calendar_group(path: Path) -> dict:
             ["Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación."],
             ["Controles", "«Por lado» compara con los cortos y «Por día» con los demás días, con la misma hora, stop y RR: si solo "
                           "gana el largo del día elegido, la ventaja es de calendario."],
-            ["Horas", "Al elegir horas en su histograma, la operación pasa a entrar a esas horas (00, 02, 05 u 08 NY)."],
+            ["Horas", "Al elegir una hora en su histograma, la operación pasa a entrar a esa hora (00, 02, 05 u 08 NY)."],
             ["Sensibilidad", "La rejilla de stops (0,15-0,75 %) y RR (1-2) del script, con la misma entrada."],
             ["Límites", "Se eligió la mejor combinación de muchas probadas: parte de la ventaja puede ser azar."]]}
 
