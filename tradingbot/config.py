@@ -55,6 +55,12 @@ class Mt5Profile:
     password: str | None = None
     terminal_path: str | None = None
     title: str = ""          # nombre que se ve en el selector (MT5_<PERFIL>_NAME); vacío = el del perfil
+    symbols: tuple[tuple[str, str], ...] = ()   # equivalencias propias (MT5_<PERFIL>_SYMBOLS): (nombre en el bot, del broker)
+
+    @property
+    def symbol_map(self) -> dict[str, str]:
+        """Equivalencias de MT5_<PERFIL>_SYMBOLS, con el nombre del bot en minúsculas."""
+        return {ours.lower(): theirs for ours, theirs in self.symbols}
 
     @property
     def is_demo(self) -> bool:
@@ -87,8 +93,22 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def parse_symbol_map(raw: str, tag: str) -> tuple[tuple[str, str], ...]:
+    """MT5_<PERFIL>_SYMBOLS=USOIL=CL-OIL.s, NAS100=NAS100ft.s -> (("USOIL", "CL-OIL.s"), ("NAS100", "NAS100ft.s"))."""
+    pairs: list[tuple[str, str]] = []
+    for item in raw.split(","):
+        if not item.strip():
+            continue
+        ours, sep, theirs = item.partition("=")
+        if not sep or not ours.strip() or not theirs.strip():
+            raise ConfigError(f"MT5_{tag}_SYMBOLS: '{item.strip()}' no es válido. Formato: NOMBRE_EN_EL_BOT=NOMBRE_DEL_BROKER, "
+                              "separados por comas (p. ej. USOIL=CL-OIL.s).")
+        pairs.append((ours.strip(), theirs.strip()))
+    return tuple(pairs)
+
+
 def load_profiles(path: Path = DEFAULT_ENV_FILE) -> tuple[dict[str, Mt5Profile], str | None]:
-    """Lee los perfiles MT5_<NOMBRE>_LOGIN/_SERVER/_PASSWORD (y opcionales _NAME y _PATH) del .env.
+    """Lee los perfiles MT5_<NOMBRE>_LOGIN/_SERVER/_PASSWORD (y opcionales _NAME, _PATH y _SYMBOLS) del .env.
 
     Devuelve (perfiles por nombre en minúsculas, perfil por defecto).
     """
@@ -107,7 +127,8 @@ def load_profiles(path: Path = DEFAULT_ENV_FILE) -> tuple[dict[str, Mt5Profile],
         password = values.get(f"MT5_{tag}_PASSWORD") or os.environ.get(f"MT5_{tag}_PASSWORD") or None
         path = values.get(f"MT5_{tag}_PATH") or terminal_path       # cada broker puede tener su propio terminal
         profiles[tag.lower()] = Mt5Profile(tag.lower(), int(raw_login), server, password, path,
-                                           values.get(f"MT5_{tag}_NAME", ""))
+                                           values.get(f"MT5_{tag}_NAME", ""),
+                                           parse_symbol_map(values.get(f"MT5_{tag}_SYMBOLS", ""), tag))
     if not profiles:
         raise ConfigError(f"No hay ningún perfil (MT5_<NOMBRE>_LOGIN) en {path}")
     default = (values.get("MT5_DEFAULT") or "").lower() or None

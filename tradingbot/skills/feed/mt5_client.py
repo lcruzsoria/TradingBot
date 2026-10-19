@@ -16,6 +16,38 @@ from ...timeframes import DERIVED, base_timeframe, minutes, mt5_constant
 
 CHUNK = 50_000
 
+# El mismo mercado con otro nombre según el broker (USOIL en MetaQuotes es CL-OIL.s en PUPrime). Solo nombres que no son
+# también acciones: DOW, CL o SPX son empresas en algunos brokers.
+ALIASES: tuple[tuple[str, ...], ...] = (
+    ("NAS100", "USTEC", "US100", "NDX100"),
+    ("SP500", "US500", "SPX500"),
+    ("DJ30", "US30", "WS30"),
+    ("GER40", "DE40", "GER30", "DAX40"),
+    ("USOIL", "WTI", "XTIUSD", "USOUSD", "CL-OIL"),
+    ("UKOIL", "BRENT", "XBRUSD"),
+    ("XAUUSD", "GOLD"),
+    ("XAGUSD", "SILVER"),
+)
+SUFFIX = r"(?:[.\-_#][a-z0-9]*)?"                    # .s, .r, -cs, #...: lo que el broker añade al nombre
+
+
+def equivalent(name: str, names: dict[str, str], explicit: dict[str, str] | None = None) -> str | None:
+    """Nombre exacto en el broker del mercado `name` del bot. Por orden: la equivalencia propia del perfil
+    (MT5_<PERFIL>_SYMBOLS), el mismo nombre, el mismo nombre con sufijo (NAS100 -> NAS100.s) y sus otros nombres
+    (USOIL -> CL-OIL.s). Con varios candidatos, el más corto. `names`: nombre en minúsculas -> nombre exacto."""
+    key = name.strip().lower()
+    if explicit and key in explicit:
+        return names.get(explicit[key].strip().lower())
+    group = next((g for g in ALIASES if key in {a.lower() for a in g}), ())
+    for alt in [key] + [a.lower() for a in group if a.lower() != key]:
+        if alt in names:
+            return names[alt]
+        pattern = re.compile(re.escape(alt) + SUFFIX)
+        found = sorted((actual for low, actual in names.items() if pattern.fullmatch(low)), key=lambda n: (len(n), n))
+        if found:
+            return found[0]
+    return None
+
 
 class Mt5Error(Exception):
     """Error de conexión o lectura con MT5."""
@@ -55,7 +87,11 @@ class Mt5Source:
 
         info = mt5.account_info()
         if info is not None and info.login != p.login:
-            if p.password and mt5.login(p.login, password=p.password, server=p.server):
+            # Sin contraseña en el perfil, MT5 usa la que el terminal tenga guardada para esa cuenta: así un mismo
+            # terminal sirve para varios perfiles y al cambiar de perfil cambia de cuenta.
+            logged = (mt5.login(p.login, password=p.password, server=p.server) if p.password
+                      else mt5.login(p.login, server=p.server))
+            if logged:
                 info = mt5.account_info()
             else:
                 actual = info.login
@@ -110,7 +146,7 @@ class Mt5Source:
                 if name in self._missing:
                     out[name] = None
                     continue
-                exact = self._broker_names(mt5).get(name.strip().lower())
+                exact = self._resolve(mt5, name)
                 if exact is None:
                     self._missing.add(name)  # no existe en este broker: no reintentar cada segundo
                     out[name] = None
@@ -182,10 +218,21 @@ class Mt5Source:
                 self._names.setdefault(sym.name.lower(), sym.name)
         return self._names
 
+    def _resolve(self, mt5, name: str) -> str | None:
+        return equivalent(name, self._broker_names(mt5), self.profile.symbol_map)
+
     def resolve_symbol(self, name: str) -> str | None:
-        """Nombre exacto del símbolo en este broker. MT5 distingue mayúsculas: 'NAS100FT.R' no es 'NAS100FT.r'."""
+        """Nombre exacto del símbolo en este broker, o el de su equivalente (NAS100 -> NAS100.s). MT5 distingue
+        mayúsculas: 'NAS100FT.R' no es 'NAS100FT.r'."""
         with self._lock:
-            return self._broker_names(self._require()).get(name.strip().lower())
+            return self._resolve(self._require(), name)
+
+    def equivalents(self, names: list[str]) -> dict[str, str | None]:
+        """Los nombres del bot que este broker llama de otra forma (o que no tiene: None)."""
+        with self._lock:
+            mt5 = self._require()
+            out = {n: self._resolve(mt5, n) for n in names}
+        return {n: exact for n, exact in out.items() if exact != n}
 
     def similar_symbols(self, name: str, limit: int = 8) -> list[str]:
         """Símbolos del broker que contienen la parte principal del nombre (antes del primer . - _ #)."""

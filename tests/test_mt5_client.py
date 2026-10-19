@@ -115,6 +115,32 @@ def test_cuenta_distinta_cancela(install):
     assert fake.shutdown_called
 
 
+def test_sin_password_cambia_de_cuenta_con_la_guardada_en_el_terminal(install):
+    """Dos perfiles en el mismo terminal: al cambiar de perfil, MT5 entra en la otra cuenta con su contraseña guardada."""
+    fake = install(login=999)
+    calls = []
+
+    def login(account, **kw):
+        calls.append((account, kw))
+        fake._login = account
+        return True
+    fake.login = login
+    assert "DEMO 26231460" in Mt5Source(PROFILE).connect()
+    assert calls == [(26231460, {"server": "VantageMarkets-Demo"})]         # sin contraseña: la del terminal
+
+
+def test_las_cotizaciones_y_velas_usan_el_nombre_del_broker(install):
+    fake = install(total_bars=100)
+    fake.names = ["NAS100.s", "NAS100ft.s", "CL-OIL.s"]
+    src = Mt5Source(PROFILE)
+    src.connect()
+    assert src.quotes(["NAS100", "USOIL"])["NAS100"] is not None
+    src.load_candles("NAS100", "15m")
+    assert fake.selected[-1] == "NAS100.s"
+    assert src.equivalents(["NAS100", "USOIL", "GER40", "NAS100.s"]) == {"NAS100": "NAS100.s", "USOIL": "CL-OIL.s",
+                                                                        "GER40": None}
+
+
 def test_perfil_demo_con_cuenta_real_cancela(install):
     fake = install(trade_mode=FakeMt5.ACCOUNT_TRADE_MODE_REAL)
     with pytest.raises(Mt5Error, match="NO es demo"):

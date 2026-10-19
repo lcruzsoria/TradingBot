@@ -49,7 +49,11 @@ class FeedSkill(Skill):
                 info = source.connect()
                 symbols = source.symbols()
                 self.connected = True
-                self.publish("feed.connected", {"info": info, "symbols": symbols, "all_symbols": source.all_symbols()})
+                app = self.services.app_cfg["app"]
+                wanted = list(dict.fromkeys([*app.get("watchlist", []), symbol]))
+                lookup = getattr(source, "equivalents", None)    # nombres que este broker llama de otra forma
+                self.publish("feed.connected", {"info": info, "symbols": symbols, "all_symbols": source.all_symbols(),
+                                                "equivalents": lookup(wanted) if lookup else {}})
             self.set_caption(f"{symbol} {display_label(tf)}")
             last_report = 0.0
 

@@ -87,6 +87,15 @@ def test_si_el_mercado_actual_sigue_no_se_recarga(make_window):
     assert settings.load_watchlist([]) == ["EURUSD", "DJ30"]
 
 
+def test_al_conectar_se_avisa_de_los_nombres_traducidos(make_window):
+    win, _ = make_window(["NAS100", "GER40"])
+    win._on_connected({"info": "MT5 DEMO 2  USD 100.00", "all_symbols": ["NAS100.s"],
+                       "equivalents": {"NAS100": "NAS100.s", "GER40": None}})
+    text = win.log_view.toPlainText()
+    assert "NAS100 → NAS100.s" in text and "no tiene GER40" in text
+    assert win.account.text() == "MT5 DEMO 2" and win.account.toolTip() == "MT5 DEMO 2  USD 100.00"
+
+
 def test_sin_mercados_no_hace_nada(make_window):
     win, loads = make_window(["EURUSD"])
     win.set_watchlist([])

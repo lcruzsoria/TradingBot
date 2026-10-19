@@ -130,6 +130,49 @@ def test_el_ultimo_perfil_elegido_se_recuerda(tmp_path):
     assert settings.load_profile(path) == "puprime" and settings.load_watchlist([], path) == ["NAS100"]
 
 
+def test_cada_perfil_tiene_su_lista_de_quotes(tmp_path):
+    from tradingbot import settings
+    path = tmp_path / "s.json"
+    settings.save_watchlist(["NAS100", "USOIL"], path)                       # la de antes de los perfiles: la común
+    settings.save_watchlist(["NAS100", "XAUUSD.s"], path, profile="PUPrime")
+    assert settings.load_watchlist([], path, profile="puprime") == ["NAS100", "XAUUSD.s"]
+    assert settings.load_watchlist([], path, profile="metaquotes") == ["NAS100", "USOIL"]   # sin lista propia: la común
+    assert settings.load_watchlist([], path) == ["NAS100", "USOIL"]
+
+
+# PUPrime-Demo: los mercados llevan el sufijo .s y el petróleo se llama CL-OIL.s; tiene acciones DOW, CL y SPX.
+PUPRIME = ["NAS100.s", "NAS100ft.s", "SP500.s", "SP500ft.s", "SPX", "DJ30.s", "DJ30ft.s", "DOW", "EURUSD", "EURUSD.s",
+           "XAUUSD.s", "XAUUSD.crp", "CL-OIL.s", "CL", "BTCUSD", "BTCUSD#", "ETHUSD"]
+
+
+def names(listing):
+    return {n.lower(): n for n in listing}
+
+
+@pytest.mark.parametrize("ours, theirs", [
+    ("NAS100", "NAS100.s"), ("nas100", "NAS100.s"), ("SP500", "SP500.s"), ("DJ30", "DJ30.s"), ("EURUSD", "EURUSD"),
+    ("XAUUSD", "XAUUSD.s"), ("USOIL", "CL-OIL.s"), ("BTCUSD", "BTCUSD"), ("ETHUSD", "ETHUSD"), ("US500", "SP500.s"),
+    ("GER40", None)])
+def test_los_mercados_se_traducen_al_nombre_del_broker(ours, theirs):
+    from tradingbot.skills.feed.mt5_client import equivalent
+    assert equivalent(ours, names(PUPRIME)) == theirs
+
+
+def test_la_equivalencia_propia_del_perfil_manda(tmp_path):
+    from tradingbot.config import ConfigError, load_profiles
+    from tradingbot.skills.feed.mt5_client import equivalent
+    env = tmp_path / ".env"
+    env.write_text("MT5_PUPRIME_LOGIN=2\nMT5_PUPRIME_SERVER=PUPrime-Demo\n"
+                   "MT5_PUPRIME_SYMBOLS=NAS100=NAS100ft.s, usoil = CL-OIL.s\n", encoding="utf-8")
+    profile = load_profiles(env)[0]["puprime"]
+    assert profile.symbol_map == {"nas100": "NAS100ft.s", "usoil": "CL-OIL.s"}
+    assert equivalent("NAS100", names(PUPRIME), profile.symbol_map) == "NAS100ft.s"
+    assert equivalent("NAS100", names(PUPRIME), {"nas100": "NOEXISTE"}) is None   # si el broker no lo tiene, se avisa
+    env.write_text("MT5_PUPRIME_LOGIN=2\nMT5_PUPRIME_SERVER=PUPrime-Demo\nMT5_PUPRIME_SYMBOLS=NAS100\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="MT5_PUPRIME_SYMBOLS"):
+        load_profiles(env)
+
+
 def test_al_cambiar_de_perfil_se_arranca_igual_pero_con_el_otro():
     from tradingbot.__main__ import relaunch_args
     assert relaunch_args(["--theme", "negro", "--profile", "metaquotes"], "puprime") == \

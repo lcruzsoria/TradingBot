@@ -89,6 +89,7 @@ Panel **Quotes** (antes *Mercados*): cotizaciones de solo lectura (se refrescan 
 qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
 *oro*, *petróleo*, *bitcoin*...), añade, quita y reordena. Se aplica al instante y se guarda en `settings.local.json`
 (no se sube a git), que tiene prioridad sobre la `watchlist` de `config.toml`. Borrar ese fichero devuelve la lista de `config.toml`.
+Cada perfil guarda su lista; uno que aún no tiene la suya usa la común (la de antes de los perfiles).
 Pulsa una tarjeta para cargar su gráfico. Un símbolo cuyo último tick va más de 5 minutos por detrás del más
 reciente se marca como *Mercado cerrado*, y uno que el broker no tiene aparece como *No disponible*.
 Usa los nombres exactos de tu broker (en MT5: Ver > Símbolos).
@@ -282,6 +283,13 @@ un bloque `MT5_<PERFIL>_LOGIN / _SERVER / _PASSWORD` por cuenta y `MT5_DEFAULT` 
 Opcionales: `MT5_<PERFIL>_NAME` (nombre en el selector, p. ej. `MT5_PUPRIME_NAME=PUPrime-Demo`) y `MT5_<PERFIL>_PATH`
 (el terminal de ese broker; si falta, `MT5_PATH` o el que encuentre MT5).
 
+**Nombres de los mercados en cada broker.** El bot usa los mismos nombres en todos los perfiles (NAS100, SP500, DJ30,
+XAUUSD, USOIL...) y al leer de MT5 los traduce al del broker: el mismo nombre; si no existe, con el sufijo del broker
+(`NAS100` -> `NAS100.s` en PUPrime; con varios, el más corto: `NAS100.s` y no `NAS100ft.s`); y si tampoco, sus otros
+nombres conocidos (`USOIL` -> `CL-OIL.s`, `SP500` <-> `US500`, `DJ30` <-> `US30`, `NAS100` <-> `USTEC`, `XAUUSD` <-> `GOLD`).
+Al conectar, el Registro dice qué nombres se han traducido y cuáles no tiene el broker. Para fijar uno a mano:
+`MT5_<PERFIL>_SYMBOLS=NAS100=NAS100ft.s, USOIL=CL-OIL.s` (nombre del bot = nombre del broker).
+
 **Perfiles.** Cada perfil es una cuenta demo con sus datos aparte en `data/perfiles/<perfil>/`: posiciones simuladas
 abiertas (`abiertas.json`), diario del forwardtest (`forwardtest/`) y **saldo virtual** (`cuenta.json`). Solo opera el
 perfil activo. El selector de la cabecera, junto a «TradingBot», cambia de perfil: el bot vuelve a arrancar con esa cuenta
@@ -293,6 +301,8 @@ favor (1 %: +1 R), el stop pasa a la entrada; si lo toca, cierra a 0 y cuenta co
 inicial) y las **Operaciones** ganadas (G, punto verde), perdidas (P, rojo) y en breakeven (B, gris). Los datos de antes
 de los perfiles (`data/setup`, `data/forwardtest`) pasan al perfil de `MT5_DEFAULT` la primera vez que arranca.
 La contraseña es opcional: si falta, se usa la variable de entorno `MT5_<PERFIL>_PASSWORD` o la sesión ya abierta en el terminal.
+Si el terminal está en otra cuenta, el bot entra en la del perfil con la contraseña que MT5 tenga guardada (marca
+«Guardar contraseña» al entrar a mano una vez en cada cuenta): así varios perfiles comparten un terminal.
 
 Protecciones al conectar:
 - Si el terminal está en una cuenta distinta a la del perfil, se cancela.

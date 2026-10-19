@@ -95,7 +95,6 @@ def main(argv=None) -> int:
             cfg["app"]["symbol"] = args.symbol.strip()
         if args.timeframe:
             cfg["app"]["timeframe"] = args.timeframe
-        cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"])
         engine = BiasEngine.from_config(cfg["bias"])
 
         demo = cfg["app"]["demo"] if args.demo is None else args.demo
@@ -117,6 +116,7 @@ def main(argv=None) -> int:
             cfg["app"]["data_dir"] = str(profile_dir(profile.name))
             cfg["app"]["profiles"] = [(p.name, p.display) for p in profiles.values()]
             cfg["app"]["profile_name"] = profile.name
+        cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"])
     except (ConfigError, ValueError) as exc:
         QMessageBox.critical(None, "TradingBot", f"{exc}\n\nPuedes probar la interfaz sin MT5 con  --demo  (o APP_DEMO=true en tradingbot.env)")
         return 2

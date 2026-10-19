@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         self.markets.set_selected(self.current_symbol)
         self.markets_panel.note.setText("Pulsa una tarjeta para ver su gráfico")
         try:
-            settings.save_watchlist(symbols)
+            settings.save_watchlist(symbols, profile=self.profile_name)      # cada perfil, su lista
         except OSError as exc:
             self.log(f"No se pudo guardar la lista de mercados: {exc}")
         self.log(f"mercados: {', '.join(symbols) or 'ninguno'}")
@@ -730,6 +730,14 @@ class MainWindow(QMainWindow):
         self.account.setToolTip(p["info"])
         self.account.show()
         self.log(f"feed: conectado - {p['info']}")
+        equivalents = p.get("equivalents") or {}
+        found = [f"{ours} → {theirs}" for ours, theirs in equivalents.items() if theirs]
+        if found:
+            self.log(f"feed: en este broker se leen {', '.join(found)}", tone="info")
+        missing = [ours for ours, theirs in equivalents.items() if not theirs]
+        if missing:
+            self.log(f"feed: este broker no tiene {', '.join(missing)} ni un equivalente. Cámbialos en «Editar» de Quotes "
+                     "o indica su nombre en MT5_<PERFIL>_SYMBOLS del .env de cuentas.", tone="warn")
         self.all_symbols = p.get("all_symbols", [])
 
     def _on_progress(self, p: dict) -> None:
