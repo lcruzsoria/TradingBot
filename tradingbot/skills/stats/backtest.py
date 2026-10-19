@@ -253,7 +253,7 @@ class Group:
 
     def _calendar_view(self, filt: str, years, hours) -> View:
         """Calendario: la operación del bot es largo, en los días y a la hora configurados. Los controles (los cortos, los
-        demás días, las demás horas) salen de las mismas velas; al elegir horas en el histograma, cambian la hora del bot."""
+        demás días, las demás horas) salen de las mismas velas; al elegir una hora en el histograma, cambia la del bot."""
         ops, cfg = self.ops, self.raw
         scope = self.filter_mask("", filt)
         in_years = self._in(ops.year, years)

@@ -4,8 +4,9 @@ Arriba se eligen el grupo (índices, forex, oro, cripto o Calendario), el patró
 sesgo o sin filtro); debajo, el veredicto, las cifras clave, la curva de R acumulado, las barras por año y por hora, y los
 «libros»: comparativa entre mercados, por mercado, zona, lado, filtro, día, mitades, sensibilidad, mejoras, embudo y metodología.
 
-Las barras por año y por hora se pulsan: cada clic añade o quita ese año (u hora) y todo lo demás se recalcula solo con esas
-operaciones. Cada histograma aplica el filtro del otro, pero no el suyo, para que se puedan elegir más. Los datos los carga la
+Las barras por año y por hora se pulsan: cada histograma marca un solo año (u hora); un clic en otra barra la sustituye y en la
+misma la quita, y todo lo demás se recalcula solo con esas operaciones. Cada histograma aplica el filtro del otro, pero no el
+suyo, para que se pueda cambiar de barra viéndolas todas. Los datos los carga la
 skill Stats; las cifras se calculan en `skills/stats/backtest.py` a partir de cada operación.
 """
 from __future__ import annotations
@@ -114,7 +115,7 @@ def _clean(net) -> np.ndarray:
 class BarCard(Book):
     """Tarjeta con un gráfico de barras (verde si es positivo, rojo si es negativo) que se pulsa para filtrar.
 
-    Cada clic en una barra emite `toggled` con su clave (el año o la hora). Con alguna elegida, las demás se atenúan.
+    Cada clic en una barra emite `toggled` con su clave (el año o la hora). Con una elegida, las demás se atenúan.
     """
 
     toggled = Signal(object)
@@ -490,11 +491,16 @@ class BacktestDialog(QDialog):
         self.refresh()
 
     def toggle_year(self, year: int) -> None:
-        """Clic en una barra del año: lo añade a la selección o, si ya estaba, lo quita."""
-        self._set_selection(self.years ^ {int(year)}, self.hours)
+        """Clic en una barra del año: queda solo ese año (sustituye al que hubiera) o, si ya estaba marcado, se quita."""
+        self._set_selection(self._single(self.years, year), self.hours)
 
     def toggle_hour(self, hour: int) -> None:
-        self._set_selection(self.years, self.hours ^ {int(hour)})
+        self._set_selection(self.years, self._single(self.hours, hour))
+
+    @staticmethod
+    def _single(current: set, key) -> set:
+        """Un solo año (u hora) por histograma."""
+        return set() if int(key) in current else {int(key)}
 
     def clear_selection(self) -> None:
         self._set_selection(set(), set())

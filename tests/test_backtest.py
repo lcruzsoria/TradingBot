@@ -157,9 +157,13 @@ def test_ventana_backtest_con_datos_minimos():
     assert dlg.by_year.keys == [2020, 2021, 2022]
     dlg.by_year.click(2021)
     assert dlg.blocks["n"].value.text() == "1" and dlg.blocks["total"].value.text() == "+2 R"
-    dlg.by_year.click(2020)                                                          # varios años a la vez
-    assert dlg.years == {2020, 2021} and dlg.blocks["n"].value.text() == "2"
-    dlg.by_hour.click(10)                                                            # ninguna de esas a las 10
+    dlg.by_year.click(2020)                                                          # un solo año: sustituye al anterior
+    assert dlg.years == {2020} and dlg.blocks["n"].value.text() == "1" and dlg.blocks["total"].value.text() == "+2 R"
+    dlg.by_hour.click(10)                                                            # la de 2020 a las 10 va en contra
     assert dlg.blocks["n"].value.text() == "-" and "Sin operaciones" in dlg.verdict.text()
     dlg.by_year.cleared.emit()                                                       # «Quitar» del histograma de años
     assert dlg.years == set() and dlg.blocks["n"].value.text() == "1"
+    dlg.by_hour.click(3)                                                             # otra hora sustituye a las 10
+    assert dlg.hours == {3} and dlg.blocks["n"].value.text() == "1"
+    dlg.by_hour.click(3)                                                             # y otro clic en la misma la quita
+    assert dlg.hours == set() and dlg.blocks["n"].value.text() == "3"
