@@ -40,9 +40,13 @@ def _ratio(pos: dict) -> float:
     return abs(float(pos["target"]) - float(pos["entry"])) / risk if risk > 0 else 0.0
 
 
+BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de la píldora y el de la caja)
+
 # Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
-RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", "gray"),
+RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None)}
+RESULT_TEXT = {"TP": "#2ECC71"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
+BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
 
 class PositionPill(pg.TextItem):
@@ -51,17 +55,16 @@ class PositionPill(pg.TextItem):
 
     def __init__(self, pos: dict) -> None:
         result, color = RESULTS.get(str(pos["state"]), (str(pos["state"]), None))
-        color = theme.MUTED if color == "gray" else color
         super().__init__(anchor=(0, 0.5), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
                          border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
         decision = pos.get("decision")
         self._bar = QColor(_verdict_color(pos)) if decision else None
         symbol = {"GO": "✓", "NO GO": "✕"}.get(decision, "")
         self.result = result
-        self.setHtml(f'<span style="font-size:8pt">&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
+        self.setHtml(f'<span style="font-size:9pt">&nbsp;&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
                      f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {_ratio(pos):.1f}R</span>'
                      f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
-                     f'<b style="color:{color or theme.MUTED}">{result}</b></span>')
+                     f'<b style="color:{RESULT_TEXT.get(result, color or theme.MUTED)}">{result}</b></span>')
         self.setZValue(8)
 
     def paint(self, p, *args) -> None:
@@ -696,6 +699,17 @@ class ChartView(pg.PlotWidget):
                 box.setZValue(-6)
                 pi.addItem(box, ignoreBounds=True)
                 self._pos_items.append(box)
+            border = BOX_BORDER.get(str(pos["state"]))
+            if border:
+                lo, hi = sorted((stop, target))
+                frame = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
+                pen = QPen(QColor(border), 1.5)
+                pen.setCosmetic(True)                           # grosor en píxeles, no en precio
+                frame.setPen(pen)
+                frame.setBrush(Qt.BrushStyle.NoBrush)
+                frame.setZValue(-4)
+                pi.addItem(frame, ignoreBounds=True)
+                self._pos_items.append(frame)
             line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.MUTED, width=1.2))
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
