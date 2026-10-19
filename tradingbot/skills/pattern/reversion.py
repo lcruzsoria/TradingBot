@@ -129,7 +129,7 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * origin_price, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * origin_price, sign * target, label)
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label), pos]
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label, tbr.day.isoformat()), pos]
     if ctx.window_closed:
         return expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero sin retroceso al 0,5")
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label)]
+    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label, tbr.day.isoformat())]

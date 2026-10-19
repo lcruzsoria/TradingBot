@@ -966,6 +966,10 @@ class MainWindow(QMainWindow):
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
                 used.add(pos["session"])
+        sessions: dict = {}                                     # una sola entrada por TBR en el gráfico: la que opera Cortex (GO)
+        for pos in positions:                                   # o, si no opera ninguna, la primera; las demás no se dibujan
+            sessions.setdefault(pos["session"], []).append(pos)
+        shown = [next((p for p in group if p["decision"] == "GO"), group[0]) for group in sessions.values()]
         fibs = []
         for f in self._fibs:
             fib = {"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
@@ -973,11 +977,15 @@ class MainWindow(QMainWindow):
             if f.state == "entrada":                            # el fibo lleva el GO / NO GO de su entrada: así se ve cuál se opera
                 pos = next((p for p in positions if p["label"] == f.label and p["direction"] == f.direction
                             and fib["x0"] <= p["x0"] <= fib["x1"]), None)
+                if pos is not None and not any(pos is p for p in shown):
+                    continue                                    # otra entrada de esa TBR ya ocupa su sitio
                 if pos is not None and pos["decision"]:
                     fib["decision"], fib["reason"] = pos["decision"], pos["reason"]
+            elif any(p["session"] == (f.zone, f.day) for p in shown):
+                continue                                        # fibo en curso de una TBR que ya dio su entrada
             fibs.append(fib)
         self.chart.set_fibs(fibs)
-        self.chart.set_positions(positions)
+        self.chart.set_positions(sorted(shown, key=lambda p: p["x0"]))
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:
         """GO / NO GO que habría dado Cortex a una entrada en la vela `index`, con el sesgo que tenía el bot en esa vela."""

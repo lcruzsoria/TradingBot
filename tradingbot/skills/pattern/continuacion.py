@@ -122,12 +122,12 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * swing, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * swing, sign * target, label)
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "entrada", label), pos]
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "entrada", label, tbr.day.isoformat()), pos]
     if ctx.window_closed:
         x = min(max(end, 0), len(ts) - 1)
         return [hit(EXPIRED, direction, x, sign * half, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin reversión al 0,5 "
                                                         f"antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)")], []
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "en curso", label)]
+    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "en curso", label, tbr.day.isoformat())]
 
 
 def _when(ctx: PatternContext, i: int) -> str:
