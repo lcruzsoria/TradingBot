@@ -1,6 +1,6 @@
 """Diario del forwardtest: lo que pasa desde que el bot opera, en un fichero por mes que no se borra nunca.
 
-Cada línea de `data/forwardtest/AAAA-MM.jsonl` es un JSON con `t` (tipo) y `at` (fecha y hora local en que se anotó):
+Cada línea de `data/perfiles/<perfil>/forwardtest/AAAA-MM.jsonl` (un diario por perfil) es un JSON con `t` (tipo) y `at` (fecha y hora local en que se anotó):
 
 - `signal`  una señal que evaluó Cortex: veredicto, motivo, mercado, temporalidad, patrón, lado, TBR y hora de la vela
 - `open`    una operación simulada que abre Setup: la orden completa de Cortex (precio, stop, objetivo, sesgo, TBR...)

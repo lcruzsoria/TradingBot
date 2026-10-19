@@ -185,6 +185,33 @@ CANDLE_UP_FILL = CANDLE_UP_LINE = CANDLE_DOWN_FILL = CANDLE_DOWN_LINE = ""
 CHART_TEXT = CHART_GRID = LEVEL_HIGH = LEVEL_LOW = LEVEL_OPEN = LEVEL_LABEL = ""
 _current: Palette = PRESETS[DEFAULT_PRESET]
 
+# -- tipo de letra (UI_FONT de tradingbot.env) ------------------------------------------------
+# mockup: la letra de la propuesta de diseño (Inter, trazo medio: las cifras sin negrita fuerte). Si Inter no está
+#         instalada ni en tradingbot/ui/fonts, se usa Segoe UI con los mismos pesos.
+# clasica: la de siempre (Segoe UI con negritas).
+FONTS: dict[str, tuple[str, dict[int, int]]] = {
+    "mockup": ('"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif', {600: 500, 700: 500, 800: 600}),
+    "clasica": ('"Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif', {}),
+}
+DEFAULT_FONT = "mockup"
+FONTS_DIR = Path(__file__).with_name("fonts")       # .ttf/.otf que se cargan al arrancar (p. ej. Inter)
+_font = DEFAULT_FONT
+
+
+def set_font(name: str | None) -> str:
+    """Elige el tipo de letra (UI_FONT); vacío = el de por defecto."""
+    global _font
+    key = (name or DEFAULT_FONT).strip().lower()
+    if key not in FONTS:
+        raise ThemeError(f"UI_FONT={name!r} no existe. Opciones: {', '.join(FONTS)}")
+    _font = key
+    return key
+
+
+def font_families() -> list[str]:
+    """Familias del tipo de letra activo, por orden de preferencia (para la letra por defecto de la aplicación)."""
+    return [f.strip().strip('"') for f in FONTS[_font][0].split(",")]
+
 
 def effective(palette: Palette, key: str) -> str:
     """Color real de un campo: los de vela vacíos siguen a bull/bear."""
@@ -249,11 +276,11 @@ apply(PRESETS[DEFAULT_PRESET])
 def stylesheet() -> str:
     """Hoja de estilos Qt con la paleta activa."""
     p = _current
-    font = '"Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif'
+    font, weights = FONTS[_font]
     ok_border, ok_bg = mix(BG, BULL, 0.45), mix(PANEL, BULL, 0.14)
     busy_border, busy_bg = mix(BG, WARN, 0.45), mix(PANEL, WARN, 0.14)
     err_border, err_bg = mix(BG, BEAR, 0.45), mix(PANEL, BEAR, 0.14)
-    return f"""
+    sheet = f"""
 * {{ font-family: {font}; font-size: 12px; color: {TEXT}; }}
 QMainWindow, QWidget#Root {{ background: {BG}; }}
 QDialog {{ background: {BG}; }}
@@ -262,6 +289,7 @@ QToolTip {{ background: {PANEL_ALT}; color: {TEXT}; border: 1px solid {BORDER}; 
 /* Cabecera */
 QFrame#Toolbar {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 6px; }}
 QLabel#Brand {{ font-size: 14px; font-weight: 700; }}
+QComboBox#ProfileSelect {{ font-size: 13px; font-weight: 600; min-width: 130px; }}
 QLabel#Muted {{ color: {MUTED}; }}
 QLabel#Tiny {{ color: {MUTED}; font-size: 11px; }}
 QLabel#StatusChip {{ border-radius: 4px; padding: 3px 9px; border: 1px solid {BORDER}; color: {MUTED}; }}
@@ -367,3 +395,4 @@ QScrollBar:vertical {{ background: transparent; width: 8px; }}
 QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 24px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 """
+    return re.sub(r"font-weight: (\d+)", lambda m: f"font-weight: {weights.get(int(m.group(1)), int(m.group(1)))}", sheet)

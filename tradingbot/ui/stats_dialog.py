@@ -24,7 +24,7 @@ from ..timeframes import display_label
 from . import theme
 from .fmt import fecha_hora
 
-RESULT_NAMES = {"objetivo": "Objetivo", "stop": "Stop", "tiempo": "Tiempo"}
+RESULT_NAMES = {"objetivo": "Objetivo", "stop": "Stop", "tiempo": "Tiempo", "breakeven": "Breakeven"}
 WINDOWS = (("Hoy", 0), ("7 días", 7), ("30 días", 30), ("Todo", None))   # días hacia atrás (fecha de NY) o None: todo
 DEFAULT_WINDOW = 30
 LIVE = ""                                                  # en el selector: lo que lleva la skill (frente a un mes guardado)

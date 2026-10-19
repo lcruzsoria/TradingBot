@@ -1,6 +1,8 @@
 """Skill Stats: el forwardtest (lo que hace el bot desde que opera, guardado por meses) y los resultados del backtest."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from ...core import Event, Skill, register_skill
 from .backtest import BOT_FILTER, load
 from . import journal
@@ -12,7 +14,7 @@ from .session import Signal, TradeStats
 class StatsSkill(Skill):
     title = "Stats"
     description = ("Las cifras del bot en un solo sitio. Forwardtest: anota cada GO / NO GO de Cortex y cada operación simulada "
-                   "que Setup abre y cierra en directo (no los patrones pasados que se repiten al arrancar), y lo guarda en un diario mensual (data/forwardtest) que no se pierde al reiniciar; "
+                   "que Setup abre y cierra en directo (no los patrones pasados que se repiten al arrancar), y lo guarda en un diario mensual por perfil (data/perfiles/<perfil>/forwardtest) que no se pierde al reiniciar; "
                    "lo publica para la ventana Forwardtest (acierto, R, drawdown, rachas, libros...). Backtest: carga el "
                    "histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia Calendario para la "
                    "ventana Backtest. No opera ni decide nada.")
@@ -22,6 +24,9 @@ class StatsSkill(Skill):
 
     def on_start(self) -> None:
         folder = self.settings.get("FORWARD_DIR", "") or None                      # tradingbot.env, bloque STATS
+        data_dir = (self.services.app_cfg or {}).get("app", {}).get("data_dir")
+        if folder is None and data_dir:
+            folder = Path(data_dir) / "forwardtest"                       # cada perfil (cuenta) tiene su diario
         if folder is None and _is_demo(self.services.source):
             folder = journal.DEFAULT_DIR.parent / "forwardtest-demo"      # datos sintéticos (--demo, capturas): aparte
         self.journal = Journal(folder)

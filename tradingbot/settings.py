@@ -48,3 +48,15 @@ def save_watchlist(symbols: list[str], path: Path | None = None) -> None:
     data = load_settings(path)
     data["watchlist"] = clean_symbols(symbols)
     save_settings(data, path)
+
+
+def load_profile(path: Path | None = None) -> str | None:
+    """Último perfil elegido en el selector de la cabecera (None si nunca se ha cambiado)."""
+    saved = load_settings(path).get("profile")
+    return str(saved).strip().lower() or None if isinstance(saved, str) else None
+
+
+def save_profile(name: str, path: Path | None = None) -> None:
+    data = load_settings(path)
+    data["profile"] = name.lower()
+    save_settings(data, path)

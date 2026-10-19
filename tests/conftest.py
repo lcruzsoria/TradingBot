@@ -30,3 +30,12 @@ def setup_positions_in_tmp(tmp_path, monkeypatch):
     """Las posiciones abiertas de Setup en las pruebas van a una carpeta temporal, nunca a data/setup."""
     from tradingbot.skills.setup import store
     monkeypatch.setattr(store, "DEFAULT_FILE", tmp_path / "setup" / "abiertas.json")
+
+
+@pytest.fixture(autouse=True)
+def profile_data_in_tmp(tmp_path, monkeypatch):
+    """La cuenta virtual y las carpetas de perfil de las pruebas van a una carpeta temporal, nunca a data/."""
+    from tradingbot import config
+    from tradingbot.skills.setup import account
+    monkeypatch.setattr(account, "DEFAULT_FILE", tmp_path / "setup" / "cuenta.json")
+    monkeypatch.setattr(config, "PROFILES_DIR", tmp_path / "perfiles")
