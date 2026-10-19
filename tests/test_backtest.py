@@ -4,7 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -13,21 +13,35 @@ from tradingbot.core import Event, EventBus, Services, SkillManager
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.cortex.order import Order
 from tradingbot.skills.setup.positions import Closed
-from tradingbot.skills.stats.backtest import BOT_FILTER, DEFAULT_FILE, Backtest, Group, load, verdict
+from tradingbot.skills.stats.backtest import BOT_FILTER, DEFAULT_FILE, Backtest, Group, load, summarize, verdict
 import tradingbot.skills  # noqa: F401
 
 ORDER = Order("NAS100", "15m", "long", "Continuación", "continuacion", "London", date(2026, 10, 6), 105.0, 95.0, 100.0, 105.0,
               95.0, 115.0, "Bullish", 3.0, "GO", entry_ts=1_000_000, close_ts=1_086_400)
 
-GROUP = {"key": "indices", "nombre": "Índices americanos", "actualizado": "2026-10-18",
+def _min(y, mo, d, h):
+    """Minutos desde 1970 de una hora de Nueva York (así guarda el backtest la entrada y el cierre)."""
+    return int((datetime(y, mo, d, h) - datetime(1970, 1, 1)).total_seconds() // 60)
+
+
+# Cinco operaciones a mano. «Lo que opera el bot» (no en contra del sesgo y sin solaparse con otra GO): 1, 4 y 5.
+#   1 lun 02-03-2020 03h Continuación largo London  +2 R  a favor
+#   2 mar 03-03-2020 10h Reversión    corto NY Open -1 R  en contra
+#   3 lun 03-05-2021 03h Continuación largo London  -1 R  sin sesgo, solapada con otra GO (bit 2)
+#   4 mar 04-05-2021 21h Continuación corto Asia    +2 R  a favor
+#   5 lun 03-01-2022 10h Reversión    largo NY Open -1 R  a favor, solapada solo con otra cualquiera (bit 1)
+ENTRIES = [(2020, 3, 2, 3), (2020, 3, 3, 10), (2021, 5, 3, 3), (2021, 5, 4, 21), (2022, 1, 3, 10)]
+GROUP = {"key": "indices", "nombre": "Índices americanos", "tipo": "patrones", "actualizado": "2026-10-18",
          "datos": [{"mercado": "NAS100.r", "velas M15": 1000, "desde (NY)": "2018-09-10", "hasta (NY)": "2026-10-16",
                     "TBR evaluadas": 60}],
-         "resumen": [{"patrón": "Ambos", "filtro": BOT_FILTER, "n": 100, "wr": 34.0, "mean": -0.05, "total": -5.0, "pf": 0.9,
-                      "avg_win": 1.9, "avg_loss": -1.05, "dd": -12.0, "streak": 7, "t": -0.4}],
-         "por_zona": [{"patrón": "Continuación", "zona": "Asia", "filtro": BOT_FILTER, "n": 10, "wr": 30.0, "total": -3.0},
-                      {"patrón": "Reversión", "zona": "Asia", "filtro": BOT_FILTER, "n": 30, "wr": 40.0, "total": 3.0},
-                      {"patrón": "Continuación", "zona": "London", "filtro": BOT_FILTER, "n": 5, "wr": 20.0, "total": -1.0}],
-         "curvas": {f"Ambos|{BOT_FILTER}": [["2018-09-10", -1.0], ["2026-10-16", -5.0]]}}
+         "cats": {"m": ["DJ30.r", "NAS100.r"], "p": ["Continuación", "Reversión"], "z": ["Asia", "London", "NY Open"],
+                  "o": ["objetivo", "stop", "tiempo"], "s": ["a favor", "en contra", "sin sesgo"]},
+         "ops": {"m": [1, 1, 0, 1, 0], "p": [0, 1, 0, 0, 1], "z": [1, 2, 1, 0, 2], "d": [0, 1, 0, 1, 0], "o": [0, 1, 1, 0, 1],
+                 "s": [0, 1, 2, 0, 0], "f": [0, 0, 2, 0, 1], "e": [_min(*e) for e in ENTRIES],
+                 "x": [_min(*e) + 300 for e in ENTRIES], "v": [20, 4, 4, 20, 4],
+                 "r": [2.0, -1.0, -1.0, 2.0, -1.0], "k": [0.1, 0.1, 0.1, 0.1, 0.1],
+                 **{c: [2.0, -1.0, -1.0, 2.0, -1.0] for c in ("tp1", "tp15", "tp2", "tp25", "tp3", "h12", "h48")},
+                 "mae": [0.5, 1.0, 1.0, 0.5, 1.0], "mfe": [2.0, 0.3, 0.3, 2.0, 0.3], "rk": [0.2] * 5}}
 
 
 def stats_skill(env=None):
@@ -61,23 +75,35 @@ def test_backtest_que_falta_se_avisa_sin_romper_la_skill(tmp_path):
     assert bt["backtest"] is None and "exportar_backtest" in bt["error"] and skill.caption == "sin backtest"
 
 
-def test_lectura_del_backtest(tmp_path):
+def test_cifras_y_seleccion_por_anios_y_horas(tmp_path):
     path = tmp_path / "bt.json"
     path.write_text(json.dumps({"generado": "x", "grupos": [GROUP], "comparativa": {}}), encoding="utf-8")
     g = load(path).group("indices")
-    assert g.period == "2018-2026" and g.row("Ambos", BOT_FILTER)["n"] == 100 and g.row("Ambos", "otro") is None
-    zones = g.breakdown("por_zona", "zona", "Ambos", BOT_FILTER)                  # sin filas «Ambos»: suma los dos patrones
-    asia = next(z for z in zones if z["zona"] == "Asia")
-    assert asia["n"] == 40 and asia["total"] == 0.0 and asia["wr"] == pytest.approx(37.5) and asia["t"] is None
-    assert len(g.breakdown("por_zona", "zona", "Reversión", BOT_FILTER)) == 1
-    assert g.curve("Ambos", BOT_FILTER)[-1] == ("2026-10-16", -5.0) and g.curve("Reversión", BOT_FILTER) == []
+    s = summarize([2.0, -1.0, -1.0, 2.0])
+    assert (s["n"], s["wr"], s["total"], s["pf"], s["dd"], s["streak"]) == (4, 50.0, 2.0, 2.0, -2.0, 2)
+    bot = g.view("Ambos", BOT_FILTER)
+    assert g.period == "2018-2026" and bot.main.stats()["n"] == 3 and bot.main.stats()["total"] == 3.0
+    assert [(z, len(o)) for z, o in bot.zones] == [("Asia", 1), ("London", 1), ("NY Open", 1)]
+    assert [(d, len(o)) for d, o in bot.days][:2] == [("lunes", 2), ("martes", 1)]
+    assert g.view("Ambos", "sin filtro de sesgo").main.stats()["n"] == 5
+    assert g.view("Reversión", "en contra del sesgo").main.stats()["total"] == -1.0
+    # años: la selección filtra todo menos su propio histograma
+    y2020 = g.view("Ambos", BOT_FILTER, years={2020})
+    assert len(y2020.main) == 1 and [y for y, _ in y2020.years] == [2020, 2021, 2022]
+    assert [(f, len(o)) for f, o in y2020.filters][:3] == [(BOT_FILTER, 1), ("a favor del sesgo (Cortex)", 1),
+                                                         ("sin filtro de sesgo", 2)]
+    h10 = g.view("Ambos", BOT_FILTER, hours={10})
+    assert h10.main.stats()["total"] == -1.0 and [y for y, _ in h10.years] == [2022] and [h for h, _ in h10.hours] == [3, 10, 21]
+    assert len(g.view("Ambos", BOT_FILTER, years={2020}, hours={10}).main) == 0
+    assert [(m, g, len(o)) for m, g, o in load(path).compare(BOT_FILTER, years={2021})] == [
+        ("NAS100.r", "Índices americanos", 1), ("DJ30.r", "Índices americanos", 0)]
     path.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError):
         load(path)
     assert verdict(-2.5, -0.1)[1] == -1 and verdict(2.1, 0.1)[1] == 1 and verdict(-1.0, -0.05)[1] == 0
 
 
-@pytest.mark.skipif(not DEFAULT_FILE.exists(), reason="sin backtest.json")
+@pytest.mark.skipif(not DEFAULT_FILE.exists(), reason="sin backtest.json.gz")
 def test_ventana_backtest_con_el_resumen_real():
     from PySide6.QtWidgets import QApplication
     from tradingbot.ui.backtest_dialog import BacktestDialog
@@ -100,6 +126,22 @@ def test_ventana_backtest_con_el_resumen_real():
     assert [r[0].text() for r in dlg.by_day.rows][0] == "Lunes" and "largos a hora fija" in dlg.subtitle.text()
     dlg.set_group("indices")
     assert dlg.pattern == "Ambos" and not dlg.by_zone.isHidden()
+    total = dlg.blocks["n"].value.text()                                          # pulsar un año recalcula todo
+    dlg.by_year.click(2024)
+    assert dlg.years == {2024} and dlg.blocks["n"].value.text() != total and not dlg.selection_bar.isHidden()
+    assert "2024" in dlg.selection_label.text() and dlg.by_year.clear_btn.isVisibleTo(dlg) and dlg.compare.rows
+    dlg.by_hour.click(dlg.by_hour.keys[0])
+    assert dlg.hours == {dlg.by_hour.keys[0]} and "no cambia" in dlg.funnel.note.text()
+    dlg.by_year.click(2024)                                                         # otro clic lo quita
+    assert dlg.years == set() and dlg.hours
+    dlg.clear_selection()
+    assert dlg.blocks["n"].value.text() == total and dlg.selection_bar.isHidden()
+    dlg.set_group("calendario")                                                    # en Calendario la hora es la de entrada
+    bot_hour = dlg.blocks["mean"].value.text()
+    dlg.by_hour.click(5)
+    assert dlg.blocks["mean"].value.text() != bot_hour and "sustituye" in dlg.selection_label.text()
+    dlg.set_group("indices")
+    assert not dlg.hours                                                           # otro grupo: selección limpia
     dlg.set_backtest(None, "falta el fichero")
     assert dlg.empty.text() == "falta el fichero" and dlg.scroll.isHidden()
 
@@ -109,8 +151,15 @@ def test_ventana_backtest_con_datos_minimos():
     from tradingbot.ui.backtest_dialog import BacktestDialog
     QApplication.instance() or QApplication([])
     dlg = BacktestDialog(None, Backtest([Group("indices", "Índices americanos", GROUP)], {}))
-    assert dlg.blocks["n"].value.text() == "100" and dlg.blocks["wr"].value.text() == "34.0 %"
-    assert "Sin ventaja clara" in dlg.verdict.text()
-    assert [r[0].text() for r in dlg.by_zone.rows] == ["Asia", "London"]
-    dlg.set_pattern("Reversión")                                                   # sin fila en el resumen
-    assert dlg.blocks["n"].value.text() == "-"
+    assert dlg.blocks["n"].value.text() == "3" and dlg.blocks["wr"].value.text() == "66.7 %"
+    assert "Sin ventaja clara" in dlg.verdict.text() and dlg.selection_bar.isHidden()
+    assert [r[0].text() for r in dlg.by_zone.rows] == ["Asia", "London", "NY Open"]
+    assert dlg.by_year.keys == [2020, 2021, 2022]
+    dlg.by_year.click(2021)
+    assert dlg.blocks["n"].value.text() == "1" and dlg.blocks["total"].value.text() == "+2 R"
+    dlg.by_year.click(2020)                                                          # varios años a la vez
+    assert dlg.years == {2020, 2021} and dlg.blocks["n"].value.text() == "2"
+    dlg.by_hour.click(10)                                                            # ninguna de esas a las 10
+    assert dlg.blocks["n"].value.text() == "-" and "Sin operaciones" in dlg.verdict.text()
+    dlg.by_year.cleared.emit()                                                       # «Quitar» del histograma de años
+    assert dlg.years == set() and dlg.blocks["n"].value.text() == "1"
