@@ -187,6 +187,8 @@ class MainWindow(QMainWindow):
         self.account = QLabel("")
         self.account.setObjectName("AccountChip")
         self.account.hide()
+        for chip in (self.status, self.account):        # las insignias se ven enteras: no se encogen
+            chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         chips.addWidget(self.status)
         chips.addWidget(self.account)
         chips.addStretch(1)
@@ -724,7 +726,8 @@ class MainWindow(QMainWindow):
     def _on_connected(self, p: dict) -> None:
         self.connected = True
         self._set_status("Conectado", "ok")
-        self.account.setText(p["info"])
+        self.account.setText(p["info"].split("  ")[0])  # «MT5 DEMO 114285263»: el saldo ya está en su bloque
+        self.account.setToolTip(p["info"])
         self.account.show()
         self.log(f"feed: conectado - {p['info']}")
         self.all_symbols = p.get("all_symbols", [])
