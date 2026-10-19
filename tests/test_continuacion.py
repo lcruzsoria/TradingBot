@@ -211,7 +211,7 @@ def test_el_grafico_dibuja_una_sola_entrada_por_tbr_la_que_opera_cortex(tmp_path
     items = win.chart._fib_items
     assert len(items) == 6 and all(item.opacity() == NO_GO_OPACITY for item in items)         # sus niveles, atenuados y sin título
     pill, = win.chart._pos_pills                                                                # la píldora: veredicto primero, resultado al final
-    assert pill.opacity() == 1 and pill.toPlainText().strip().startswith("✕") and pill.result == "SL"
+    assert pill.opacity() == NO_GO_OPACITY and pill.toPlainText().strip().startswith("✕") and pill.result == "SL"
     assert pill.border.color().name().upper() == "#EF5350"                                       # borde rojo: saltó el stop
 
 

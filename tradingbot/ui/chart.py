@@ -714,13 +714,13 @@ class ChartView(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
-            if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada (su píldora, no)
-                for item in self._pos_items[first:]:
-                    item.setOpacity(NO_GO_OPACITY)
             pill = PositionPill(pos)
             pill.setPos(x0, entry)
             pi.addItem(pill, ignoreBounds=True)
             self._pos_items.append(pill)
+            if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada, píldora incluida (como su fibo)
+                for item in self._pos_items[first:]:
+                    item.setOpacity(NO_GO_OPACITY)
             self._pos_pills.append(pill)
         self._fit_pills()
         self._update_card()
