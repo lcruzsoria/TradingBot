@@ -25,9 +25,9 @@ def clock(*when):
     return lambda: datetime(*when)
 
 
-def skill_in(folder):
+def skill_in(folder, start=""):
     bus = EventBus()
-    env = EnvConfig(parse(f"STATS_FORWARD_DIR={folder}\nSTATS_BACKTEST_FILE={folder / 'no.json'}"))
+    env = EnvConfig(parse(f"STATS_FORWARD_DIR={folder}\nSTATS_BACKTEST_FILE={folder / 'no.json'}\nSTATS_FORWARD_START={start}"))
     skill = SkillManager(bus, Services(None, None, {"app": {}}, env), [{"type": "stats"}]).skills["stats"]
     skill.on_start()
     return skill
@@ -93,9 +93,10 @@ def test_una_operacion_cuenta_en_el_mes_en_que_abre(tmp_path):
     s = oct_.load_month("2026-09")
     assert (len(s.done), s.total_r, s.nogo) == (1, 2.0, 1)
     assert oct_.load_month("2026-10").trades == []
-    recent = oct_.load_recent()                                 # en vivo: mes actual y anterior
+    recent = oct_.load_recent()                                 # en vivo: todo el diario
     assert (len(recent.done), recent.nogo) == (1, 1)
-    assert Journal(tmp_path, clock(2026, 12, 1)).load_recent().trades == []      # septiembre ya no entra en vivo
+    assert len(Journal(tmp_path, clock(2027, 3, 1)).load_recent("2026-09").done) == 1     # se acumula desde el inicio
+    assert Journal(tmp_path, clock(2026, 12, 1)).load_recent("2026-11").trades == []      # antes del inicio no entra
 
 
 def test_lineas_rotas_se_saltan(tmp_path):
@@ -141,23 +142,37 @@ def test_en_modo_demo_el_diario_va_aparte(tmp_path):
     assert skill.journal.folder == journal.DEFAULT_DIR.parent / "forwardtest-demo"
 
 
-def test_los_patrones_pasados_que_se_repiten_al_arrancar_no_cuentan(tmp_path):
-    import pandas as pd
-    skill = skill_in(tmp_path)
-    skill.handle(Event("candles.loaded", {"symbol": "nas100", "timeframe": "15m",
-                                          "df": pd.DataFrame({"ts": [800_000, 950_000]})}, "feed"))
-    skill.handle(decision(True, ts=900_000))                                    # vela anterior al arranque: se ignora
-    skill.handle(Event("setup.executed", {"order": ORDER}, "setup"))            # ORDER entra en 1_000_000: en directo
-    old = replace(ORDER, entry_ts=900_000)
-    skill.handle(Event("setup.executed", {"order": old}, "setup"))
-    skill.handle(Event("setup.closed", {"order": old, "closed": WIN}, "setup"))
-    skill.handle(decision(False, ts=950_000))                                   # la vela del arranque sí cuenta
-    assert [r["t"] for r in lines(tmp_path)] == ["open", "signal"]
-    assert (skill.stats.go, skill.stats.nogo, len(skill.stats.trades)) == (0, 1, 1)
-    # una operación que ya estaba en el diario recibe su cierre aunque la anuncien al arrancar
-    again = skill_in(tmp_path)
-    again.handle(Event("candles.loaded", {"symbol": "NAS100", "timeframe": "15m",
-                                          "df": pd.DataFrame({"ts": [2_000_000]})}, "feed"))
-    again.handle(Event("setup.executed", {"order": ORDER}, "setup"))
-    again.handle(Event("setup.closed", {"order": ORDER, "closed": WIN}, "setup"))
-    assert [r["t"] for r in lines(tmp_path)] == ["open", "signal", "close"] and again.stats.total_r == 2.0
+def test_cuenta_todo_desde_el_inicio_aunque_se_repase_al_arrancar(tmp_path):
+    from calendar import timegm
+    from tradingbot.clock import server_from_ny_day
+    start = server_from_ny_day(date(2026, 10, 19), 3 * 3600)            # 00:00 NY del 19/10 con un servidor UTC+3
+    assert start == timegm((2026, 10, 19, 7, 0, 0))
+    assert server_from_ny_day(date(2026, 10, 19), None) == start         # sin desfase medido: servidor = NY + 7 h
+    skill = skill_in(tmp_path, "2026-10-19")
+    skill.handle(Event("clock.offset", {"server_offset": 3 * 3600}, "quotes"))
+    skill.handle(decision(True, ts=start - 900))                        # 18/10 en NY: no cuenta
+    before = replace(ORDER, entry_ts=start - 900)
+    skill.handle(Event("setup.executed", {"order": before}, "setup"))
+    skill.handle(Event("setup.closed", {"order": before, "closed": WIN}, "setup"))
+    first = replace(ORDER, entry_ts=start, close_ts=start + 86_400)     # 19/10: cuenta, aunque sea un repaso al arrancar
+    skill.handle(decision(False, ts=start))
+    skill.handle(Event("setup.executed", {"order": first}, "setup"))
+    other = replace(ORDER, symbol="EURUSD", entry_ts=start + 3600, close_ts=start + 90_000)
+    skill.handle(Event("setup.closed", {"order": other, "closed": WIN}, "setup"))   # con su cierre basta para anotarla
+    assert [r["t"] for r in lines(tmp_path)] == ["signal", "open", "close"]
+    # otro arranque (o el otro perfil de MT5: el diario es el mismo) las vuelve a repasar y no se duplican
+    again = skill_in(tmp_path, "2026-10-19")
+    again.handle(decision(False, ts=start))
+    again.handle(Event("setup.executed", {"order": first}, "setup"))
+    again.handle(Event("setup.closed", {"order": other, "closed": WIN}, "setup"))
+    assert len(lines(tmp_path)) == 3
+    assert (again.stats.nogo, len(again.stats.trades), len(again.stats.done)) == (1, 2, 1)
+
+
+def test_inicio_mal_escrito():
+    import pytest
+    env = EnvConfig(parse("STATS_FORWARD_START=19/10/2026"))
+    skill = SkillManager(EventBus(), Services(None, None, {"app": {}}, env), [{"type": "stats"}]).skills["stats"]
+    with pytest.raises(ValueError, match="AAAA-MM-DD"):
+        skill.on_start()
+

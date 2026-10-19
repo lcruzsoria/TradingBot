@@ -7,8 +7,8 @@ Cada línea de `data/forwardtest/AAAA-MM.jsonl` es un JSON con `t` (tipo) y `at`
 - `close`   su cierre: la orden otra vez (así cada mes se entiende solo) y el resultado (objetivo, stop o tiempo, R, %)
 - `stage`   «Nueva etapa»: las cifras en vivo empiezan desde aquí; los meses guardados se ven completos
 
-Al arrancar se cargan el mes actual y el anterior (para cubrir los últimos 30 días); los meses anteriores se abren desde la
-ventana Forwardtest. Las líneas que no se entienden se saltan, para que un fichero a medio escribir no rompa nada.
+Al arrancar se cargan todos los meses desde el inicio del forwardtest (STATS_FORWARD_START), sea cual sea el perfil de MT5:
+el diario es uno solo y acumula lo de todos. Cada mes también se abre suelto desde la ventana Forwardtest. Las líneas que no se entienden se saltan, para que un fichero a medio escribir no rompa nada.
 """
 from __future__ import annotations
 
@@ -120,13 +120,15 @@ class Journal:
         except (KeyError, TypeError, ValueError):
             pass                                        # línea de otra versión o incompleta: se salta
 
-    def load_recent(self) -> TradeStats:
-        """Lo que vuelve a la memoria de la skill al arrancar: el mes anterior y el actual, desde la última «Nueva etapa».
+    def load_recent(self, first: str | None = None) -> TradeStats:
+        """Lo que vuelve a la memoria de la skill al arrancar: todos los meses desde `first` (AAAA-MM, el del inicio del
+        forwardtest; sin él, todo el diario), desde la última «Nueva etapa».
 
         Las abiertas quedan «sin seguimiento» hasta que Setup las vuelva a anunciar (Cortex repite los patrones recientes).
         """
         current = month_of(self._now())
-        records = self._records(previous_month(current)) + self._records(current)
+        records = [rec for m in sorted(self.months()) if (first is None or m >= first) and m <= current
+                   for rec in self._records(m)]
         stages = [i for i, rec in enumerate(records) if rec["t"] == "stage"]
         stats = TradeStats(since=records[stages[-1]].get("at") if stages else None)
         for rec in records[stages[-1] + 1 if stages else 0:]:

@@ -219,7 +219,7 @@ class StatsDialog(QDialog):
         head.addWidget(sub)
         head.addStretch(1)
         self.month_box = QComboBox()
-        self.month_box.setToolTip("En vivo: lo que lleva la skill Stats (mes actual y anterior). O un mes guardado del diario "
+        self.month_box.setToolTip("En vivo: lo que lleva la skill Stats (desde el inicio del forwardtest). O un mes guardado del diario "
                                   "(data/forwardtest), completo")
         self.month_box.activated.connect(lambda _i: self.set_month(self.month_box.currentData()))
         head.addWidget(self.month_box)

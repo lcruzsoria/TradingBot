@@ -6,7 +6,7 @@ muchos brokers). Se mide comparando los ticks en vivo con el reloj del PC (Offse
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 try:
     from zoneinfo import ZoneInfo
@@ -29,6 +29,17 @@ def ny_from_server(server_ts: int, utc_offset_seconds: int | None) -> tuple[date
         return utc.astimezone(NY), False
     naive = datetime.fromtimestamp(server_ts, tz=timezone.utc).replace(tzinfo=None)
     return naive - timedelta(hours=NY_CLOSE_SERVER_AHEAD_HOURS), True
+
+
+def server_from_ny_day(day: date, utc_offset_seconds: int | None) -> int:
+    """Hora del servidor (marca de tiempo) de las 00:00 de Nueva York del día `day`; lo contrario de ny_from_server.
+
+    Sin el desfase medido se asume un servidor con cierre en Nueva York (servidor = NY + 7 h).
+    """
+    if utc_offset_seconds is not None and NY is not None:
+        return int(datetime(day.year, day.month, day.day, tzinfo=NY).timestamp()) + utc_offset_seconds
+    midnight = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    return int(midnight.timestamp()) + NY_CLOSE_SERVER_AHEAD_HOURS * 3600
 
 
 def server_minus_ny(utc_offset_seconds: int | None, now: datetime | None = None) -> tuple[int, bool]:
