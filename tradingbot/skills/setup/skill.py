@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ...core import Event, Skill, register_skill
+from . import store
 from .positions import resolve, trackable
 
 
@@ -11,7 +12,8 @@ class SetupSkill(Skill):
     description = ("El ejecutor: mete la operación en la cuenta del broker (MT5). Solo recibe órdenes de Cortex, que es "
                    "quien reúne el activo, la temporalidad, el sesgo, la TBR y el patrón válido; Setup no decide nada. "
                    "Por ahora funciona en modo simulación: prepara la orden y la anota, pero no la envía a MT5. Sigue las "
-                   "posiciones simuladas (stop, objetivo y cierre por tiempo) con las velas que le reenvía Cortex.")
+                   "posiciones simuladas (stop, objetivo y cierre por tiempo) con las velas que le reenvía Cortex. Las abiertas se guardan en "
+                   "data/setup/abiertas.json: se pueden consultar y siguen ahí al reiniciar el bot.")
     subscribes = ("setup.order", "setup.candles")
     publishes = ("setup.executed", "setup.closed")
     slot = "aux1"
@@ -25,8 +27,8 @@ class SetupSkill(Skill):
             raise ValueError(self.error)
         self.error = ""
         self.executed = 0
-        self.positions: list = []                       # órdenes simuladas abiertas (se pierden al reiniciar el bot)
-        self.set_caption("esperando a Cortex")
+        self.positions: list = [o for o in store.load() if trackable(o)]   # órdenes simuladas abiertas (en disco)
+        self.set_caption(f"{len(self.positions)} posición(es) abierta(s)" if self.positions else "esperando a Cortex")
 
     def handle(self, event: Event) -> None:
         if self.error:
@@ -41,6 +43,7 @@ class SetupSkill(Skill):
         self.executed += 1
         if trackable(order):
             self.positions.append(order)
+            store.save(self.positions)
         self.set_caption(f"simulada: {order.direction.capitalize()} {order.symbol}")
         note = "Modo simulación: la orden está lista pero no se ha enviado a MT5."
         if trackable(order):
@@ -59,6 +62,8 @@ class SetupSkill(Skill):
                 continue
             self.publish("setup.closed", {"order": order, "closed": closed, "sent": False})
             self.set_caption(f"cerrada: {closed.result} {closed.r:+.2f} R")
+        if len(still) != len(self.positions):
+            store.save(still)
         self.positions = still
         if still:
             self.set_caption(f"{len(still)} posición(es) abierta(s)")

@@ -4,6 +4,7 @@ from __future__ import annotations
 from ..bias import Direction, TradeFilter
 from ...core import Event, Skill, register_skill
 from .order import build_calendar_order, build_order
+from ..setup import store
 from ..setup.positions import resolve, trackable
 from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
 
@@ -36,6 +37,11 @@ class CortexSkill(Skill):
         if self.scope not in ("global", "mercado"):
             self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
             raise ValueError(self.error)
+        for order in store.load():                      # las posiciones que Setup dejó abiertas antes de reiniciar
+            if trackable(order):
+                self._open[order.symbol] = order
+                if order.tbr_zone:
+                    self._used.add((order.symbol, order.tbr_zone, order.tbr_day))
 
     def handle(self, event: Event) -> None:
         if event.topic == "candles.loaded":

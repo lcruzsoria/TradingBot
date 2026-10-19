@@ -15,12 +15,12 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, fields
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from ...config import PROJECT_ROOT
-from ..cortex.order import Order
 from ..setup.positions import Closed
+from ..setup.store import order_from_json as _order_from_json, order_to_json as _order_to_json
 from .session import Signal, TradeStats
 
 DEFAULT_DIR = PROJECT_ROOT / "data" / "forwardtest"
@@ -48,22 +48,9 @@ def month_label(month: str) -> str:
     return f"{MONTH_NAMES[m - 1].capitalize()} {y}"
 
 
-def _order_to_json(order) -> dict:
-    d = asdict(order)
-    d["tbr_day"] = order.tbr_day.isoformat() if isinstance(order.tbr_day, date) else order.tbr_day
-    return d
-
-
 def _pick(cls, data: dict) -> dict:
     names = {f.name for f in fields(cls)}
     return {k: v for k, v in data.items() if k in names}
-
-
-def _order_from_json(data: dict) -> Order:
-    d = _pick(Order, data)
-    if isinstance(d.get("tbr_day"), str):
-        d["tbr_day"] = date.fromisoformat(d["tbr_day"])
-    return Order(**d)
 
 
 class Journal:

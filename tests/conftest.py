@@ -23,3 +23,10 @@ def forwardtest_journal_in_tmp(tmp_path, monkeypatch):
     """El diario del forwardtest de las pruebas va a una carpeta temporal, nunca a data/forwardtest."""
     from tradingbot.skills.stats import journal
     monkeypatch.setattr(journal, "DEFAULT_DIR", tmp_path / "forwardtest")
+
+
+@pytest.fixture(autouse=True)
+def setup_positions_in_tmp(tmp_path, monkeypatch):
+    """Las posiciones abiertas de Setup en las pruebas van a una carpeta temporal, nunca a data/setup."""
+    from tradingbot.skills.setup import store
+    monkeypatch.setattr(store, "DEFAULT_FILE", tmp_path / "setup" / "abiertas.json")

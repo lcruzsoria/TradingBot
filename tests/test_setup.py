@@ -71,3 +71,43 @@ def test_el_registro_anota_la_orden_preparada(tmp_path, monkeypatch):
     win._on_setup_executed({"order": ORDER, "sent": False, "note": "Modo simulación: la orden está lista pero no se ha enviado a MT5."})
     text = win.log_view.toPlainText()
     assert "setup: orden preparada (simulación) - Long EURUSD 15m" in text
+
+
+def test_las_posiciones_abiertas_se_guardan_en_disco_y_siguen_al_reiniciar():
+    import json
+    import pandas as pd
+    from tradingbot.skills.setup import store
+    order = Order("EURUSD", "15m", "long", "Patrón de prueba", "p", "NY Open", date(2026, 10, 6), 105.0, 95.0, 100.0, 100.0, 95.0, 110.0,
+                  "Bullish", 3.0, "GO", None, 1000, 1000 + 24 * 3600)
+    manager, bus, executed = run_skill()
+    bus.publish("setup.order", {"order": order}, source="cortex")
+    wait(executed)
+    manager.stop()
+    saved = json.loads(store.DEFAULT_FILE.read_text(encoding="utf-8"))                # JSON legible, para consultarlo
+    assert [(o["symbol"], o["direction"], o["stop"], o["target"]) for o in saved] == [("EURUSD", "long", 95.0, 110.0)]
+    manager, bus, executed = run_skill()                                               # al reiniciar, la sigue
+    time.sleep(0.3)
+    setup = manager.skills["setup"]
+    assert setup.positions == [order] and setup.caption == "1 posición(es) abierta(s)"
+    closed = []
+    bus.subscribe("t", "setup.closed", closed.append)
+    df = pd.DataFrame({"ts": [1000, 1900], "high": [101.0, 111.0], "low": [99.0, 100.5], "close": [100.5, 110.0]})
+    bus.publish("setup.candles", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="cortex")
+    wait(closed)
+    manager.stop()
+    assert closed[0].payload["closed"].result == "objetivo" and store.load() == []    # cerrada: sale del fichero
+
+
+def test_cortex_sabe_que_mercados_estan_ocupados_al_reiniciar():
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.setup import store
+    import tradingbot.skills  # noqa: F401
+    order = Order("EURUSD", "15m", "long", "Patrón de prueba", "p", "NY Open", date(2026, 10, 6), 105.0, 95.0, 100.0, 100.0, 95.0, 110.0,
+                  "Bullish", 3.0, "GO", None, 1000, 1000 + 24 * 3600)
+    store.save([order])
+    manager = SkillManager(EventBus(), Services(None, None, {"app": {}}, EnvConfig()), [{"type": "cortex"}])
+    manager.start()
+    time.sleep(0.3)
+    cortex = manager.skills["cortex"]
+    manager.stop()
+    assert cortex._open == {"EURUSD": order} and ("EURUSD", "NY Open", date(2026, 10, 6)) in cortex._used
