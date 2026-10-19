@@ -316,6 +316,11 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
     assert card.isVisible()
     win.chart._chart_clicked(click)                                                                          # ...hasta pulsarla otra vez
     assert not card.isVisible()
+    vb = win.chart.getPlotItem().getViewBox()
+    vb.setXRange(0, 14, padding=0)                                                              # la entrada (vela 12) pegada al eje
+    vb.updateMatrix()
+    assert pill.sceneBoundingRect().right() <= vb.sceneBoundingRect().right()                  # se corre a la izquierda: se ve entera
+    assert pill.pos().x() < 12
     assert win.chart._positions[0]["x0"] == 12 and win.chart._positions[0]["x1"] > 12                      # 11:00 es la vela M5 número 12
     win.pos_btn.setChecked(False)
     assert win.chart.position_count == 0 and win.chart._pos_items == []

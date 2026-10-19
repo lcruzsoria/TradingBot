@@ -342,7 +342,7 @@ class ChartView(pg.PlotWidget):
         self._card.setZValue(31)
         self._card.hide()
         self.scene().sigMouseClicked.connect(self._chart_clicked)
-        vb.sigRangeChanged.connect(lambda *_: self._update_card())
+        vb.sigRangeChanged.connect(lambda *_: (self._fit_pills(), self._update_card()))
 
     def _style_axes(self) -> None:
         pi = self.getPlotItem()
@@ -708,7 +708,20 @@ class ChartView(pg.PlotWidget):
             pi.addItem(pill, ignoreBounds=True)
             self._pos_items.append(pill)
             self._pos_pills.append(pill)
+        self._fit_pills()
         self._update_card()
+
+    def _fit_pills(self) -> None:
+        """Las píldoras empiezan en la vela de entrada, pero si no caben hasta el eje de precio se corren a la izquierda
+        para que se vea entera (el resultado va al final). Solo lo que haga falta."""
+        vb = self.getPlotItem().getViewBox()
+        right = vb.sceneBoundingRect().right() - 2
+        for pos, pill in zip(self._positions, self._pos_pills):
+            x0, entry = float(pos["x0"]), float(pos["entry"])
+            width = pill.boundingRect().width()                 # en píxeles: la píldora no se escala con el gráfico
+            start = vb.mapViewToScene(QPointF(x0, entry)).x()
+            x = vb.mapSceneToView(QPointF(right - width, 0)).x() if start + width > right else x0
+            pill.setPos(x, entry)
 
     @property
     def position_count(self) -> int:
