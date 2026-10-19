@@ -297,7 +297,8 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
                  {"entrada": 103.5, "stop": 97.0, "objetivo": 116.5}, "objetivo", "NY Open ▲")
     win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [pos]})
     assert win.chart.position_count == 1 and win.chart.fib_count == 0
-    assert len(win.chart._pos_items) == 2 + 1 + 1                                                           # dos zonas, la línea de entrada y su píldora
+    assert len(win.chart._pos_items) == 2 + 1 + 1 + 1                                                       # dos zonas, el borde verde (TP), la línea de entrada y su píldora
+    assert win.chart._pos_items[2].pen().color().name().upper() == "#26A69A"
     pill = win.chart._pos_pills[0]
     assert "NY Open ▲ 2.0R" in pill.toPlainText() and pill.result == "TP" and not win.chart._card.isVisible()   # el detalle, oculto
     win.chart.resize(800, 500)
