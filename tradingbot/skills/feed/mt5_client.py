@@ -54,7 +54,7 @@ class Mt5Error(Exception):
 
 
 class Mt5Source:
-    def __init__(self, profile: Mt5Profile, max_bars: int = 2_000_000):
+    def __init__(self, profile: Mt5Profile, max_bars: int = 20_000):
         self.profile = profile
         self.max_bars = max_bars
         self.description = profile.label

@@ -27,7 +27,7 @@ DEFAULT_SKILLS = ({"type": "cortex"}, {"type": "feed"}, {"type": "bias"}, {"type
 
 # Valores por defecto de tradingbot.env
 DEFAULT_SYMBOL = "NAS100"                                     # FEED_SYMBOL
-DEFAULT_MAX_BARS = 2_000_000                                  # FEED_MAX_BARS
+DEFAULT_MAX_BARS = 20_000           # FEED_MAX_BARS: velas por mercado y timeframe (todo el historial tarda minutos)
 DEFAULT_BIAS_RULES = ("prev_day_break", "tdo", "midnight", "htf_break")   # BIAS_RULES
 DEFAULT_MIN_SCORE = 3                                         # BIAS_MIN_SCORE
 DEFAULT_LATERAL_HOURS = 6.0                                   # BIAS_LATERAL_HOURS

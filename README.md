@@ -207,7 +207,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **FEED** — conexión y velas | | |
 | `FEED_SYMBOL` | `NAS100` | Mercado que se carga al arrancar. Nombre exacto del broker, con mayúsculas y sufijos (`NAS100FT.r`). |
 | `FEED_TIMEFRAME` | `M15` | Timeframe al arrancar: `M1` `M3` `M5` `M15` `H1` `H3` `H4` `H7` `H12` `1D` `1W` (también vale `15m`, `1h`...). |
-| `FEED_MAX_BARS` | `2000000` | Tope de seguridad de velas a cargar por mercado y timeframe. |
+| `FEED_MAX_BARS` | `20000` | Velas que se cargan de cada mercado y timeframe (las más recientes), en todos los perfiles. Pocas = cambio de mercado ágil. |
 | **QUOTES** — cotizaciones y cuenta | | |
 | `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Quotes y de las cifras de la cuenta (admite decimales). |
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
@@ -314,9 +314,13 @@ Protecciones al conectar:
 
 ### Cuántas velas se cargan
 
-Se piden a MT5 en bloques de 50.000 hasta que no entrega más (tope `FEED_MAX_BARS` en `tradingbot.env`).
-MT5 limita lo que entrega con *Herramientas > Opciones > Gráficos > Máx. de barras en el gráfico*:
-ponlo en **Ilimitado** y reinicia el terminal. El historial disponible depende también del broker.
+Las últimas `FEED_MAX_BARS` (20.000 por defecto) de cada mercado y timeframe, en todos los perfiles: unos 10 meses en
+M15 y 2 semanas en M1, de sobra para las skills (miran como mucho los últimos 30 días). MT5 descarga solo esas, así que
+un mercado que el terminal aún no tiene tarda 1-2 s y uno ya visto es instantáneo. Pedir todo el historial (cientos de
+miles de velas) obliga al terminal a descargarlo entero la primera vez: minutos por mercado, con el bot congelado mientras
+(la librería de MT5 no suelta el intérprete de Python), y vuelve a pasar al cambiar de perfil, porque el terminal entra en
+otra cuenta. Para ver más historial sube `FEED_MAX_BARS` (con más de 50.000 se pide en bloques de 50.000) y, si MT5 entrega
+menos, ponlo en *Herramientas > Opciones > Gráficos > Máx. de barras en el gráfico*.
 
 ## Cómo funciona el Bias
 

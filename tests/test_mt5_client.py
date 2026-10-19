@@ -85,7 +85,7 @@ PROFILE = Mt5Profile("demo", 26231460, "VantageMarkets-Demo")
 
 def test_carga_todas_las_velas_en_orden(install):
     fake = install(total_bars=120_000)
-    src = Mt5Source(PROFILE)
+    src = Mt5Source(PROFILE, max_bars=2_000_000)
     assert "DEMO 26231460" in src.connect()
     seen = []
     df = src.load_candles("EURUSD", "15m", seen.append)
@@ -93,6 +93,18 @@ def test_carga_todas_las_velas_en_orden(install):
     assert seen == [50_000, 100_000, 120_000]
     assert df["ts"].is_monotonic_increasing and df["ts"].is_unique
     assert df["close"].iloc[-1] == 119_999          # la última vela es la más reciente
+
+
+def test_por_defecto_solo_las_ultimas_20000_velas_en_una_peticion(install):
+    """Pedir todo el historial obliga a MT5 a descargarlo entero (minutos con el bot congelado): solo las recientes."""
+    fake = install(total_bars=120_000)
+    asked = []
+    original = fake.copy_rates_from_pos
+    fake.copy_rates_from_pos = lambda s, tf, pos, n: (asked.append((pos, n)), original(s, tf, pos, n))[1]
+    src = Mt5Source(PROFILE)
+    src.connect()
+    df = src.load_candles("EURUSD", "15m")
+    assert asked == [(0, 20_000)] and len(df) == 20_000 and df["close"].iloc[-1] == 119_999
 
 
 def test_respeta_max_bars(install):
