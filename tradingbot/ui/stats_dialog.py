@@ -280,7 +280,8 @@ class StatsDialog(QDialog):
         self.by_pattern = Book("Por patrón", "el patrón que dio la entrada", ("Patrón",) + GROUP_HEADERS, highlights=True)
         self.by_side = Book("Por lado", "largos contra cortos", ("Lado",) + GROUP_HEADERS)
         self.by_session = Book("Por sesión", "la sesión a la hora de entrada (NY)", ("Sesión",) + GROUP_HEADERS)
-        self.by_symbol = Book("Por mercado", "todos los mercados de la lista", ("Mercado",) + GROUP_HEADERS)
+        self.by_symbol = Book("Por mercado", "todos los mercados de la lista; con las señales de Cortex y por qué no operó",
+                              ("Mercado",) + GROUP_HEADERS + ("GO · NO GO", "Motivo del NO GO"))
         self.by_bias = Book("Por sesgo", "el sesgo vigente al entrar", ("Sesgo",) + GROUP_HEADERS)
         self.by_reason = Book("Señales de Cortex", "por qué dio GO o NO GO", ("Motivo", "Veredicto", "Señales", "% del total"))
         self.signals_by_pattern = Book("Señales por patrón", "cuántas pasan el filtro de Cortex",
@@ -425,7 +426,7 @@ class StatsDialog(QDialog):
         self._fill(self.by_side, s.groups(lambda t: t.order.direction, ("long", "short")),
                    lambda n: _colored("▲ LARGO", theme.BULL) if n == "long" else _colored("▼ CORTO", theme.BEAR))
         self._fill(self.by_session, s.groups(self._session, SESSIONS))
-        self._fill(self.by_symbol, s.groups(lambda t: t.order.symbol, self._symbols()))
+        self._fill(self.by_symbol, s.groups(lambda t: t.order.symbol, self._symbols()), extra=self._signals_of(s))
         self._fill(self.by_bias, s.groups(lambda t: alignment_of(t.order), ALIGNMENTS))
         self._fill_signals(s)
         self._fill_history(s.trades)
@@ -480,13 +481,33 @@ class StatsDialog(QDialog):
                   f" ({100 * s.go / evaluated:.0f} % aprobadas)" if evaluated else "Cortex: ninguna señal evaluada")
         return "  ·  ".join(parts + [cortex])
 
-    def _fill(self, book: Book, groups: list[Group], name: Callable[[str], str] = lambda n: n) -> None:
+    @staticmethod
+    def _signals_of(s: TradeStats) -> Callable[[str], list[tuple[str, str | None]]]:
+        """Por mercado: señales GO y NO GO de Cortex y el motivo de NO GO más repetido (un mercado sin operaciones muestra aquí por qué)."""
+        found: dict[str, list] = {}
+        for x in s.signals:
+            row = found.setdefault(x.symbol, [0, 0, {}])
+            row[0 if x.allowed else 1] += 1
+            if not x.allowed:
+                reason = reason_of(x.reason)
+                row[2][reason] = row[2].get(reason, 0) + 1
+
+        def cells(symbol: str) -> list[tuple[str, str | None]]:
+            go, nogo, reasons = found.get(symbol, (0, 0, {}))
+            if not go and not nogo:
+                return [("sin señales", theme.MUTED), ("-", theme.MUTED)]
+            top = max(reasons, key=reasons.get) if reasons else "-"
+            more = f" (+{len(reasons) - 1})" if len(reasons) > 1 else ""
+            return [(f"{go} · {nogo}", theme.BEAR if nogo and not go else None), (top + more, theme.MUTED if top == "-" else None)]
+        return cells
+
+    def _fill(self, book: Book, groups: list[Group], name: Callable[[str], str] = lambda n: n, extra=None) -> None:
         rows = []
         for g in groups:
             label = name(g.name)
             if g.open:
                 label += f'  <span style="color:{theme.WARN}">· {g.open} abierta{"s" if g.open != 1 else ""}</span>'
-            cells = group_cells(g)
+            cells = group_cells(g) + (extra(g.name) if extra else [])
             rows.append([(label, theme.MUTED if not g.n and not g.open else None)] + cells)
         book.set_rows(rows)
 

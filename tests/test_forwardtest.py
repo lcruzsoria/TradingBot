@@ -176,3 +176,15 @@ def test_inicio_mal_escrito():
     with pytest.raises(ValueError, match="AAAA-MM-DD"):
         skill.on_start()
 
+
+
+def test_por_mercado_muestra_las_senales_y_el_motivo_del_no_go_de_un_mercado_sin_operaciones():
+    from tradingbot.ui.stats_dialog import StatsDialog
+    stats = TradeStats()
+    stats.decision(False, Signal(False, "US30", "15m", "Reversión", "long", "ya hay una posición abierta en XAUUSD (Reversión): hasta que no cierre", 1, "London"))
+    stats.decision(False, Signal(False, "US30", "15m", "Continuación", "short", "Short contra el sesgo Bullish (puntuación +4)", 2, "NY Open"))
+    stats.decision(False, Signal(False, "US30", "15m", "Continuación", "short", "Short contra el sesgo Bullish (puntuación +4)", 3, "NY Open"))
+    stats.decision(True, Signal(True, "EURUSD", "15m", "Reversión", "long", "Long a favor del sesgo Bullish", 4, "London"))
+    cells = StatsDialog._signals_of(stats)
+    assert cells("US30") == [("0 · 3", cells("US30")[0][1]), ("Contra el sesgo (+1)", None)]
+    assert cells("EURUSD")[0][0] == "1 · 0" and cells("USTEC") == [("sin señales", cells("USTEC")[0][1]), ("-", cells("USTEC")[1][1])]
