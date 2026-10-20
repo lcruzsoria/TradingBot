@@ -46,7 +46,7 @@ def main() -> None:
     bot, raw, meta = pd.DataFrame(bot), pd.DataFrame(raw), pd.DataFrame(meta)
     out = Path("analisis/comparativa_mercados.xlsx")
     notes = pd.DataFrame({"nota": [
-        "Patrones Continuación y Reversión en M15, entrada en el 0,5 del fibonacci, stop en el swing o la mecha pivote, objetivo 2R, cierre por tiempo a las 24 h.",
+        "Patrones Continuación y Reversión en M15, entrada en el 0,5 del fibonacci, stop en el swing o la mecha pivote, objetivo 2R, cierre por tiempo al final de sesión (17:00 NY; 18:00 NY en índices americanos, máx. 24 h).",
         "Plazos: Asia hasta London, London hasta las 12:00 y NY Open hasta las 18:00 (hora de Nueva York). Spread real de MT5 una vez por operación.",
         "«Lo que opera el bot»: no va contra el sesgo (CORTEX_ALLOW_NO_BIAS=true), una sola posición abierta a la vez y una sesión (TBR) un trade.",
         "En cada grupo la regla de una sola posición se aplica entre los mercados del grupo (no entre grupos).",

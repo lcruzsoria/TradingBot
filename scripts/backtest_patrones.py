@@ -7,7 +7,8 @@ del bot (tradingbot.skills.pattern) con las mismas reglas que en vivo, y simula 
   Continuación, la mecha pivote en Reversión) y objetivo en el -0,5 (2R).
 - Si en una misma vela caben el stop y el objetivo, cuenta el stop. La vela de la entrada ya cuenta para el stop y el objetivo.
 - Costes: el spread real que registra MT5 en la vela de la entrada, una vez por operación (R neto = R bruto - spread / riesgo).
-- Si en 24 h no se alcanza ni el stop ni el objetivo, se cierra al cierre de esa vela (sensibilidad en otra hoja).
+- Si antes del final de sesión del mercado (17:00 NY; 18:00 NY en los índices americanos) no se alcanza ni el stop ni el objetivo, se cierra
+  al cierre de la última vela anterior a esa hora, con tope de 24 h (como el bot). Sensibilidad con tiempos fijos en otra hoja.
 - Sesgo: el del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; filtro de lateralidad de 6 h), calculado con las velas M15
   al abrirse cada bloque de 3 h, sin mirar al futuro. «A favor del sesgo» es lo que dejaría pasar Cortex.
 
@@ -36,6 +37,7 @@ from tradingbot.skills.bias.history import block_ids, lateral_flags, score_histo
 from tradingbot.skills.feed.mt5_client import Mt5Source                              # noqa: E402
 from tradingbot.skills.pattern import continuacion, reversion                        # noqa: E402
 from tradingbot.skills.pattern.patterns import (ActiveTbr, DETECTED, EXPIRED, PatternContext, window_for)   # noqa: E402
+from tradingbot.skills.cortex.order import session_close_ts                           # noqa: E402
 from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index          # noqa: E402
 from tradingbot.skills.tbr.zones import compute, zones_from_settings                 # noqa: E402
 
@@ -54,7 +56,7 @@ GLOBAL_SCOPE = os.environ.get("BT_ALCANCE", "global") != "mercado"
 EXTEND = ()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
-MAX_HOLD = 96                                 # velas M15 (24 h)
+MAX_HOLD = 96                                 # velas M15 (24 h): tope; el cierre real es el final de sesión (session_hold)
 TP_MULTS = (1.0, 1.5, 2.0, 2.5, 3.0)
 HOLDS = (48, 96, 192)
 STOP_MULTS = (1.0, 1.5, 2.0, 3.0)             # mejoras: stop ampliado a k veces el original...
@@ -81,6 +83,12 @@ def simulate(h, l, c, t, direction, entry, stop, target, max_hold):
     last = c[end]
     r = (last - entry) / risk if direction == "long" else (entry - last) / risk
     return "tiempo", end - t, r, mae / risk, mfe / risk
+
+
+def session_hold(ts, t: int, sym: str) -> int:
+    """Velas que puede durar la posición abierta en la vela t: hasta la última vela anterior al final de sesión del mercado."""
+    last = int(np.searchsorted(ts, session_close_ts(sym, int(ts[t]), AHEAD), "left")) - 1
+    return max(0, min(MAX_HOLD, last - t))
 
 
 def stats(r: pd.Series, exit_time: pd.Series | None = None) -> dict:
@@ -165,7 +173,8 @@ def run_symbol(source, sym: str, order, zones):
             risk = abs(entry - stop)
             if risk <= 0:
                 continue
-            res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, MAX_HOLD)
+            hold_t = session_hold(ts, t, sym)              # fin de sesión: 17:00 NY (18:00 en índices americanos), máx. 24 h
+            res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, hold_t)
             cost = float(spread[t]) / risk
             row = {"mercado": sym, "patrón": name, "zona": tbr.zone, "dirección": direction, "entrada (NY)": pd.Timestamp(int(ts[t]) - AHEAD, unit="s"),
                    "día": tbr.day, "entrada": entry, "stop": stop, "objetivo": target, "riesgo (precio)": risk, "riesgo %": 100 * risk / entry,
@@ -177,7 +186,7 @@ def run_symbol(source, sym: str, order, zones):
             row["sesgo vs operación"] = "a favor" if bias[t] == want else "en contra" if bias[t] == -want else "sin sesgo"
             for m in TP_MULTS:                           # sensibilidad al objetivo (en R)
                 tgt = entry + m * risk if direction == "long" else entry - m * risk
-                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, tgt, MAX_HOLD)
+                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, tgt, hold_t)
                 row[f"R neto TP {m:g}R"] = rg - cost
             for hold in HOLDS:                           # sensibilidad al tiempo máximo (objetivo 2R)
                 _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, target, hold)
@@ -186,7 +195,7 @@ def run_symbol(source, sym: str, order, zones):
                 stp = entry - k * risk if direction == "long" else entry + k * risk
                 for rr in IMPROVE_RRS:
                     tgt = entry + rr * k * risk if direction == "long" else entry - rr * k * risk
-                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, MAX_HOLD)
+                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, hold_t)
                     row[f"R bruto k{k:g} RR{rr:g}"] = rg
                     row[f"R neto k{k:g} RR{rr:g}"] = rg - float(spread[t]) / (k * risk)
                     row[f"cierre k{k:g} RR{rr:g}"] = pd.Timestamp(int(ts[min(t + bars_k, n - 1)]) - AHEAD, unit="s")
@@ -341,10 +350,10 @@ NOTES = [
               "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
-    ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
+    ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o final de sesión). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
     ("Mejoras (stop y RR)", "Hoja «Mejoras (stop y RR)»: la misma entrada en el 0,5 con el stop ampliado a k veces el original y el objetivo a RR veces el nuevo riesgo (RR 1, 1,5 y 2), y filtros: solo largos de lunes en Asia y London, solo NAS100 y DJ30, y riesgo mínimo del 0,15 %. Siempre con las reglas del bot (GO de Cortex, una posición abierta y una sesión un trade); win rate sobre el R bruto."),
     ("Plazos", "Cada TBR se busca hasta: Asia 02:00 (inicio de London), London 12:00 (final de NY Open) y NY Open 18:00 (variante anterior con BT_PLAZOS=anterior)."),
-    ("Cierre por tiempo", "Si en 24 h no se alcanza stop ni objetivo, se cierra al cierre de esa vela. Hoja Sensibilidad: 12, 24 y 48 h."),
+    ("Cierre por tiempo", "Si antes del final de sesión (17:00 NY; 18:00 NY en índices americanos, máx. 24 h) no se alcanza stop ni objetivo, se cierra al cierre de la última vela anterior. Hoja Sensibilidad: tiempos fijos de 12, 24 y 48 h, sin final de sesión (el de 24 h era la regla anterior)."),
     ("Sesgo", "Reglas del bot (ruptura x2, TDO x2, Midnight x1, continuación x2; umbral 3; lateralidad 6 h / 0,15) con velas M15, congelado "
               "al abrir cada bloque de 3 h. «A favor» = lo que dejaría pasar Cortex; «sin sesgo» incluye el mercado lateral."),
     ("Una señal por patrón y TBR", "Cada patrón da como mucho una entrada por TBR y día. Los dos patrones pueden coincidir en la misma TBR."),

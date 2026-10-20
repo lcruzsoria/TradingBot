@@ -37,7 +37,7 @@ def main() -> None:
     real = bp.simulate
 
     def spy(h, l, c, t, direction, entry, stop, target, max_hold):
-        calls.append((h, l, c, t, direction, entry, stop))
+        calls.append((h, l, c, t, direction, entry, stop, max_hold))
         return real(h, l, c, t, direction, entry, stop, target, max_hold)
 
     bp.simulate = spy
@@ -47,14 +47,14 @@ def main() -> None:
         calls.clear()
         trades, _f, _i = bp.run_symbol(source, sym, order, zones)
         main_calls = calls[::CALLS_PER_TRADE]
-        for tr, (h, l, c, t, d, entry, stop) in zip(trades, main_calls):
+        for tr, (h, l, c, t, d, entry, stop, hold) in zip(trades, main_calls):
             risk0 = abs(entry - stop)
             for k in KS:
                 risk = k * risk0
                 stp = entry - risk if d == "long" else entry + risk
                 for m in MS:
                     tgt = entry + m * risk if d == "long" else entry - m * risk
-                    _, _, rg, _, _ = real(h, l, c, t, d, entry, stp, tgt, bp.MAX_HOLD)
+                    _, _, rg, _, _ = real(h, l, c, t, d, entry, stp, tgt, hold)
                     rows.append({"mercado": sym, "patrón": tr["patrón"], "zona": tr["zona"], "dirección": d,
                                  "dow": tr["entrada (NY)"].weekday(), "año": tr["entrada (NY)"].year,
                                  "t": tr["entrada (NY)"], "k": k, "RR": m, "bruto": rg,
