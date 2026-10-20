@@ -215,7 +215,8 @@ class PatternSkill(Skill):
             if key in self._seen:
                 continue
             self._seen.add(key)
-            payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit, **mark}
+            payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit,
+                       "session_close": self._session_close(hit.ts, ahead), **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
         if ended:
             key = (symbol, "session", tbr.key, tbr.day)
@@ -223,6 +224,18 @@ class PatternSkill(Skill):
                 self._seen.add(key)
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
                                                  "session_end": window.session_end_hours, **mark})
+
+    def _session_close(self, ts: int | None, ahead: int) -> int | None:
+        """Fin de la sesión (final de la última zona del ciclo, NY PM) siguiente a la hora `ts` (servidor): ahí se cierra el trade."""
+        if not ts or not self.order:
+            return None
+        last = self.order[-1]
+        wall = (last.start + last.minutes) * 60
+        ny = int(ts) - ahead
+        end = (ny // 86400) * 86400 + wall
+        while end <= ny:
+            end += 86400
+        return end + ahead
 
     def _evaluate_tbr(self, c, tbr, window, ahead, results, figures, errors, unavailable, tfs) -> None:
         """Ejecuta los patrones sobre una TBR y recoge sus resultados y dibujos."""

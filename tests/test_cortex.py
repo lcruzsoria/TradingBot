@@ -229,3 +229,11 @@ def test_una_operacion_pasada_ya_cerrada_no_bloquea_a_la_siguiente_que_se_anunci
     manager.stop()
     assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2       # el primero ya cerró a las 00:30
     assert decisions[0].payload["hit"].key == "p"                                                        # y se decide en orden de hora
+
+
+def test_el_trade_de_patron_cierra_al_fin_de_la_sesion_con_tope_de_24_h():
+    from tradingbot.skills.cortex.order import MAX_HOLD_SECONDS, close_time
+    assert close_time(1_000, 5_000) == 5_000                       # el fin de la sesión llega antes
+    assert close_time(1_000, 1_000 + MAX_HOLD_SECONDS + 1) == 1_000 + MAX_HOLD_SECONDS
+    assert close_time(1_000, None) == 1_000 + MAX_HOLD_SECONDS
+    assert close_time(None, 5_000) is None

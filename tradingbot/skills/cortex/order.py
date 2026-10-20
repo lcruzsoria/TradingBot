@@ -35,13 +35,21 @@ class Order:
         return f"{self.direction.capitalize()} {self.symbol} {self.timeframe} ({self.pattern}{where})"
 
 
+def close_time(entry_ts: int | None, session_close: int | None) -> int | None:
+    """Cierre por tiempo de un trade de patrón: el fin de la sesión, y como tope 24 h tras la entrada."""
+    if not entry_ts:
+        return None
+    limit = entry_ts + MAX_HOLD_SECONDS
+    return min(limit, session_close) if session_close else limit
+
+
 def build_order(payload: dict, decision, bias_result) -> Order:
     """Orden a partir de un `pattern.detected`, la decisión de Cortex y el sesgo vigente."""
     hit, tbr = payload["hit"], payload["tbr"]
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
-                 bias_result.bias.value, float(bias_result.score), decision.reason, "24 h tras la entrada",
-                 hit.ts or None, (hit.ts + MAX_HOLD_SECONDS) if hit.ts else None)
+                 bias_result.bias.value, float(bias_result.score), decision.reason, "fin de la sesión",
+                 hit.ts or None, close_time(hit.ts, payload.get("session_close")))
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
