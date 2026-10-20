@@ -1,6 +1,9 @@
 """Skill Stats: el forwardtest (lo que hace el bot desde que opera, guardado por meses) y los resultados del backtest."""
 from __future__ import annotations
 
+from datetime import date
+
+from ...clock import server_from_ny_day
 from ...core import Event, Skill, register_skill
 from .backtest import BOT_FILTER, load
 from . import journal
@@ -12,11 +15,12 @@ from .session import Signal, TradeStats
 class StatsSkill(Skill):
     title = "Stats"
     description = ("Las cifras del bot en un solo sitio. Forwardtest: anota cada GO / NO GO de Cortex y cada operación simulada "
-                   "que Setup abre y cierra en directo (no los patrones pasados que se repiten al arrancar), y lo guarda en un diario mensual (data/forwardtest) que no se pierde al reiniciar; "
+                   "que Setup abre y cierra desde el inicio del forwardtest (STATS_FORWARD_START, 00:00 de Nueva York), también las que "
+                   "repasa al arrancar, de cualquier perfil de MT5, y lo guarda en un diario mensual (data/forwardtest) que no se pierde al reiniciar; "
                    "lo publica para la ventana Forwardtest (acierto, R, drawdown, rachas, libros...). Backtest: carga el "
                    "histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia Calendario para la "
                    "ventana Backtest. No opera ni decide nada.")
-    subscribes = ("candles.loaded", "cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload")
+    subscribes = ("clock.offset", "cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload")
     publishes = ("stats.session", "stats.backtest")
     slot = "aux3"
 
@@ -25,9 +29,14 @@ class StatsSkill(Skill):
         if folder is None and _is_demo(self.services.source):
             folder = journal.DEFAULT_DIR.parent / "forwardtest-demo"      # datos sintéticos (--demo, capturas): aparte
         self.journal = Journal(folder)
-        self._start: dict[str, int] = {}               # mercado -> última vela de su primera carga (el arranque, en hora del servidor)
+        raw = self.settings.get("FORWARD_START", "")                              # tradingbot.env, bloque STATS
         try:
-            self.stats = self.journal.load_recent()
+            self.start = date.fromisoformat(raw) if raw else None                  # día de NY en que empieza (None: todo)
+        except ValueError:
+            raise ValueError(f"STATS_FORWARD_START={raw!r}: usa AAAA-MM-DD (por ejemplo 2026-10-19).") from None
+        self._offset: int | None = None                # desfase del servidor respecto a UTC (clock.offset)
+        try:
+            self.stats = self.journal.load_recent(f"{self.start:%Y-%m}" if self.start else None)
         except OSError as exc:
             self.stats = TradeStats()
             self.publish("skill.error", {"key": self.key, "error": f"no se pudo leer el diario del forwardtest: {exc}"})
@@ -37,24 +46,22 @@ class StatsSkill(Skill):
 
     def handle(self, event: Event) -> None:
         p = event.payload
-        if event.topic == "candles.loaded":
-            df = p.get("df")
-            if df is not None and len(df):
-                self._start.setdefault(p["symbol"].lower(), int(df["ts"].iloc[-1]))
+        if event.topic == "clock.offset":
+            self._offset = p.get("server_offset")
             return
         if event.topic == "cortex.decision":
             decision = p["decision"]
             signal = _signal(p)
-            if self.live(signal.symbol, signal.ts) and self.stats.decision(decision.allowed, signal):
+            if self.counts(signal.ts) and self.stats.decision(decision.allowed, signal):
                 self._save(self.journal.signal, signal)
         elif event.topic == "setup.executed":
             order = p["order"]
-            if self.stats.find(order) is None and not self.live(order.symbol, order.entry_ts):
+            if self.stats.find(order) is None and not self.counts(order.entry_ts):
                 return
             if self.stats.executed(order):
                 self._save(self.journal.opened, order)
         elif event.topic == "setup.closed":
-            if self.stats.find(p["order"]) is None and not self.live(p["order"].symbol, p["order"].entry_ts):
+            if self.stats.find(p["order"]) is None and not self.counts(p["order"].entry_ts):
                 return
             if self.stats.closed(p["order"], p["closed"]):
                 self._save(self.journal.closed, p["order"], p["closed"])
@@ -66,12 +73,11 @@ class StatsSkill(Skill):
             return
         self._publish_session()
 
-    def live(self, symbol: str, ts: int | None) -> bool:
-        """Si la vela del patrón es del arranque en adelante. Al arrancar, Pattern y Cortex repasan los patrones recientes
-        del histórico: eso es backtest, no forwardtest, y no se anota (las operaciones que ya estaban en el diario sí
-        reciben su cierre). Sin velas de ese mercado aún, o sin hora, no se puede saber y se anota."""
-        start = self._start.get((symbol or "").lower())
-        return start is None or ts is None or int(ts) >= start
+    def counts(self, ts: int | None) -> bool:
+        """Si la vela (hora del servidor) es del inicio del forwardtest en adelante: las 00:00 de Nueva York del día
+        STATS_FORWARD_START. Cuenta también lo que Pattern y Cortex repasan al arrancar, así no se pierde lo que pasó con
+        el bot cerrado o con otro perfil (lo repetido no se anota dos veces). Sin inicio, o sin hora, se anota."""
+        return self.start is None or ts is None or int(ts) >= server_from_ny_day(self.start, self._offset)
 
     def _save(self, write, *args):
         try:
