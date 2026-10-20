@@ -31,7 +31,7 @@ from .logview import LogView
 from .ring import FREE_SLOT_TEXT, RingView, describe_skill
 from .rules_dialog import RulesDialog
 from .backtest_dialog import BacktestDialog
-from .stats_dialog import StatsDialog, TradeStats
+from .stats_dialog import StatsDialog, TradeStats, _ny_today
 from ..skills.stats.journal import Journal
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
@@ -231,7 +231,8 @@ class MainWindow(QMainWindow):
         self.stat_trades = StatBlock("Operaciones", clickable=True)     # pulsable: abre el Forwardtest del perfil
         self.stat_trades.value.setTextFormat(Qt.RichText)
         self.stat_trades.clicked.connect(lambda: self.toggle_stats(not self._stats_shown(), self.stat_trades))
-        self._paint_trades(0, 0, 0)
+        self._trades_day = None                                   # día (NY) que muestra la tarjeta Operaciones
+        self._paint_trades()
         for i, block in enumerate((self.stat_balance, self.stat_pnl, self.stat_result, self.stat_trades)):
             if i:
                 divider = QFrame()
@@ -704,6 +705,7 @@ class MainWindow(QMainWindow):
     def _on_stats_session(self, p: dict) -> None:
         """La skill Stats publica una copia de las cifras del forwardtest cada vez que cambian."""
         self.stats = p["stats"]
+        self._paint_trades()
         if p.get("folder") and (self.stats_journal is None or str(self.stats_journal.folder) != p["folder"]):
             self.stats_journal = Journal(p["folder"])
         self._refresh_stats()
@@ -838,6 +840,8 @@ class MainWindow(QMainWindow):
                                  f"última {fecha_hora(last)}  -  {zone}")
 
     def _on_quotes(self, p: dict) -> None:
+        if _ny_today().date() != self._trades_day:
+            self._paint_trades()                                # empieza otro día (NY): la tarjeta Operaciones vuelve a cero
         quotes, account = p["quotes"], p["account"]
         shift, estimated = server_minus_ny(p.get("server_offset"))
         if (shift, estimated) != (self.ny_shift, self.ny_estimated):
@@ -912,28 +916,35 @@ class MainWindow(QMainWindow):
         pct = diff / initial * 100 if initial else 0.0
         color = theme.BULL if diff > 0 else theme.BEAR if diff < 0 else None
         self.stat_result.set_value(f"{pct:+.2f}%", f"{diff:+,.2f}  -  capital inicial {initial:,.0f}", color)
-        self._paint_trades(v["wins"], v["losses"], v["breakeven"], v.get("since"), v.get("pending") or 0, v.get("next_at"))
+        self._paint_trades()
 
-    def _paint_trades(self, wins: int, losses: int, be: int, since: str | None = None, pending: int = 0,
-                      next_at: int | None = None) -> None:
+    def _paint_trades(self) -> None:
+        """Tarjeta Operaciones: las del Forwardtest con entrada hoy (fecha de Nueva York), igual que la ventana con «Hoy»:
+        ganadas (G), perdidas (P), en breakeven (B: 0 R) y las que siguen abiertas."""
+        today = _ny_today().date()
+        self._trades_day = today
+        stats = self.stats if getattr(self, "stats", None) is not None else TradeStats()   # aún sin la skill Stats
+        s = stats.only(lambda t: bool(t.order.entry_ts) and self._ny(t.order.entry_ts).date() == today,
+                            lambda x: bool(x.ts) and self._ny(x.ts).date() == today)
+        wins, losses, be, opened = s.wins, s.losses, s.flat, len(s.open)
         dot = '<span style="color:{};">●</span>'
         self.stat_trades.value.setText(f"{dot.format(theme.BULL)} {wins} G&nbsp;&nbsp;{dot.format(theme.BEAR)} {losses} P"
                                        f"&nbsp;&nbsp;{dot.format(BE_GREY)} {be} B")
         n = wins + losses + be
-        when = ""
-        if since:
-            try:
-                when = f" desde el {fecha_corta(datetime.fromisoformat(since))}"
-            except ValueError:
-                pass
-        text = f"{n} cerrada{'s' if n != 1 else ''}{when}" if n else (when.strip() or "ninguna cerrada")
-        tip = ("Operaciones del Forwardtest ya consolidadas en el saldo del perfil: ganadas (G), perdidas (P) y en "
-               "breakeven (B: el stop ya estaba en la entrada). Se consolidan al cierre de la vela de 3 h (índices) o de "
-               "4 h (resto) en la que cerraron.\nPulsa para abrir o cerrar el Forwardtest del perfil.")
-        if pending:
-            at = f" a las {self._ny(next_at):%H:%M}" if next_at else ""
-            text = f"{n} + {pending} por consolidar{at}"
-            tip += f"\n{pending} cerrada{'s' if pending != 1 else ''} esperando a consolidar; la próxima{at} (NY)."
+        parts = [f"{n} cerrada{'s' if n != 1 else ''}"] if n else []
+        if opened:
+            parts.append(f"{opened} abierta{'s' if opened != 1 else ''}")
+        text = (" · ".join(parts) + " hoy") if parts else "ninguna hoy"
+        if n:
+            text += f" · {s.total_r:+.2f} R"
+        tip = (f"Operaciones del Forwardtest con entrada hoy ({today:%d/%m/%Y}, fecha de Nueva York): ganadas (G), "
+               "perdidas (P) y en breakeven (B: 0 R), más las que siguen abiertas.\nPulsa para abrir o cerrar el "
+               "Forwardtest con el día en curso; el botón Forwardtest lo abre con todo el diario.")
+        v = self.virtual or {}
+        if v.get("pending"):
+            at = f" a las {self._ny(v['next_at']):%H:%M}" if v.get("next_at") else ""
+            tip += (f"\nSaldo del perfil: {v['pending']} cerrada{'s' if v['pending'] != 1 else ''} esperando a consolidar; "
+                    f"la próxima{at} (NY).")
         self.stat_trades.sub.setText(text)
         self.stat_trades.setToolTip(tip)
 

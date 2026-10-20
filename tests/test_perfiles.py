@@ -298,9 +298,27 @@ def test_la_cabecera_muestra_el_saldo_virtual_el_resultado_y_g_p_b(tmp_path, mon
                                                             "stop": 95.0}]})
     assert win.stat_balance.value.text() == "102,350.00"
     assert win.stat_result.value.text() == "+2.35%" and "capital inicial 100,000" in win.stat_result.sub.text()
-    trades = win.stat_trades.value.text()
-    assert "7 G" in trades and "3 P" in trades and "1 B" in trades and "#9E9E9E" in trades
-    assert win.stat_trades.sub.text().startswith("11 cerradas desde el")
+    assert "#9E9E9E" in win.stat_trades.value.text() and win.stat_trades.sub.text() == "ninguna hoy"   # sin forwardtest de hoy
     win.last_quotes = {"nas100": Quote("NAS100", 102.5, 102.6, 0)}                       # +0,5 R flotante
     win._apply_account(None)
     assert win.stat_pnl.value.text() == "+511.75" and "equity 102,861.75" in win.stat_balance.sub.text()
+
+
+def test_la_tarjeta_operaciones_muestra_solo_el_dia_en_curso(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from datetime import timezone
+    from tradingbot.skills.stats.session import TradeStats
+    from tradingbot.ui.stats_dialog import _ny_today
+    win = make_window(tmp_path, monkeypatch)
+    noon = _ny_today().replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    now = int(noon.timestamp()) + win.ny_shift                                  # hoy a mediodía NY, hora del servidor
+    s = TradeStats()
+    for i, (r, when) in enumerate(((2.0, now - 60), (-1.0, now - 120), (0.0, now - 180), (2.0, now - 2 * 86400))):
+        o = replace(order(), entry_ts=when, symbol=f"M{i}")
+        s.executed(o)
+        s.closed(o, Closed("objetivo" if r > 0 else "stop", 0.0, when + 60, r, 0.1))
+    s.executed(replace(order(), entry_ts=now - 30, symbol="ABIERTA"))
+    win._on_stats_session({"stats": s})
+    text = win.stat_trades.value.text()
+    assert "1 G" in text and "1 P" in text and "1 B" in text                     # la de hace dos días no cuenta
+    assert win.stat_trades.sub.text() == "3 cerradas · 1 abierta hoy · +1.00 R"
