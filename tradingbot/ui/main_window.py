@@ -662,7 +662,8 @@ class MainWindow(QMainWindow):
 
     def toggle_stats(self, show: bool, anchor: QWidget | None = None) -> None:
         """El botón Forwardtest (o el bloque Operaciones de la cabecera) abre la ventana flotante y, pulsado otra vez, la
-        cierra. El botón refleja siempre si está abierta."""
+        cierra. El botón refleja siempre si está abierta. Desde Operaciones se abre con el periodo «Hoy»; desde el botón
+        Forwardtest, con «Todo»."""
         if self.stats_btn.isChecked() != show:
             self.stats_btn.blockSignals(True)
             self.stats_btn.setChecked(show)
@@ -678,6 +679,10 @@ class MainWindow(QMainWindow):
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
             self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
             self.stats_dialog.market_clicked.connect(self._on_market_clicked)    # el mercado pinchado pasa al gráfico
+        # Operaciones (cabecera): lo del día en curso; botón Forwardtest: todo lo que hay en el diario, en vivo
+        if self.stats_dialog.month:
+            self.stats_dialog.set_month(None)
+        self.stats_dialog.set_window(0 if anchor is self.stat_trades else None)
         self.stats_dialog.popup_at(anchor or self.stats_btn)
 
     def _refresh_stats(self) -> None:

@@ -103,10 +103,12 @@ def test_pulsar_las_operaciones_de_la_cabecera_abre_y_cierra_el_forwardtest(make
     assert win.stat_trades.clickable and win.stat_trades.cursor().shape() == Qt.CursorShape.PointingHandCursor
     QTest.mouseClick(win.stat_trades, Qt.MouseButton.LeftButton)
     assert win.stats_dialog is not None and win.stats_dialog.isVisible() and win.stats_btn.isChecked()
+    assert win.stats_dialog.window_days == 0 and win.stats_dialog.window_btns["Hoy"].isChecked()   # el día en curso
     QTest.mouseClick(win.stat_trades, Qt.MouseButton.LeftButton)                 # otra vez: se cierra
     assert not win.stats_dialog.isVisible() and not win.stats_btn.isChecked()
     win.stats_btn.setChecked(True)                                                # el botón sigue funcionando igual
     assert win.stats_dialog.isVisible()
+    assert win.stats_dialog.window_days is None and win.stats_dialog.window_btns["Todo"].isChecked()  # todo el diario
     win.stats_dialog.hide()
 
 
