@@ -85,7 +85,7 @@ PROFILE = Mt5Profile("demo", 26231460, "VantageMarkets-Demo")
 
 def test_carga_todas_las_velas_en_orden(install):
     fake = install(total_bars=120_000)
-    src = Mt5Source(PROFILE)
+    src = Mt5Source(PROFILE, max_bars=2_000_000)
     assert "DEMO 26231460" in src.connect()
     seen = []
     df = src.load_candles("EURUSD", "15m", seen.append)
@@ -93,6 +93,18 @@ def test_carga_todas_las_velas_en_orden(install):
     assert seen == [50_000, 100_000, 120_000]
     assert df["ts"].is_monotonic_increasing and df["ts"].is_unique
     assert df["close"].iloc[-1] == 119_999          # la última vela es la más reciente
+
+
+def test_por_defecto_solo_las_ultimas_20000_velas_en_una_peticion(install):
+    """Pedir todo el historial obliga a MT5 a descargarlo entero (minutos con el bot congelado): solo las recientes."""
+    fake = install(total_bars=120_000)
+    asked = []
+    original = fake.copy_rates_from_pos
+    fake.copy_rates_from_pos = lambda s, tf, pos, n: (asked.append((pos, n)), original(s, tf, pos, n))[1]
+    src = Mt5Source(PROFILE)
+    src.connect()
+    df = src.load_candles("EURUSD", "15m")
+    assert asked == [(0, 20_000)] and len(df) == 20_000 and df["close"].iloc[-1] == 119_999
 
 
 def test_respeta_max_bars(install):
@@ -113,6 +125,32 @@ def test_cuenta_distinta_cancela(install):
     with pytest.raises(Mt5Error, match="999"):
         Mt5Source(PROFILE).connect()
     assert fake.shutdown_called
+
+
+def test_sin_password_cambia_de_cuenta_con_la_guardada_en_el_terminal(install):
+    """Dos perfiles en el mismo terminal: al cambiar de perfil, MT5 entra en la otra cuenta con su contraseña guardada."""
+    fake = install(login=999)
+    calls = []
+
+    def login(account, **kw):
+        calls.append((account, kw))
+        fake._login = account
+        return True
+    fake.login = login
+    assert "DEMO 26231460" in Mt5Source(PROFILE).connect()
+    assert calls == [(26231460, {"server": "VantageMarkets-Demo"})]         # sin contraseña: la del terminal
+
+
+def test_las_cotizaciones_y_velas_usan_el_nombre_del_broker(install):
+    fake = install(total_bars=100)
+    fake.names = ["NAS100.s", "NAS100ft.s", "CL-OIL.s"]
+    src = Mt5Source(PROFILE)
+    src.connect()
+    assert src.quotes(["NAS100", "USOIL"])["NAS100"] is not None
+    src.load_candles("NAS100", "15m")
+    assert fake.selected[-1] == "NAS100.s"
+    assert src.equivalents(["NAS100", "USOIL", "GER40", "NAS100.s"]) == {"NAS100": "NAS100.s", "USOIL": "CL-OIL.s",
+                                                                        "GER40": None}
 
 
 def test_perfil_demo_con_cuenta_real_cancela(install):

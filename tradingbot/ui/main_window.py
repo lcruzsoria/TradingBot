@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-                               QProgressBar, QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QMainWindow, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from ..skills.bias import BiasResult
 from ..skills.bias.models import Bias, RuleVote
@@ -35,11 +35,13 @@ from .stats_dialog import StatsDialog, TradeStats
 from ..skills.stats.journal import Journal
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
+from ..skills.setup.account import outcome
 from .. import envconfig, settings
 from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesList, StatBlock, repolish
 
 
 RIGHT_WIDTH = 392                    # columna de la derecha (Skills y debajo) y área Stats, encima: mismo ancho
+BE_GREY = "#9E9E9E"                  # punto de las operaciones en breakeven (G verde, P rojo, B gris)
 
 
 # Lo que el barrido de la watchlist publica en segundo plano y no se pinta (sí se anotan patrones, GO / NO GO y operaciones)
@@ -50,8 +52,13 @@ class MainWindow(QMainWindow):
     first_loaded = Signal()
 
     def __init__(self, bus: EventBus, manager: SkillManager, app_cfg: dict, subtitle: str, demo: bool = False,
-                 theme_name: str = theme.DEFAULT_PRESET):
+                 theme_name: str = theme.DEFAULT_PRESET, switch_profile=None):
         super().__init__()
+        self.profiles: list[tuple[str, str]] = list(app_cfg["app"].get("profiles") or [])   # (perfil, nombre visible)
+        self.profile_name: str | None = app_cfg["app"].get("profile_name")
+        self.switch_profile = switch_profile              # vuelve a arrancar el bot con otro perfil (lo pone __main__)
+        self.virtual: dict | None = None                  # cuenta virtual del perfil (setup.account)
+        self.last_quotes: dict = {}
         self.bus = bus
         self.manager = manager
         self.bridge = UiBridge(bus)
@@ -119,7 +126,8 @@ class MainWindow(QMainWindow):
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
-            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed,
+            "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed, "setup.account": self._on_setup_account,
+            "setup.consolidated": self._on_setup_consolidated,
             "stats.session": self._on_stats_session, "stats.backtest": self._on_stats_backtest, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected, "pattern.discarded": self._on_pattern_discarded,
             "pattern.session": self._on_pattern_session,
@@ -156,13 +164,26 @@ class MainWindow(QMainWindow):
         title_row.setSpacing(10)
         brand = QLabel("TradingBot")
         brand.setObjectName("Brand")
-        sub = QLabel(subtitle)
-        sub.setObjectName("Muted")
         title_row.addWidget(brand)
-        title_row.addWidget(sub)
+        self.profile_box: QComboBox | None = None
+        if self.profiles:                               # selector de perfil: cada uno es una cuenta con su saldo virtual
+            box = QComboBox()
+            box.setObjectName("ProfileSelect")
+            for name, shown in self.profiles:
+                box.addItem(shown, name)
+            box.setCurrentIndex(max(0, box.findData(self.profile_name)))
+            box.setToolTip(f"{subtitle}\nCambiar de perfil vuelve a arrancar el bot con esa cuenta.")
+            box.activated.connect(self._on_profile_chosen)
+            self.profile_box = box
+            title_row.addWidget(box)
+        elif not demo:
+            sub = QLabel(subtitle)
+            sub.setObjectName("Muted")
+            title_row.addWidget(sub)
         if demo:
             badge = QLabel("Datos sintéticos")
             badge.setObjectName("DemoBadge")
+            badge.setToolTip(subtitle)                  # «Modo demo sin conexión a MT5»: en la etiqueta no cabe
             title_row.addWidget(badge)
         title_row.addStretch(1)
         chips = QHBoxLayout()
@@ -172,26 +193,44 @@ class MainWindow(QMainWindow):
         self.account = QLabel("")
         self.account.setObjectName("AccountChip")
         self.account.hide()
+        for chip in (self.status, self.account):        # las insignias se ven enteras: no se encogen
+            chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         chips.addWidget(self.status)
         chips.addWidget(self.account)
         chips.addStretch(1)
         left.addLayout(title_row)
         left.addLayout(chips)
-        h.addLayout(left)
+        left_box = QWidget()                            # nombre, perfil y estado: nunca se recortan
+        left_box.setLayout(left)
+        left.setContentsMargins(0, 0, 0, 0)
+        left_box.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        h.addWidget(left_box)
 
         self.stat_balance = StatBlock("Saldo")
+        self.stat_balance.setToolTip("Saldo virtual del perfil: el capital inicial más lo ganado o perdido en las operaciones "
+                                     "simuladas de Setup (no se envía nada a MT5).")
         self.stat_pnl = StatBlock("P&L abierto")
-        self.stat_open = StatBlock("Mercados abiertos")
-        self.stat_tick = StatBlock("Último tick")
-        for i, block in enumerate((self.stat_balance, self.stat_pnl, self.stat_open, self.stat_tick)):
+        self.stat_pnl.setToolTip("Ganancia o pérdida flotante de las posiciones simuladas abiertas, con la cotización del "
+                                 "panel Quotes.")
+        self.stat_result = StatBlock("Resultado del perfil")
+        self.stat_result.setToolTip("Lo ganado o perdido frente al capital inicial del perfil, con las operaciones cerradas.")
+        self.stat_trades = StatBlock("Operaciones", clickable=True)     # pulsable: abre el Forwardtest del perfil
+        self.stat_trades.value.setTextFormat(Qt.RichText)
+        self.stat_trades.clicked.connect(lambda: self.toggle_stats(not self._stats_shown(), self.stat_trades))
+        self._paint_trades(0, 0, 0)
+        for i, block in enumerate((self.stat_balance, self.stat_pnl, self.stat_result, self.stat_trades)):
             if i:
                 divider = QFrame()
                 divider.setObjectName("StatDivider")
                 h.addWidget(divider)
             h.addWidget(block)
 
-        # Las cifras van justo después de la cuenta; el botón Skins, en la esquina derecha.
+        # Las cifras del perfil van justo después de la cuenta; la hora y el botón Skins, a la derecha del todo.
         h.addStretch(1)
+        self.stat_tick = StatBlock("Último tick")
+        for w in (self.stat_tick.label, self.stat_tick.value, self.stat_tick.sub):
+            w.setAlignment(Qt.AlignRight)
+        h.addWidget(self.stat_tick)
         self.colors_btn = QPushButton("Skins")
         self.colors_btn.setToolTip("Cambiar la paleta (skin) y personalizar los colores de la interfaz")
         h.addWidget(self.colors_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
@@ -590,10 +629,9 @@ class MainWindow(QMainWindow):
         kept = self._match_symbol(self.current_symbol)
         self.current_symbol = kept or (symbols[0] if symbols else "")
         self.markets.set_selected(self.current_symbol)
-        self.stat_open.set_value("-", "")
         self.markets_panel.note.setText("Pulsa una tarjeta para ver su gráfico")
         try:
-            settings.save_watchlist(symbols)
+            settings.save_watchlist(symbols, profile=self.profile_name)      # cada perfil, su lista
         except OSError as exc:
             self.log(f"No se pudo guardar la lista de mercados: {exc}")
         self.log(f"mercados: {', '.join(symbols) or 'ninguno'}")
@@ -604,8 +642,16 @@ class MainWindow(QMainWindow):
             self.load_candles()
 
     # -- estadísticas -----------------------------------------------------------------------------
-    def toggle_stats(self, show: bool) -> None:
-        """El botón Forwardtest abre la ventana flotante y, pulsado otra vez, la cierra."""
+    def _stats_shown(self) -> bool:
+        return self.stats_dialog is not None and self.stats_dialog.isVisible()
+
+    def toggle_stats(self, show: bool, anchor: QWidget | None = None) -> None:
+        """El botón Forwardtest (o el bloque Operaciones de la cabecera) abre la ventana flotante y, pulsado otra vez, la
+        cierra. El botón refleja siempre si está abierta."""
+        if self.stats_btn.isChecked() != show:
+            self.stats_btn.blockSignals(True)
+            self.stats_btn.setChecked(show)
+            self.stats_btn.blockSignals(False)
         if not show:
             if self.stats_dialog is not None:
                 self.stats_dialog.hide()
@@ -616,7 +662,7 @@ class MainWindow(QMainWindow):
                                             load_month=self._load_stats_month)
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
             self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
-        self.stats_dialog.popup_at(self.stats_btn)
+        self.stats_dialog.popup_at(anchor or self.stats_btn)
 
     def _refresh_stats(self) -> None:
         if self.stats_dialog is not None:
@@ -695,9 +741,18 @@ class MainWindow(QMainWindow):
     def _on_connected(self, p: dict) -> None:
         self.connected = True
         self._set_status("Conectado", "ok")
-        self.account.setText(p["info"])
+        self.account.setText(" ".join(p["info"].split()[:2]))   # «MT5 DEMO»: cuenta y saldo, en el tooltip
+        self.account.setToolTip(p["info"])
         self.account.show()
         self.log(f"feed: conectado - {p['info']}")
+        equivalents = p.get("equivalents") or {}
+        found = [f"{ours} → {theirs}" for ours, theirs in equivalents.items() if theirs]
+        if found:
+            self.log(f"feed: en este broker se leen {', '.join(found)}", tone="info")
+        missing = [ours for ours, theirs in equivalents.items() if not theirs]
+        if missing:
+            self.log(f"feed: este broker no tiene {', '.join(missing)} ni un equivalente. Cámbialos en «Editar» de Quotes "
+                     "o indica su nombre en MT5_<PERFIL>_SYMBOLS del .env de cuentas.", tone="warn")
         self.all_symbols = p.get("all_symbols", [])
 
     def _on_progress(self, p: dict) -> None:
@@ -769,12 +824,12 @@ class MainWindow(QMainWindow):
             self.chart.set_ny_shift(shift)
             self._update_chart_stats()
         self.markets.set_quotes(quotes)
+        self.last_quotes = {str(k).lower(): q for k, q in quotes.items() if q}
         live = [q for q in quotes.values() if q]
         if live:
             freshest = max(q.ts for q in live)
             self._show_last_tick(freshest, p.get("server_offset"), p.get("offset_source"))
             open_n = sum(1 for q in live if freshest - q.ts <= STALE_AFTER_SECONDS)
-            self.stat_open.set_value(f"{open_n} de {len(self.watchlist)}", "con precio en vivo")
             self.markets_panel.note.setText(f"{open_n} abiertos. Pulsa una tarjeta para ver su gráfico")
         self._apply_account(account)
 
@@ -790,12 +845,92 @@ class MainWindow(QMainWindow):
         self.stat_tick.setToolTip(f"Último tick en hora de Nueva York.\nHora del servidor del broker: {server_clock}.\n{how}")
 
     def _apply_account(self, account: AccountSnapshot | None) -> None:
+        if self.virtual and self.virtual.get("started"):
+            self._paint_virtual()                      # el saldo es el virtual del perfil; solo cambia el flotante
+            return
         if account is None:
             return
         self.stat_balance.set_value(f"{account.balance:,.2f}", f"{account.currency}  -  equity {account.equity:,.2f}")
         pct = account.profit / account.balance * 100 if account.balance else 0.0
         color = theme.BULL if account.profit > 0 else theme.BEAR if account.profit < 0 else None
         self.stat_pnl.set_value(f"{account.profit:+,.2f}", f"{pct:+.2f}% del saldo", color)
+
+    def _on_setup_account(self, p: dict) -> None:
+        self.virtual = p
+        if p.get("started"):
+            self._paint_virtual()
+
+    def floating(self) -> float | None:
+        """P&L flotante de las posiciones simuladas abiertas con la última cotización (None si no hay ninguna)."""
+        v = self.virtual or {}
+        if not v.get("open"):
+            return None
+        total = 0.0
+        for pos in v["open"]:
+            q = self.last_quotes.get(str(pos["symbol"]).lower())
+            dist = abs(pos["price"] - pos["stop"]) if pos.get("stop") is not None else 0
+            if q is None or dist <= 0:
+                continue                                # sin cotización (no está en el panel Quotes): no suma
+            long = pos["direction"] == "long"
+            exit_price = q.bid if long else q.ask
+            total += (1 if long else -1) * (exit_price - pos["price"]) / dist * v["risk_amount"]
+        return total
+
+    def _paint_virtual(self) -> None:
+        v = self.virtual
+        balance, initial, cur = v["balance"], v["initial"] or 0.0, v.get("currency") or ""
+        flt = self.floating()
+        equity = f"equity {balance + (flt or 0):,.2f}"
+        self.stat_balance.set_value(f"{balance:,.2f}", f"{cur}  -  {equity}" if cur else equity)
+        if flt is None:
+            self.stat_pnl.set_value(f"{0:+,.2f}", "sin posiciones abiertas")
+        else:
+            color = theme.BULL if flt > 0 else theme.BEAR if flt < 0 else None
+            self.stat_pnl.set_value(f"{flt:+,.2f}", f"{flt / balance * 100 if balance else 0:+.2f}% del saldo", color)
+        diff = balance - initial
+        pct = diff / initial * 100 if initial else 0.0
+        color = theme.BULL if diff > 0 else theme.BEAR if diff < 0 else None
+        self.stat_result.set_value(f"{pct:+.2f}%", f"{diff:+,.2f}  -  capital inicial {initial:,.0f}", color)
+        self._paint_trades(v["wins"], v["losses"], v["breakeven"], v.get("since"), v.get("pending") or 0, v.get("next_at"))
+
+    def _paint_trades(self, wins: int, losses: int, be: int, since: str | None = None, pending: int = 0,
+                      next_at: int | None = None) -> None:
+        dot = '<span style="color:{};">●</span>'
+        self.stat_trades.value.setText(f"{dot.format(theme.BULL)} {wins} G&nbsp;&nbsp;{dot.format(theme.BEAR)} {losses} P"
+                                       f"&nbsp;&nbsp;{dot.format(BE_GREY)} {be} B")
+        n = wins + losses + be
+        when = ""
+        if since:
+            try:
+                when = f" desde el {fecha_corta(datetime.fromisoformat(since))}"
+            except ValueError:
+                pass
+        text = f"{n} cerrada{'s' if n != 1 else ''}{when}" if n else (when.strip() or "ninguna cerrada")
+        tip = ("Operaciones del Forwardtest ya consolidadas en el saldo del perfil: ganadas (G), perdidas (P) y en "
+               "breakeven (B: el stop ya estaba en la entrada). Se consolidan al cierre de la vela de 3 h (índices) o de "
+               "4 h (resto) en la que cerraron.\nPulsa para abrir o cerrar el Forwardtest del perfil.")
+        if pending:
+            at = f" a las {self._ny(next_at):%H:%M}" if next_at else ""
+            text = f"{n} + {pending} por consolidar{at}"
+            tip += f"\n{pending} cerrada{'s' if pending != 1 else ''} esperando a consolidar; la próxima{at} (NY)."
+        self.stat_trades.sub.setText(text)
+        self.stat_trades.setToolTip(tip)
+
+    def _on_profile_chosen(self, index: int) -> None:
+        name = self.profile_box.itemData(index)
+        current = max(0, self.profile_box.findData(self.profile_name))
+        if name == self.profile_name or self.switch_profile is None:
+            self.profile_box.setCurrentIndex(current)
+            return
+        shown = self.profile_box.itemText(index)
+        answer = QMessageBox.question(self, "Cambiar de perfil",
+                                      f"El bot se volverá a arrancar con el perfil {shown}: su cuenta, su saldo virtual y "
+                                      "sus posiciones simuladas. Lo del perfil actual queda guardado.\n\n¿Cambiar?")
+        if answer != QMessageBox.Yes:
+            self.profile_box.setCurrentIndex(current)
+            return
+        self.log(f"perfil: cambiando a {shown}; el bot se vuelve a arrancar")
+        self.switch_profile(name)
 
     def _on_bias(self, p: dict) -> None:
         result: BiasResult = p["result"]
@@ -1101,15 +1236,35 @@ class MainWindow(QMainWindow):
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]
         self.ring.trade_closed(c.result, c.r, o.symbol)
-        why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})"}[c.result]
+        why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})",
+               "breakeven": "stop en breakeven (en la entrada) alcanzado"}.get(c.result, c.result)
         opened = f"{self._ny(o.entry_ts):%d/%m %H:%M}" if o.entry_ts else "-"
         closed = f"{self._ny(c.exit_ts):%d/%m %H:%M}"
         lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)} ({opened} NY)   Salida: {fmt_price(c.exit_price)} ({closed} NY)",
-                 f"Motivo:   {why}", f"Resultado: {c.r:+.2f} R ({c.pct:+.2f} % del precio, sin spread)",
-                 "Modo simulación: no hubo posición real en MT5."]
-        verdict = {"objetivo": "GANADA (objetivo)", "stop": "PERDIDA (stop)", "tiempo": "cerrada por tiempo"}[c.result]
+                 f"Motivo:   {why}", f"Resultado: {c.r:+.2f} R ({c.pct:+.2f} % del precio, sin spread)"]
+        if getattr(c, "be_ts", None):
+            lines.append(f"Stop a breakeven al cierre de la vela de 15 min de las {self._ny(c.be_ts):%d/%m %H:%M} NY")
+        if p.get("consolidate_at"):
+            lines.append(f"Saldo virtual: pasa a la cuenta del perfil al cierre de la vela de {p.get('consolidate_hours')} h, "
+                         f"a las {self._ny(p['consolidate_at']):%d/%m %H:%M} NY")
+        lines.append("Modo simulación: no hubo posición real en MT5.")
+        verdict = {"objetivo": "GANADA (objetivo)", "stop": "PERDIDA (stop)", "tiempo": "cerrada por tiempo",
+                   "breakeven": "BREAKEVEN (stop en la entrada)"}.get(c.result, c.result)
         self.log(f"setup: posición simulada {verdict} - {o.label}: {c.r:+.2f} R, {c.pct:+.2f} % ({opened} -> {closed} NY)",
-                 chr(10).join(lines), "go" if c.r > 0 else "nogo")
+                 chr(10).join(lines), "go" if c.r > 0 else "nogo" if c.r < 0 else "info")
+
+    def _on_setup_consolidated(self, p: dict) -> None:
+        """Las cerradas del Forwardtest que acaban de pasar al saldo virtual del perfil."""
+        trades, cur = p["trades"], p.get("currency") or ""
+        total = sum(float(t["importe"]) for t in trades)
+        kinds = {"G": 0, "P": 0, "B": 0}
+        for t in trades:
+            kinds[outcome(float(t.get("r", 0)))] += 1
+        lines = [f"{self._ny(t['cierre_ts']):%d/%m %H:%M} NY  {t['symbol']} {t['direction']}  {t['result']}  "
+                 f"{float(t['r']):+.2f} R  {float(t['importe']):+,.2f}  ->  saldo {float(t['saldo']):,.2f}" for t in trades]
+        self.log(f"cuenta: consolidadas {len(trades)} operación(es) del Forwardtest ({kinds['G']} G, {kinds['P']} P, "
+                 f"{kinds['B']} B): {total:+,.2f} {cur} -> saldo {p['balance']:,.2f} {cur}".rstrip(),
+                 "\n".join(lines), "go" if total > 0 else "nogo" if total < 0 else "info")
 
     def _on_bias_schedule(self, p: dict) -> None:
         start = p["day_start"]

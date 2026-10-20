@@ -21,7 +21,7 @@ Cómo se comunica una skill:
 
 Temas que ya existen (payload entre llaves):
   feed.load {symbol, timeframe}      pide cargar velas            (ui -> feed)
-  feed.connected {info, symbols}     conexión con MT5 abierta     (feed)
+  feed.connected {info, symbols, all_symbols, equivalents}   conexión con MT5 abierta   (feed)
   candles.loaded {symbol, timeframe, df, seconds}                 (feed)
   quotes.updated {quotes, account}   cada segundo                 (quotes)
   clock.offset {server_offset, offset_source}  desfase del servidor, al cambiar (quotes)

@@ -1,4 +1,5 @@
-"""Posiciones simuladas abiertas en disco: `data/setup/abiertas.json`, para no perderlas al reiniciar y poder consultarlas.
+"""Posiciones simuladas abiertas en disco: `data/perfiles/<perfil>/abiertas.json`, para no perderlas al reiniciar y poder
+consultarlas. Cada perfil (cuenta) tiene las suyas.
 
 Lo escribe Setup cada vez que abre o cierra una; al arrancar, Setup las sigue y Cortex sabe qué mercados están ocupados.
 Es un JSON legible: una lista con la orden completa de cada posición (mercado, lado, patrón, precio, stop, objetivo, TBR,
@@ -14,7 +15,13 @@ from pathlib import Path
 from ...config import PROJECT_ROOT
 from ..cortex.order import Order
 
-DEFAULT_FILE = PROJECT_ROOT / "data" / "setup" / "abiertas.json"
+DEFAULT_FILE = PROJECT_ROOT / "data" / "setup" / "abiertas.json"     # sin perfil (pruebas, arranques antiguos)
+
+
+def file_for(app_cfg: dict | None) -> Path:
+    """El fichero de las abiertas del perfil con el que arrancó el bot (app_cfg["app"]["data_dir"])."""
+    folder = ((app_cfg or {}).get("app") or {}).get("data_dir")
+    return Path(folder) / "abiertas.json" if folder else DEFAULT_FILE
 
 
 def order_to_json(order: Order) -> dict:

@@ -114,6 +114,7 @@ Panel **Quotes** (antes *Mercados*): cotizaciones de solo lectura (se refrescan 
 qué mercados se muestran: busca entre los símbolos reales de tu broker (también por nombre común: *dow*, *nasdaq*,
 *oro*, *petróleo*, *bitcoin*...), añade, quita y reordena. Se aplica al instante y se guarda en `settings.local.json`
 (no se sube a git), que tiene prioridad sobre la `watchlist` de `config.toml`. Borrar ese fichero devuelve la lista de `config.toml`.
+Cada perfil guarda su lista; uno que aún no tiene la suya usa la común (la de antes de los perfiles).
 Pulsa una tarjeta para cargar su gráfico. Un símbolo cuyo último tick va más de 5 minutos por detrás del más
 reciente se marca como *Mercado cerrado*, y uno que el broker no tiene aparece como *No disponible*.
 Usa los nombres exactos de tu broker (en MT5: Ver > Símbolos).
@@ -226,12 +227,12 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 |---|---|---|
 | **APP** — arranque | | |
 | `APP_AUTO_UPDATE` | `false` | Traer el código nuevo de GitHub (`git pull`) antes de arrancar (`true`/`false`). Lo lee `run.ps1`. |
-| `APP_PROFILE` | vacío | Perfil de MT5 con el que conectar: el `<NOMBRE>` de `MT5_<NOMBRE>_LOGIN` del `.env` de cuentas. Vacío: el de `MT5_DEFAULT`. |
+| `APP_PROFILE` | vacío | Perfil de MT5 con el que conectar: el `<NOMBRE>` de `MT5_<NOMBRE>_LOGIN` del `.env` de cuentas. Vacío: el de `MT5_DEFAULT`. El último perfil elegido en el selector de la cabecera manda sobre esta clave. |
 | `APP_DEMO` | `false` | `true`: datos sintéticos, sin conectar con MT5 (como `--demo`). |
 | **FEED** — conexión y velas | | |
 | `FEED_SYMBOL` | `NAS100` | Mercado que se carga al arrancar. Nombre exacto del broker, con mayúsculas y sufijos (`NAS100FT.r`). |
 | `FEED_TIMEFRAME` | `M15` | Timeframe al arrancar: `M1` `M3` `M5` `M15` `H1` `H3` `H4` `H7` `H12` `1D` `1W` (también vale `15m`, `1h`...). |
-| `FEED_MAX_BARS` | `2000000` | Tope de seguridad de velas a cargar por mercado y timeframe. |
+| `FEED_MAX_BARS` | `20000` | Velas que se cargan de cada mercado y timeframe (las más recientes), en todos los perfiles. Pocas = cambio de mercado ágil. |
 | `FEED_SWEEP_MINUTES` | `5` | Minutos entre vueltas del barrido en segundo plano de toda la watchlist (`0` = sin barrido). Ver «Todos los mercados, aunque no estén en pantalla». |
 | `FEED_SWEEP_TIMEFRAME` | *(vacío)* | Timeframe del barrido; vacío = el de `FEED_TIMEFRAME`. |
 | `FEED_SWEEP_DAYS` | `10` | Días de velas que se cargan de cada mercado en cada vuelta del barrido. |
@@ -277,9 +278,13 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
 | **SETUP** — ejecutor | | |
 | `SETUP_SEND_ORDERS` | `false` | Enviar las órdenes de Cortex a MT5. Aún no implementado: `true` da error; ahora solo se simulan. |
+| `SETUP_RISK_PCT` | `1` | Riesgo de cada operación simulada, en % del saldo virtual del perfil (resultado en dinero = R x riesgo). |
+| `SETUP_BE_TRIGGER_PCT` | `1` | Ganancia flotante, en % del saldo, que al cierre de una vela de 15 min pasa el stop a la entrada (breakeven). `0`: sin breakeven. |
+| `SETUP_CONSOLIDATE_INDEX_HOURS` / `SETUP_CONSOLIDATE_HOURS` | `3` / `4` | Las cerradas del Forwardtest pasan al saldo virtual del perfil al terminar la vela de estas horas (índices USA / resto) en la que cerraron. Deben dividir el día. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
 | `UI_THEME` | `matrix` | Paleta de arranque: `matrix`, `negro`, `pizarra` o `blanco`. |
+| `UI_FONT` | `mockup` | Tipo de letra: `mockup` (Inter con trazo medio, la de la propuesta de diseño; sin Inter, Segoe UI con los mismos pesos) o `clasica` (Segoe UI con negritas). Las `.ttf` de `tradingbot/ui/fonts` se cargan al arrancar. |
 
 Cada clave lleva en `tradingbot.env` un comentario que la explica, con su valor por defecto entre paréntesis.
 Una clave vacía, comentada o borrada usa el valor por defecto, que vive en el código (`tradingbot/config.py` y cada skill).
@@ -304,7 +309,32 @@ con un comentario por clave, y documentarlo en la tabla de arriba.
 
 Se leen de `C:\Users\claude\mt5\.env` (fuera del repositorio). Formato en `.env.example`:
 un bloque `MT5_<PERFIL>_LOGIN / _SERVER / _PASSWORD` por cuenta y `MT5_DEFAULT` con el perfil por defecto.
+Opcionales: `MT5_<PERFIL>_NAME` (nombre en el selector, p. ej. `MT5_PUPRIME_NAME=PUPrime-Demo`) y `MT5_<PERFIL>_PATH`
+(el terminal de ese broker; si falta, `MT5_PATH` o el que encuentre MT5).
+
+**Nombres de los mercados en cada broker.** El bot usa los mismos nombres en todos los perfiles (NAS100, SP500, DJ30,
+XAUUSD, USOIL...) y al leer de MT5 los traduce al del broker: el mismo nombre; si no existe, con el sufijo del broker
+(`NAS100` -> `NAS100.s` en PUPrime; con varios, el más corto: `NAS100.s` y no `NAS100ft.s`); y si tampoco, sus otros
+nombres conocidos (`USOIL` -> `CL-OIL.s`, `SP500` <-> `US500`, `DJ30` <-> `US30`, `NAS100` <-> `USTEC`, `XAUUSD` <-> `GOLD`).
+Al conectar, el Registro dice qué nombres se han traducido y cuáles no tiene el broker. Para fijar uno a mano:
+`MT5_<PERFIL>_SYMBOLS=NAS100=NAS100ft.s, USOIL=CL-OIL.s` (nombre del bot = nombre del broker).
+
+**Perfiles.** Cada perfil es una cuenta demo con sus datos aparte en `data/perfiles/<perfil>/`: posiciones simuladas
+abiertas (`abiertas.json`), diario del forwardtest (`forwardtest/`) y **saldo virtual** (`cuenta.json`). Solo opera el
+perfil activo. El selector de la cabecera, junto a «TradingBot», cambia de perfil: el bot vuelve a arrancar con esa cuenta
+y recuerda la elección (en `settings.local.json`). El saldo virtual empieza con el saldo de la cuenta de MT5 el primer día
+que se usa el perfil (capital inicial) y cada operación cerrada del Forwardtest del perfil suma o resta su resultado en R
+por el riesgo (`SETUP_RISK_PCT`, 1 % del saldo). No se apunta al cerrar sino al **consolidar**: al terminar la vela de 3 h
+(índices USA) o de 4 h (resto) en la que cerró, en hora del servidor; hasta entonces la cabecera la cuenta como «por
+consolidar» con la hora de la próxima consolidación, y al consolidar el Registro lo anota con el saldo nuevo. Así todo lo
+que hay en el diario cuenta, también lo anotado antes de existir el saldo virtual. Si una vela de 15 min cierra con la posición `SETUP_BE_TRIGGER_PCT` % del saldo a
+favor (1 %: +1 R), el stop pasa a la entrada; si lo toca, cierra a 0 y cuenta como breakeven. La cabecera muestra el
+**Saldo** (capital + simulado), el **P&L abierto** de las simuladas, el **Resultado del perfil** (% frente al capital
+inicial) y las **Operaciones** ganadas (G, punto verde), perdidas (P, rojo) y en breakeven (B, gris). Los datos de antes
+de los perfiles (`data/setup`, `data/forwardtest`) pasan al perfil de `MT5_DEFAULT` la primera vez que arranca.
 La contraseña es opcional: si falta, se usa la variable de entorno `MT5_<PERFIL>_PASSWORD` o la sesión ya abierta en el terminal.
+Si el terminal está en otra cuenta, el bot entra en la del perfil con la contraseña que MT5 tenga guardada (marca
+«Guardar contraseña» al entrar a mano una vez en cada cuenta): así varios perfiles comparten un terminal.
 
 Protecciones al conectar:
 - Si el terminal está en una cuenta distinta a la del perfil, se cancela.
@@ -312,9 +342,13 @@ Protecciones al conectar:
 
 ### Cuántas velas se cargan
 
-Se piden a MT5 en bloques de 50.000 hasta que no entrega más (tope `FEED_MAX_BARS` en `tradingbot.env`).
-MT5 limita lo que entrega con *Herramientas > Opciones > Gráficos > Máx. de barras en el gráfico*:
-ponlo en **Ilimitado** y reinicia el terminal. El historial disponible depende también del broker.
+Las últimas `FEED_MAX_BARS` (20.000 por defecto) de cada mercado y timeframe, en todos los perfiles: unos 10 meses en
+M15 y 2 semanas en M1, de sobra para las skills (miran como mucho los últimos 30 días). MT5 descarga solo esas, así que
+un mercado que el terminal aún no tiene tarda 1-2 s y uno ya visto es instantáneo. Pedir todo el historial (cientos de
+miles de velas) obliga al terminal a descargarlo entero la primera vez: minutos por mercado, con el bot congelado mientras
+(la librería de MT5 no suelta el intérprete de Python), y vuelve a pasar al cambiar de perfil, porque el terminal entra en
+otra cuenta. Para ver más historial sube `FEED_MAX_BARS` (con más de 50.000 se pide en bloques de 50.000) y, si MT5 entrega
+menos, ponlo en *Herramientas > Opciones > Gráficos > Máx. de barras en el gráfico*.
 
 ## Cómo funciona el Bias
 
@@ -408,7 +442,7 @@ Cómo personalizarlo:
 1. **`tradingbot.env`**: `UI_THEME` elige la paleta de arranque.
 2. **Botón "Skins"**, en la esquina superior derecha de la cabecera: cambia de paleta o retoca cada color con un selector, y se ve al instante.
 3. **Área "Stats"**, a la derecha de la cabecera y con el mismo ancho que el panel Skills que tiene debajo: los botones de la skill **Stats** (satélite `aux3` del anillo; sin ella el área no aparece). Separa el **forwardtest** (lo que hace el bot desde que opera) del **backtest** (análisis del histórico):
-   - **"Forwardtest"** abre (y, pulsado otra vez, cierra) una ventana flotante con las cifras de las operaciones simuladas: cifras clave (operaciones, G · P · N, acierto, R total, % del precio, drawdown), resumen (media, profit factor, ganada y perdida media, mejor y peor, racha, duración, GO / NO GO de Cortex), curva de R, libros por patrón, lado, sesión, mercado y sesgo, señales de Cortex por motivo y por patrón, y el diario de operaciones. Periodo: Hoy, 7 días, 30 días (por defecto) o Todo. La skill Stats guarda cada señal, apertura y cierre en un diario mensual (`data/forwardtest/AAAA-MM.jsonl`, carpeta en `STATS_FORWARD_DIR`) que no se borra al reiniciar. El forwardtest empieza el día de `STATS_FORWARD_START` (2026-10-19) a las 00:00 de Nueva York y desde ahí acumula todas las operaciones de todos los mercados, también las que Cortex repasa al arrancar (lo que pasó con el bot cerrado o con otro perfil de MT5: el diario es uno solo para todos los perfiles, sin duplicar lo repetido). Al arrancar vuelven todos los meses desde ese día, y el selector de la ventana abre cualquier mes guardado completo; las abiertas de un arranque anterior las sigue Setup desde `data/setup/abiertas.json`; una que no esté ahí aparece «sin seguimiento». «Nueva etapa» empieza las cifras en vivo desde cero sin borrar el diario.
+   - **"Forwardtest"** (o el bloque **Operaciones** de la cabecera) abre (y, pulsado otra vez, cierra) una ventana flotante con las cifras de las operaciones simuladas: cifras clave (operaciones, G · P · N, acierto, R total, % del precio, drawdown), resumen (media, profit factor, ganada y perdida media, mejor y peor, racha, duración, GO / NO GO de Cortex), curva de R, libros por patrón, lado, sesión, mercado y sesgo, señales de Cortex por motivo y por patrón, y el diario de operaciones. Periodo: Hoy, 7 días, 30 días (por defecto) o Todo. La skill Stats guarda cada señal, apertura y cierre en un diario mensual por perfil (`data/perfiles/<perfil>/forwardtest/AAAA-MM.jsonl`, carpeta en `STATS_FORWARD_DIR`) que no se borra al reiniciar: El forwardtest empieza el día de `STATS_FORWARD_START` (2026-10-19) a las 00:00 de Nueva York y desde ahí acumula todas las operaciones de todos los mercados, también las que Cortex repasa al arrancar (lo que pasó con el bot cerrado o mientras estaba el otro perfil: al cambiar de perfil se repasan desde esa hora y entran en el diario del nuevo, sin duplicar lo repetido). Al arrancar vuelven todos los meses desde ese día, y el selector de la ventana abre cualquier mes guardado completo; las abiertas de un arranque anterior las sigue Setup desde `data/perfiles/<perfil>/abiertas.json`; una que no esté ahí aparece «sin seguimiento». «Nueva etapa» empieza las cifras en vivo desde cero sin borrar el diario.
    - **"Backtest"** abre una ventana con el mismo estilo y todos los resultados del backtest de los patrones (2018-2026) y de la estrategia Calendario: eliges grupo (índices, forex, oro, cripto o Calendario), patrón (Ambos, Continuación, Reversión) y filtro (lo que opera el bot, a favor del sesgo, sin filtro; en Calendario, los mercados del bot o los 4 índices, con la configuración del bloque CALENDARIO al exportar) y muestra el veredicto (según el estadístico t), las cifras clave, la curva de R, barras por año y por hora, y tablas: comparativa entre mercados, por mercado, zona, lado, filtro, día, mitades, sensibilidad, mejoras de stop y RR, embudo, cómo terminan las operaciones, datos y metodología. **Las barras por año y por hora se pulsan**: cada histograma marca un solo año u hora (un clic en otra barra la sustituye y en la misma la quita; «Quitar filtro» borra los dos) y todo lo demás —cifras clave, curva, comparativa y tablas— se recalcula solo con esas operaciones; cada histograma aplica el filtro del otro pero no el suyo. En Calendario, elegir una hora cambia la hora de entrada. Solo las mejoras de stop y RR, el embudo y los datos no cambian con el filtro. Lee `tradingbot/skills/stats/backtest.json.gz` (o `STATS_BACKTEST_FILE`), con cada operación de los Excel de `analisis/` y de `analisis/lunes_hora_fija.pkl`: tras regenerar el backtest, ejecuta `uv run --with openpyxl python scripts/exportar_backtest.py` y pulsa «Recargar».
    *Guardar* deja esa paleta como la de arranque (cambia `UI_THEME` en `tradingbot.env`) y guarda tus colores
    retocados en `theme.local.json` (no se sube a git).
@@ -457,9 +491,9 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |
 | `pattern` | 4 | Patrones de entrada dentro de la TBR activa (la última TBR cerrada: High, Low y 50 %) hasta que empieza la siguiente; avisa de cada uno que identifica y de los que se invalidan, anulan o vencen (`candles.loaded` + `tbr.updated` + `clock.offset` -> `pattern.updated` / `pattern.detected` / `pattern.discarded` / `pattern.session`). Lee el bloque PATTERN. |
-| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo y cierre por tiempo -> `setup.closed`, que se anota en el Registro); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/setup/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
+| `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo, stop a breakeven y cierre por tiempo -> `setup.closed`, que se anota en el Registro; al terminar su vela de 3 h (índices) o 4 h (resto) se consolida en el saldo virtual del perfil, `setup.consolidated`, publicado como `setup.account` para la cabecera); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/perfiles/<perfil>/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
-| `stats` | aux3 | Forwardtest y backtest: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) en un diario mensual (`data/forwardtest`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` (nueva etapa) y `stats.reload`. Alimenta los botones Forwardtest y Backtest del área Stats. Lee el bloque STATS. |
+| `stats` | aux3 | Forwardtest y backtest: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) en un diario mensual por perfil (`data/perfiles/<perfil>/forwardtest`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` (nueva etapa) y `stats.reload`. Alimenta los botones Forwardtest y Backtest del área Stats. Lee el bloque STATS. |
 
 El anillo está completo; los satélites los ocupan Setup (`aux1`), Calendario (`aux2`) y Stats (`aux3`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).

@@ -47,7 +47,7 @@ class CortexSkill(Skill):
         if self.scope not in ("global", "mercado"):
             self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
             raise ValueError(self.error)
-        for order in store.load():                      # las posiciones que Setup dejó abiertas antes de reiniciar
+        for order in store.load(store.file_for(self.services.app_cfg)):                      # las posiciones que Setup dejó abiertas antes de reiniciar
             if trackable(order):
                 self._open[order.symbol] = order
                 if order.tbr_zone:

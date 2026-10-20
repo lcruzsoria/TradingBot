@@ -16,7 +16,7 @@ class StatsSkill(Skill):
     title = "Stats"
     description = ("Las cifras del bot en un solo sitio. Forwardtest: anota cada GO / NO GO de Cortex y cada operación simulada "
                    "que Setup abre y cierra desde el inicio del forwardtest (STATS_FORWARD_START, 00:00 de Nueva York), también las que "
-                   "repasa al arrancar, de cualquier perfil de MT5, y lo guarda en un diario mensual (data/forwardtest) que no se pierde al reiniciar; "
+                   "repasa al arrancar, y lo guarda en un diario mensual por perfil (data/perfiles/<perfil>/forwardtest) que no se pierde al reiniciar; "
                    "lo publica para la ventana Forwardtest (acierto, R, drawdown, rachas, libros...). Backtest: carga el "
                    "histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia Calendario para la "
                    "ventana Backtest. No opera ni decide nada.")
@@ -25,10 +25,9 @@ class StatsSkill(Skill):
     slot = "aux3"
 
     def on_start(self) -> None:
-        folder = self.settings.get("FORWARD_DIR", "") or None                      # tradingbot.env, bloque STATS
-        if folder is None and _is_demo(self.services.source):
-            folder = journal.DEFAULT_DIR.parent / "forwardtest-demo"      # datos sintéticos (--demo, capturas): aparte
-        self.journal = Journal(folder)
+        # STATS_FORWARD_DIR o el diario del perfil (cada cuenta el suyo); datos sintéticos sin perfil: aparte
+        self.journal = Journal(journal.folder_for(self.services.app_cfg, self.settings.get("FORWARD_DIR", "") or None,
+                                                  _is_demo(self.services.source)))
         raw = self.settings.get("FORWARD_START", "")                              # tradingbot.env, bloque STATS
         try:
             self.start = date.fromisoformat(raw) if raw else None                  # día de NY en que empieza (None: todo)

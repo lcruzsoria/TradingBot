@@ -37,14 +37,36 @@ def clean_symbols(symbols) -> list[str]:
     return out
 
 
-def load_watchlist(default: list[str], path: Path | None = None) -> list[str]:
-    """Watchlist guardada desde la app; si no hay, la de config.toml."""
-    saved = load_settings(path).get("watchlist")
+def load_watchlist(default: list[str], path: Path | None = None, profile: str | None = None) -> list[str]:
+    """Watchlist guardada desde la app: la del perfil («watchlists»); si no tiene, la común («watchlist», la de antes de
+    los perfiles); si no hay, la de config.toml. Los nombres del bot valen en cualquier broker: MT5 los traduce."""
+    data = load_settings(path)
+    own = data.get("watchlists", {})
+    saved = own.get(profile.lower()) if profile and isinstance(own, dict) else None
+    if not isinstance(saved, list):
+        saved = data.get("watchlist")
     chosen = clean_symbols(saved) if isinstance(saved, list) else []
     return chosen or clean_symbols(default) or list(DEFAULT_WATCHLIST)
 
 
-def save_watchlist(symbols: list[str], path: Path | None = None) -> None:
+def save_watchlist(symbols: list[str], path: Path | None = None, profile: str | None = None) -> None:
+    """Con perfil, la guarda solo para él; sin perfil (modo demo), en la común."""
     data = load_settings(path)
-    data["watchlist"] = clean_symbols(symbols)
+    if profile:
+        own = data.get("watchlists")
+        data["watchlists"] = {**(own if isinstance(own, dict) else {}), profile.lower(): clean_symbols(symbols)}
+    else:
+        data["watchlist"] = clean_symbols(symbols)
+    save_settings(data, path)
+
+
+def load_profile(path: Path | None = None) -> str | None:
+    """Último perfil elegido en el selector de la cabecera (None si nunca se ha cambiado)."""
+    saved = load_settings(path).get("profile")
+    return str(saved).strip().lower() or None if isinstance(saved, str) else None
+
+
+def save_profile(name: str, path: Path | None = None) -> None:
+    data = load_settings(path)
+    data["profile"] = name.lower()
     save_settings(data, path)

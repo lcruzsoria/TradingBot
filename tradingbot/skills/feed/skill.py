@@ -81,7 +81,11 @@ class FeedSkill(Skill):
                 info = source.connect()
                 symbols = source.symbols()
                 self.connected = True
-                self.publish("feed.connected", {"info": info, "symbols": symbols, "all_symbols": source.all_symbols()})
+                app = self.services.app_cfg["app"]
+                wanted = list(dict.fromkeys([*app.get("watchlist", []), symbol]))
+                lookup = getattr(source, "equivalents", None)    # nombres que este broker llama de otra forma
+                self.publish("feed.connected", {"info": info, "symbols": symbols, "all_symbols": source.all_symbols(),
+                                                "equivalents": lookup(wanted) if lookup else {}})
             if first and self._sweep_due():
                 # El primer barrido se anuncia antes que las velas del gráfico: así Cortex retiene también los patrones
                 # de este mercado y decide los de todos los mercados juntos, en orden de hora.
