@@ -10,6 +10,7 @@ from ...core import Event, Skill, background_of, register_skill
 from ...envconfig import EnvConfig
 from ...timeframes import display_label, minutes
 from ..feed.datasource import aggregate_candles
+from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
 
@@ -74,6 +75,10 @@ class PatternSkill(Skill):
         self.until = self._load_until(order)
         env = self.services.env if self.services.env is not None else EnvConfig()
         self.order = zones_from_settings(env.section("TBR"), order) if order else []        # ciclo de TBR: define el plazo
+        levels = env.section("LEVELS")                  # el día de trading acaba cuando empieza el siguiente: ahí cierran los trades
+        self.day_end = parse_time(levels.get("DAY_START", DEFAULT_DAY_START), "LEVELS_DAY_START")
+        self.index_day_end = parse_time(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START), "LEVELS_INDEX_DAY_START")
+        self.us_indices = levels.get_list("US_INDICES", list(DEFAULT_US_INDICES))
         wanted = [t.lower() for t in self.settings.get_list("TYPES", [])]
         unknown = [t for t in wanted if t not in PATTERN_REGISTRY]
         if unknown:
@@ -216,7 +221,7 @@ class PatternSkill(Skill):
                 continue
             self._seen.add(key)
             payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit,
-                       "session_close": self._session_close(hit.ts, ahead), **mark}
+                       "session_close": self._session_close(symbol, hit.ts, ahead), **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
         if ended:
             key = (symbol, "session", tbr.key, tbr.day)
@@ -225,12 +230,11 @@ class PatternSkill(Skill):
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
                                                  "session_end": window.session_end_hours, **mark})
 
-    def _session_close(self, ts: int | None, ahead: int) -> int | None:
-        """Fin de la sesión (final de la última zona del ciclo, NY PM) siguiente a la hora `ts` (servidor): ahí se cierra el trade."""
-        if not ts or not self.order:
+    def _session_close(self, symbol: str, ts: int | None, ahead: int) -> int | None:
+        """Fin del día de trading siguiente a la hora `ts` (servidor): 17:00 NY en forex y metales, 18:00 en los índices USA."""
+        if not ts:
             return None
-        last = self.order[-1]
-        wall = (last.start + last.minutes) * 60
+        wall = (self.index_day_end if is_us_index(symbol, self.us_indices) else self.day_end) * 60
         ny = int(ts) - ahead
         end = (ny // 86400) * 86400 + wall
         while end <= ny:

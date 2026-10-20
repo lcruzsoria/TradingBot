@@ -237,3 +237,21 @@ def test_el_trade_de_patron_cierra_al_fin_de_la_sesion_con_tope_de_24_h():
     assert close_time(1_000, 1_000 + MAX_HOLD_SECONDS + 1) == 1_000 + MAX_HOLD_SECONDS
     assert close_time(1_000, None) == 1_000 + MAX_HOLD_SECONDS
     assert close_time(None, 5_000) is None
+
+
+def test_el_fin_del_dia_de_trading_es_17h_ny_y_18h_en_indices():
+    from tradingbot.core import SkillManager, Services  # noqa: F401
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.skills.pattern.skill import PatternSkill
+    from datetime import datetime, timezone
+    ahead = 7 * 3600
+    skill = PatternSkill.__new__(PatternSkill)
+    skill.day_end, skill.index_day_end, skill.us_indices = 17 * 60, 18 * 60, ["USTEC"]
+    entry = int(datetime(2026, 10, 19, 10, 0, tzinfo=timezone.utc).timestamp()) + ahead      # 10:00 NY
+    def ny(ts):
+        return datetime.fromtimestamp(ts - ahead, timezone.utc).strftime("%d %H:%M")
+    assert ny(skill._session_close("EURUSD", entry, ahead)) == "19 17:00"
+    assert ny(skill._session_close("XAUUSD", entry, ahead)) == "19 17:00"
+    assert ny(skill._session_close("USTEC", entry, ahead)) == "19 18:00"
+    late = entry + 8 * 3600                                                                    # 18:00 NY
+    assert ny(skill._session_close("EURUSD", late, ahead)) == "20 17:00"
