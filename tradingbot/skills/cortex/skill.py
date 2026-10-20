@@ -53,7 +53,7 @@ class CortexSkill(Skill):
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
-        self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
+        self.scope = (self.settings.get("POSITION_SCOPE", "mercado") or "mercado").lower()  # mercado: una por mercado; global: una en toda la cuenta
         if self.scope not in ("global", "mercado"):
             self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
             raise ValueError(self.error)

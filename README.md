@@ -47,7 +47,9 @@ operaciones de todos.
   Lo ya anotado no se repite. El barrido llega hasta `FEED_SWEEP_DAYS` días atrás (y el gráfico, hasta `TBR_DAYS`).
 - Bias calcula el sesgo de cada mercado del barrido con sus propios TDO y Midnight (ajustes `LEVELS_DAY_START`,
   `LEVELS_INDEX_DAY_START` y `LEVELS_US_INDICES`) y Cortex valida cada patrón con el sesgo **de su mercado**.
-- **Orden de las decisiones.** Con `CORTEX_POSITION_SCOPE=global` (una sola posición en toda la cuenta) importa quién llega
+- **Posiciones.** Con `CORTEX_POSITION_SCOPE=mercado` (por defecto) cada mercado opera independiente de los demás, pero
+  nunca hay dos operaciones abiertas a la vez en el mismo mercado; con `global`, una sola en toda la cuenta.
+- **Orden de las decisiones.** Dentro de un mercado (y, con `CORTEX_POSITION_SCOPE=global`, entre todos) importa quién llega
   primero. Por eso, mientras dura una vuelta del barrido, Cortex **retiene** los patrones (también los del gráfico) y, cuando
   Pattern y Bias han repasado todos los mercados cargados, los decide juntos **en orden de hora**: un patrón de las 09:00 de
   un mercado va antes que uno de las 10:00 de otro aunque llegue después. Si una vuelta no se completa, Cortex decide igualmente

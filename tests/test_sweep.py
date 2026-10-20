@@ -134,7 +134,8 @@ def bias(kind=Bias.BULLISH):
 def test_cortex_decide_la_vuelta_entera_en_orden_de_hora():
     bus, decisions = EventBus(), []
     bus.subscribe("t", "cortex.decision", decisions.append)
-    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig()), [{"type": "cortex"}])
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse("CORTEX_POSITION_SCOPE=global\n"))),
+                           [{"type": "cortex"}])
     manager.start()
     mark = {"background": True, "sweep": 7}
     bus.publish("feed.sweep", {"stage": "start", "id": 7, "symbols": ["NAS100", "XAUUSD"]}, source="feed")
@@ -178,7 +179,8 @@ def test_con_barrido_la_senal_del_grafico_espera_a_la_vuelta():
     bus, decisions = EventBus(), []
     bus.subscribe("t", "cortex.decision", decisions.append)
     cfg = {"app": {"timeframe": "15m", "watchlist": ["EURUSD", "XAUUSD"]}}
-    manager = SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "cortex"}])
+    env = EnvConfig(parse("CORTEX_POSITION_SCOPE=global\n"))
+    manager = SkillManager(bus, Services(None, None, cfg, env), [{"type": "cortex"}])
     manager.start()
 
     def hit(ts):

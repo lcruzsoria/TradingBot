@@ -163,14 +163,14 @@ def _dos_mercados(env_text):
     return decisions, orders
 
 
-def test_el_alcance_por_defecto_es_una_sola_posicion_en_toda_la_cuenta():
-    decisions, orders = _dos_mercados("")
+def test_con_alcance_global_hay_una_sola_posicion_en_toda_la_cuenta():
+    decisions, orders = _dos_mercados("CORTEX_POSITION_SCOPE=global\n")
     assert [d.payload["decision"].allowed for d in decisions] == [True, False] and len(orders) == 1
     assert "ya hay una posición abierta en EURUSD" in decisions[1].payload["decision"].reason          # GBPUSD queda bloqueado
 
 
-def test_con_alcance_mercado_cada_mercado_tiene_su_posicion():
-    decisions, orders = _dos_mercados("CORTEX_POSITION_SCOPE=mercado\n")
+def test_por_defecto_cada_mercado_tiene_su_posicion():
+    decisions, orders = _dos_mercados("")                  # CORTEX_POSITION_SCOPE=mercado
     assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
 
 
