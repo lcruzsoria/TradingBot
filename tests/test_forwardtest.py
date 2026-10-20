@@ -204,3 +204,16 @@ def test_pinchar_el_mercado_de_una_operacion_lo_muestra_en_el_grafico(tmp_path, 
     row = next(r for r in dlg.by_symbol.rows if r[0].text().startswith(ORDER.symbol))
     row[0].mousePressEvent(None)                                         # y el del libro «Por mercado»
     assert len(loads) == 2 and win.current_symbol == ORDER.symbol
+
+
+def test_las_abiertas_que_setup_recupera_al_arrancar_no_salen_sin_seguimiento(tmp_path):
+    from tradingbot.skills.setup import store
+    skill = skill_in(tmp_path)
+    other = replace(ORDER, symbol="GER40", entry_ts=1_020_000)
+    lost = replace(ORDER, symbol="US30", entry_ts=1_030_000)
+    for order in (other, lost):
+        skill.handle(Event("setup.executed", {"order": order}, "setup"))
+    store.save([other])                                         # Setup solo conserva la de GER40 en abiertas.json
+    s = skill_in(tmp_path).stats
+    assert [t.order.symbol for t in s.open] == ["GER40"]                   # la sigue Setup
+    assert [t.order.symbol for t in s.stale] == ["US30"]

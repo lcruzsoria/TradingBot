@@ -9,6 +9,7 @@ from .backtest import BOT_FILTER, load
 from . import journal
 from .journal import Journal
 from .session import Signal, TradeStats
+from ..setup import store
 
 
 @register_skill("stats")
@@ -39,9 +40,18 @@ class StatsSkill(Skill):
         except OSError as exc:
             self.stats = TradeStats()
             self.publish("skill.error", {"key": self.key, "error": f"no se pudo leer el diario del forwardtest: {exc}"})
+        self._followed()
         self.backtest = None
         self._load_backtest()
         self._publish_session()
+
+    def _followed(self) -> None:
+        """Las abiertas que Setup recupera al arrancar (abiertas.json del perfil) siguen con seguimiento: el diario solo
+        marca «sin seguimiento» las que ya no están ahí."""
+        for order in store.load(store.file_for(self.services.app_cfg)):
+            known = self.stats.find(order)
+            if known is not None and known.closed is None:
+                known.stale = False
 
     def handle(self, event: Event) -> None:
         p = event.payload
