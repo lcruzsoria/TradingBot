@@ -112,4 +112,4 @@ def test_cortex_sabe_que_mercados_estan_ocupados_al_reiniciar():
     time.sleep(0.3)
     cortex = manager.skills["cortex"]
     manager.stop()
-    assert cortex._open == {"EURUSD": order} and ("EURUSD", "NY Open", date(2026, 10, 6)) in cortex._used
+    assert list(cortex._open.values()) == [order] and ("EURUSD", "NY Open", date(2026, 10, 6)) in cortex._used

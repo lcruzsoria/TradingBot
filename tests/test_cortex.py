@@ -229,3 +229,21 @@ def test_una_operacion_pasada_ya_cerrada_no_bloquea_a_la_siguiente_que_se_anunci
     manager.stop()
     assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2       # el primero ya cerró a las 00:30
     assert decisions[0].payload["hit"].key == "p"                                                        # y se decide en orden de hora
+
+
+def test_el_cierre_de_una_orden_antigua_no_libera_otra_abierta_del_mismo_mercado():
+    """Carrera real: el cierre de una orden vieja de GBPUSD llegaba tras abrir la de London y Cortex la daba por cerrada."""
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.cortex.skill import _key
+    old = Order("GBPUSD", "15m", "long", "Continuación", "continuacion", "Asia", date(2026, 10, 20), 105.0, 95.0, 100.0, 100.0, 95.0, 110.0,
+                "No Bias", 0.0, "GO", None, 1000, 1000 + 24 * 3600)
+    london = Order("GBPUSD", "15m", "long", "Continuación", "continuacion", "London", date(2026, 10, 20), 105.0, 95.0, 100.0, 100.0, 95.0, 110.0,
+                   "No Bias", 0.0, "GO", None, 5000, 5000 + 24 * 3600)
+    manager, bus, decisions, orders, executed = run_skills()
+    cortex = manager.skills["cortex"]
+    cortex._open[_key(london)] = london
+    bus.publish("setup.closed", {"order": old, "closed": None, "sent": False}, source="setup")     # llega tarde el cierre de la vieja
+    time.sleep(0.3)
+    busy = cortex._busy("XAUUSD")
+    manager.stop()
+    assert busy is london

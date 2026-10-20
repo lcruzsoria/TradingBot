@@ -46,7 +46,7 @@ class CortexSkill(Skill):
         self._sweeping = every > 0 and bool(app.get("watchlist"))     # con barrido, solo se decide al cerrar cada vuelta
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
-        self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
+        self._open: dict[tuple, object] = {}            # orden abierta (por su identidad, no por mercado): hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
         self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
@@ -55,7 +55,7 @@ class CortexSkill(Skill):
             raise ValueError(self.error)
         for order in store.load(store.file_for(self.services.app_cfg)):                      # las posiciones que Setup dejó abiertas antes de reiniciar
             if trackable(order):
-                self._open[order.symbol] = order
+                self._open[_key(order)] = order
                 if order.tbr_zone:
                     self._used.add((order.symbol, order.tbr_zone, order.tbr_day))
 
@@ -86,7 +86,7 @@ class CortexSkill(Skill):
         elif event.topic == "pattern.swept":
             self._round_seen("swept", p)
         elif event.topic == "setup.closed":
-            self._open.pop(event.payload["order"].symbol, None)
+            self._open.pop(_key(event.payload["order"]), None)      # solo esa orden: otra del mismo mercado sigue abierta
             self.set_caption(f"{event.payload['order'].symbol}: posición cerrada")
         elif event.topic == "calendar.signal":
             self._pending = (self._pending + [{**p, "calendar": True}])[-MAX_PENDING:]
@@ -164,7 +164,7 @@ class CortexSkill(Skill):
     def _send(self, order) -> None:
         """Le pasa la orden a Setup y, si se puede seguir, marca el mercado como ocupado hasta que cierre."""
         if trackable(order):
-            self._open[order.symbol] = order
+            self._open[_key(order)] = order
         self.publish("setup.order", {"order": order})
         df = self._candles.get(order.symbol)
         if df is not None:                              # si la operación ya terminó con las velas actuales, el resultado sale al momento
@@ -222,6 +222,11 @@ class CortexSkill(Skill):
                 self._send(build_order(p, decision, result))
             self.set_caption(f"{decision.verdict} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
         self._pending = waiting
+
+
+def _key(order) -> tuple:
+    """Identidad de una orden: un cierre antiguo de un mercado no debe borrar otra orden abierta de ese mismo mercado."""
+    return (order.symbol, order.pattern_key, order.tbr_zone, order.tbr_day, order.entry_ts)
 
 
 def _when(p: dict) -> int:
