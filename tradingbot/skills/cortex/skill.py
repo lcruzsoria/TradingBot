@@ -5,9 +5,11 @@ import time
 
 from ..bias import Direction, TradeFilter
 from ...core import Event, Skill, register_skill
+from ...envconfig import EnvConfig
 from .order import build_calendar_order, build_order
 from ..setup import store
 from ..setup.positions import resolve, trackable
+from ..feed.skill import sweep_settings
 from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
 
 MAX_PENDING = 500
@@ -38,6 +40,10 @@ class CortexSkill(Skill):
         self._biases: dict[str, dict] = {}              # mercado -> su último sesgo (gráfico o barrido)
         self._pending: list[dict] = []                 # patrones (y señales de calendario) que esperan a su sesgo o al barrido
         self._round: dict | None = None                 # vuelta del barrido de la watchlist en curso
+        env = self.services.env
+        app = (self.services.app_cfg or {}).get("app", {})
+        every = sweep_settings(env.section("feed") if env is not None else EnvConfig(), app)[0]
+        self._sweeping = every > 0 and bool(app.get("watchlist"))     # con barrido, solo se decide al cerrar cada vuelta
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
@@ -122,7 +128,7 @@ class CortexSkill(Skill):
         late = (r["ended"] is not None and now - r["ended"] > ROUND_WAIT_SECONDS) or now - r["since"] > ROUND_MAX_SECONDS
         if complete or late:
             self._round = None
-            self._decide()
+            self._decide(closing=True)
 
     def tick(self) -> None:
         self._check_round()
@@ -183,11 +189,13 @@ class CortexSkill(Skill):
             self._send(build_calendar_order(payload, result, reason))
         self.set_caption(f"{'GO' if allowed else 'NO GO'} {direction.capitalize()} calendario")
 
-    def _decide(self) -> None:
+    def _decide(self, closing: bool = False) -> None:
         """Valida cada patrón pendiente con el sesgo de su mercado; si es GO, le pasa la orden a Setup.
 
-        Mientras una vuelta del barrido está en curso no se decide nada: al terminar se deciden todos los mercados juntos."""
-        if self._round is not None:
+        Mientras una vuelta del barrido está en curso no se decide nada: al terminar se deciden todos los mercados juntos.
+        Con el barrido activo tampoco se decide fuera de una vuelta (p. ej. la señal del gráfico tras refrescarlo): el barrido
+        repasa ese mismo mercado, y decidirlo antes que los demás le quitaría la posición a señales anteriores de otros mercados."""
+        if self._round is not None or (self._sweeping and not closing):
             return
         waiting = []
         for p in sorted(self._pending, key=_when):                # en orden de hora: así se decidiría en directo

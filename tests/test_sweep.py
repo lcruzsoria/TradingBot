@@ -168,3 +168,35 @@ def test_el_grafico_sigue_en_directo_con_el_barrido():
     skill.tick()
     chart = [e.payload for e in out[n:] if e.topic == "candles.loaded" and not e.payload.get("background")]
     assert len(chart) == 1 and chart[0]["refresh"] and chart[0]["reason"] == "live"
+
+
+def test_con_barrido_la_senal_del_grafico_espera_a_la_vuelta():
+    """Tras una suspensión, el gráfico se refresca antes que el barrido: decidirlo solo le quitaría la posición a señales
+    anteriores de otros mercados (una sola posición en toda la cuenta)."""
+    bus, decisions = EventBus(), []
+    bus.subscribe("t", "cortex.decision", decisions.append)
+    cfg = {"app": {"timeframe": "15m", "watchlist": ["EURUSD", "XAUUSD"]}}
+    manager = SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "cortex"}])
+    manager.start()
+
+    def hit(ts):
+        return PatternHit("p", "Patrón", "long", 13, 100.0, "", {"stop": 95.0, "target": 115.0}, ts)
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit(2_000)}, source="pattern")
+    bus.publish("bias.updated", {"result": bias(), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")   # el del gráfico
+    time.sleep(0.3)
+    assert decisions == []                                              # fuera de una vuelta no se decide
+    mark = {"background": True, "sweep": 3}
+    bus.publish("feed.sweep", {"stage": "start", "id": 3, "symbols": ["EURUSD", "XAUUSD"]}, source="feed")
+    bus.publish("pattern.detected", {"symbol": "XAUUSD", "timeframe": "15m", "tbr": TBR, "hit": hit(1_000), **mark},
+                source="pattern")
+    for symbol in ("EURUSD", "XAUUSD"):
+        bus.publish("bias.updated", {"result": bias(), "symbol": symbol, "timeframe": "15m", **mark}, source="bias")
+        bus.publish("pattern.swept", {"symbol": symbol, "timeframe": "15m", **mark}, source="pattern")
+    bus.publish("feed.sweep", {"stage": "end", "id": 3, "loaded": ["EURUSD", "XAUUSD"], "failed": {}}, source="feed")
+    deadline = time.time() + 3
+    while len(decisions) < 2 and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    first, second = (d.payload for d in decisions)
+    assert first["symbol"] == "XAUUSD" and first["decision"].allowed       # el de las 09:00 va antes que el de las 10:00
+    assert second["symbol"] == "EURUSD" and not second["decision"].allowed
