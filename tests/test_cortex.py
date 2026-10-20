@@ -140,7 +140,7 @@ def test_con_una_posicion_abierta_no_se_abre_otra_hasta_que_cierre():
     assert [d.payload["decision"].allowed for d in decisions] == [True, False]
     assert "ya hay una posición abierta en EURUSD" in decisions[1].payload["decision"].reason and len(orders) == 1
     o = orders[0].payload["order"]
-    assert (o.entry_ts, o.close_ts) == (1_000_000, 1_000_000 + 24 * 3600)           # Setup puede seguirla: stop, objetivo o 24 h
+    assert (o.entry_ts, o.close_ts) == (1_000_000, 1_036_800)           # Setup puede seguirla: stop, objetivo o el fin de sesión (17:00 NY)
     bus.publish("setup.closed", {"order": o, "closed": None, "sent": False}, source="setup")      # la posición cierra
     time.sleep(0.2)
     otra = ActiveTbr("LONDON", "London", date(2026, 10, 7), 105.0, 95.0, -0.5, 9.5)                 # otra sesión
@@ -247,3 +247,18 @@ def test_el_cierre_de_una_orden_antigua_no_libera_otra_abierta_del_mismo_mercado
     busy = cortex._busy("XAUUSD")
     manager.stop()
     assert busy is london
+
+
+def test_todo_trade_se_cierra_antes_del_fin_de_sesion_17_o_18_h_ny():
+    from datetime import datetime, timezone
+    from tradingbot.skills.cortex.order import session_close_ts
+
+    def server(day, h, m=0):                                    # servidor = NY + 7 h
+        return int(datetime(2026, 10, day, h, m, tzinfo=timezone.utc).timestamp()) + 7 * 3600
+
+    assert session_close_ts("EURUSD", server(20, 3)) == server(20, 17)            # resto: 17:00 NY del mismo día
+    assert session_close_ts("NAS100.r", server(20, 3)) == server(20, 18)          # índices americanos: 18:00 NY
+    assert session_close_ts("EURUSD", server(20, 20)) == server(21, 17)           # Asia (20:00 NY): hasta el día siguiente
+    assert session_close_ts("GBPUSD", server(20, 17)) == server(21, 17)           # a la hora exacta: ya es la sesión siguiente
+    assert session_close_ts("US30", server(20, 17, 30)) == server(20, 18)
+    assert session_close_ts("EURUSD", server(20, 18)) - server(20, 18) < 24 * 3600

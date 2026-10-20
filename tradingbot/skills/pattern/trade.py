@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..cortex.order import DEFAULT_AHEAD, session_close_ts
 from .patterns import Figure
-
-MAX_HOLD_SECONDS = 24 * 3600          # igual que en cortex/order.py
 
 
 def outcome(h: np.ndarray, l: np.ndarray, start: int, direction: str, stop: float, target: float,
@@ -30,7 +29,7 @@ def outcome(h: np.ndarray, l: np.ndarray, start: int, direction: str, stop: floa
 def position_figure(ctx, key: str, zone: str, direction: str, t: int, entry: float, stop: float, target: float,
                     label: str) -> Figure:
     """Posición para el gráfico: de la vela de la entrada a la del cierre (o a la última vela si sigue abierta)."""
-    limit = int(np.searchsorted(ctx.ts, int(ctx.ts[t]) + MAX_HOLD_SECONDS, "left")) - 1       # 24 h tras la entrada
+    limit = int(np.searchsorted(ctx.ts, session_close_ts(ctx.symbol, int(ctx.ts[t]), ctx.ahead or DEFAULT_AHEAD), "left")) - 1   # antes del fin de sesión
     kind, idx = outcome(ctx.high, ctx.low, t, direction, stop, target, limit)
     tf_sec = ctx.tf_minutes * 60
     state = {"target": "objetivo", "stop": "stop"}.get(kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")

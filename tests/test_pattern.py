@@ -358,7 +358,7 @@ def test_plazo_de_ny_open_hasta_las_1800():
     assert manager.skills["pattern"].state.value == "error" and "HH:MM" in manager.skills["pattern"].note
 
 
-def test_la_posicion_dibujada_se_cierra_por_tiempo_a_las_24_h():
+def test_la_posicion_dibujada_se_cierra_por_tiempo_al_fin_de_sesion():
     import numpy as np
     from tradingbot.skills.pattern.trade import position_figure
     n = 120
@@ -366,10 +366,10 @@ def test_la_posicion_dibujada_se_cierra_por_tiempo_a_las_24_h():
     flat = np.full(n, 100.0)
     ctx = PatternContext("X", "15m", 15, ts, flat, flat + 0.1, flat - 0.1, flat, TBR, 0, n - 1, True)
     pos = position_figure(ctx, "p", "NY Open", "long", 2, 100.0, 90.0, 120.0, "Patrón")
-    assert pos.state == "tiempo" and pos.x1_ts == int(ts[2 + 95]) + 900              # 96 velas M15 (de la 2 a la 97) = 24 h; ya no sigue abierta
+    assert pos.state == "tiempo" and pos.x1_ts == 86_400              # cierra con la última vela antes de las 17:00 NY (= 24:00 de servidor aquí); ya no sigue abierta
     corta = position_figure(PatternContext("X", "15m", 15, ts[:50], flat[:50], flat[:50] + 0.1, flat[:50] - 0.1, flat[:50], TBR, 0, 49, True),
                             "p", "NY Open", "long", 2, 100.0, 90.0, 120.0, "Patrón")
-    assert corta.state == "abierta"                                                  # los datos acaban antes de las 24 h
+    assert corta.state == "abierta"                                                  # los datos acaban antes del fin de sesión
 
 
 def test_desde_el_inicio_del_forwardtest_se_avisa_tambien_de_las_tbr_pasadas(registry):

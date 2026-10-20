@@ -6,7 +6,10 @@ import time
 from ..bias import Direction, TradeFilter
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
-from .order import build_calendar_order, build_order
+from functools import partial
+
+from .order import build_calendar_order, build_order, session_close_ts
+from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES
 from ..setup import store
 from ..setup.positions import resolve, trackable
 from ..feed.skill import sweep_settings
@@ -49,6 +52,10 @@ class CortexSkill(Skill):
         self._open: dict[tuple, object] = {}            # orden abierta (por su identidad, no por mercado): hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
+        levels = env.section("levels") if env is not None else EnvConfig()      # fin de sesión = inicio del día de trading
+        self._close_ts = partial(session_close_ts, day_start=levels.get("DAY_START", DEFAULT_DAY_START),
+                                 index_day_start=levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START),
+                                 indices=levels.get_list("US_INDICES", list(DEFAULT_US_INDICES)))
         self.scope = (self.settings.get("POSITION_SCOPE", "global") or "global").lower()   # global: una en toda la cuenta; mercado: una por mercado
         if self.scope not in ("global", "mercado"):
             self.error = f"CORTEX_POSITION_SCOPE={self.scope}: usa global o mercado"
@@ -219,7 +226,7 @@ class CortexSkill(Skill):
                                              "bias_result": result})
             if decision.allowed:
                 self._used.add((p["symbol"], p["tbr"].zone, p["tbr"].day))
-                self._send(build_order(p, decision, result))
+                self._send(build_order(p, decision, result, self._close_ts))
             self.set_caption(f"{decision.verdict} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
         self._pending = waiting
 
