@@ -176,3 +176,31 @@ def test_inicio_mal_escrito():
     with pytest.raises(ValueError, match="AAAA-MM-DD"):
         skill.on_start()
 
+
+
+def test_pinchar_el_mercado_de_una_operacion_lo_muestra_en_el_grafico(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.ui.main_window import MainWindow
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    folder = tmp_path / "ft"
+    Journal(folder, clock(2026, 9, 10)).closed(ORDER, WIN)
+    cfg = {"app": {"symbol": "XAUUSD", "timeframe": "15m", "watchlist": ["XAUUSD", ORDER.symbol]}}
+    bus, loads = EventBus(), []
+    bus.subscribe("t", "feed.load", loads.append)
+    env = EnvConfig(parse(f"STATS_FORWARD_DIR={folder}"))
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, env), [{"type": "stats"}]), cfg, "t")
+    win._on_stats_session({"stats": TradeStats(), "folder": str(folder)})
+    win.stats_btn.click()
+    dlg = win.stats_dialog
+    dlg.set_month("2026-09")
+    dlg._on_history_click(0, 0)                                          # otra columna: no cambia nada
+    assert loads == []
+    dlg._on_history_click(0, 1)                                          # el mercado del diario
+    assert loads[-1].payload["symbol"] == ORDER.symbol and win.current_symbol == ORDER.symbol
+    win._set_busy(False)
+    win.current_symbol = "XAUUSD"
+    row = next(r for r in dlg.by_symbol.rows if r[0].text().startswith(ORDER.symbol))
+    row[0].mousePressEvent(None)                                         # y el del libro «Por mercado»
+    assert len(loads) == 2 and win.current_symbol == ORDER.symbol

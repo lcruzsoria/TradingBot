@@ -92,10 +92,12 @@ class Tile(QFrame):
 class Book(QFrame):
     """Tarjeta con título, nota a la derecha, unos destacados opcionales y una tabla de filas."""
 
-    def __init__(self, title: str, note: str, headers: tuple[str, ...], highlights: bool | tuple[str, ...] = False) -> None:
+    def __init__(self, title: str, note: str, headers: tuple[str, ...], highlights: bool | tuple[str, ...] = False,
+                 on_name: Callable[[str], None] | None = None) -> None:
         super().__init__()
         self.setObjectName("Card")
         self.headers = headers
+        self.on_name = on_name            # si está, el nombre de cada fila se puede pinchar (p. ej. el mercado)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 11, 14, 10)
         lay.setSpacing(8)
@@ -141,8 +143,9 @@ class Book(QFrame):
         label.setStyleSheet(f"color: {color};" if name != "-" else "")
         note.setText(sub)
 
-    def set_rows(self, rows: list[list[tuple[str, str | None]]]) -> None:
-        """Cada fila: (texto, color) por columna. La primera columna va a la izquierda y el resto a la derecha."""
+    def set_rows(self, rows: list[list[tuple]]) -> None:
+        """Cada fila: (texto, color) por columna. La primera columna va a la izquierda y el resto a la derecha; puede llevar
+        una clave, (texto, color, clave), que es lo que se le pasa a `on_name` al pincharla."""
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w is not None:
@@ -157,7 +160,12 @@ class Book(QFrame):
             line.setFixedHeight(1)
             self.grid.addWidget(line, 2 * i + 1, 0, 1, len(self.headers))
             self.rows.append([self._put(2 * i + 2, col, text, color, "BookName" if col == 0 else "BookCell")
-                              for col, (text, color) in enumerate(row)])
+                              for col, (text, color, *_key) in enumerate(row)])
+            if self.on_name is not None and len(row[0]) > 2:   # (texto, color, clave): la clave es lo que se pincha
+                name = self.rows[-1][0]
+                name.setCursor(Qt.CursorShape.PointingHandCursor)
+                name.setToolTip(f"Ver {row[0][2]} en el gráfico")
+                name.mousePressEvent = lambda _e, key=row[0][2]: self.on_name(key)
         if not rows:
             self._put(1, 0, self.empty_text, None, "Muted")
 
@@ -188,6 +196,7 @@ class StatsDialog(QDialog):
     """Ventana flotante (no modal) del forwardtest; se abre y se cierra con el botón Forwardtest del área Stats."""
 
     hidden = QtSignal()
+    market_clicked = QtSignal(str)       # se ha pinchado un mercado (Diario o «Por mercado»): la ventana principal lo muestra
     reset_requested = QtSignal()         # «Nueva etapa»: las cifras las lleva la skill Stats, que es quien la anota
 
     def __init__(self, parent, stats: TradeStats, to_ny: Callable[[int], datetime],
@@ -280,7 +289,8 @@ class StatsDialog(QDialog):
         self.by_pattern = Book("Por patrón", "el patrón que dio la entrada", ("Patrón",) + GROUP_HEADERS, highlights=True)
         self.by_side = Book("Por lado", "largos contra cortos", ("Lado",) + GROUP_HEADERS)
         self.by_session = Book("Por sesión", "la sesión a la hora de entrada (NY)", ("Sesión",) + GROUP_HEADERS)
-        self.by_symbol = Book("Por mercado", "todos los mercados de la lista", ("Mercado",) + GROUP_HEADERS)
+        self.by_symbol = Book("Por mercado", "todos los mercados de la lista · pincha uno para verlo", ("Mercado",) + GROUP_HEADERS,
+                              on_name=self.market_clicked.emit)
         self.by_bias = Book("Por sesgo", "el sesgo vigente al entrar", ("Sesgo",) + GROUP_HEADERS)
         self.by_reason = Book("Señales de Cortex", "por qué dio GO o NO GO", ("Motivo", "Veredicto", "Señales", "% del total"))
         self.signals_by_pattern = Book("Señales por patrón", "cuántas pasan el filtro de Cortex",
@@ -292,6 +302,7 @@ class StatsDialog(QDialog):
         journal = Book("Diario", "las más recientes arriba", ())
         self.history = self._table(("Entrada (NY)", "Mercado", "Lado", "Patrón", "Sesión", "Salida", "Duración", "Resultado"))
         self.history.setMinimumHeight(220)
+        self.history.cellClicked.connect(self._on_history_click)
         journal.layout().addWidget(self.history)
         lay.addWidget(journal)
         lay.addStretch(1)
@@ -487,7 +498,7 @@ class StatsDialog(QDialog):
             if g.open:
                 label += f'  <span style="color:{theme.WARN}">· {g.open} abierta{"s" if g.open != 1 else ""}</span>'
             cells = group_cells(g)
-            rows.append([(label, theme.MUTED if not g.n and not g.open else None)] + cells)
+            rows.append([(label, theme.MUTED if not g.n and not g.open else None, g.name)] + cells)
         book.set_rows(rows)
 
     def _fill_patterns(self, s: TradeStats) -> None:
@@ -523,6 +534,12 @@ class StatsDialog(QDialog):
             item.setForeground(QBrush(QColor(color)))
         table.setItem(row, col, item)
 
+    def _on_history_click(self, row: int, col: int) -> None:
+        """Pinchar el mercado de una operación del diario lo muestra en el gráfico."""
+        item = self.history.item(row, 1)
+        if col == 1 and item is not None and item.data(Qt.ItemDataRole.UserRole):
+            self.market_clicked.emit(str(item.data(Qt.ItemDataRole.UserRole)))
+
     def _fill_history(self, trades: list[Trade]) -> None:
         rows = sorted(trades, key=lambda t: t.order.entry_ts or 0, reverse=True)     # las más recientes arriba
         self.history.setRowCount(len(rows))
@@ -532,6 +549,9 @@ class StatsDialog(QDialog):
             side_color = theme.BULL if o.direction == "long" else theme.BEAR
             self._cell(self.history, i, 0, when)
             self._cell(self.history, i, 1, f"{o.symbol} {display_label(o.timeframe)}")
+            market = self.history.item(i, 1)
+            market.setData(Qt.ItemDataRole.UserRole, o.symbol)
+            market.setToolTip(f"Ver {o.symbol} en el gráfico")
             self._cell(self.history, i, 2, "Largo" if o.direction == "long" else "Corto", side_color)
             self._cell(self.history, i, 3, o.pattern)
             self._cell(self.history, i, 4, self._session(t))

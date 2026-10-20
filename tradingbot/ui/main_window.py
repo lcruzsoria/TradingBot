@@ -616,6 +616,7 @@ class MainWindow(QMainWindow):
                                             load_month=self._load_stats_month)
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
             self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
+            self.stats_dialog.market_clicked.connect(self._on_market_clicked)    # el mercado pinchado pasa al gráfico
         self.stats_dialog.popup_at(self.stats_btn)
 
     def _refresh_stats(self) -> None:
