@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self.manager = manager
         self.bridge = UiBridge(bus)
         self.watchlist: list[str] = [s.strip() for s in app_cfg["app"].get("watchlist", [])]
+        self.strategy = app_cfg["app"].get("strategy") or ""      # perfil de estrategia (calendario): dibuja las entradas de su backtest
         self.candles = None
         self.connected = False
         self._busy = False
@@ -340,7 +341,7 @@ class MainWindow(QMainWindow):
         self.pos_btn.setCheckable(True)
         self.pos_btn.setToolTip("Dibuja las entradas de los patrones como la herramienta de posición de TradingView: zona verde hasta el "
                                 "objetivo, zona roja hasta el stop, con el R:R.")
-        self.pos_btn.setVisible(pattern_skill is not None)
+        self.pos_btn.setVisible(pattern_skill is not None or self.strategy == "calendario")
         self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
@@ -706,6 +707,8 @@ class MainWindow(QMainWindow):
         """La skill Stats publica una copia de las cifras del forwardtest cada vez que cambian."""
         self.stats = p["stats"]
         self._paint_trades()
+        if self.strategy == "calendario":
+            self._apply_fibs()                                   # sus operaciones en directo salen en el gráfico
         if p.get("folder") and (self.stats_journal is None or str(self.stats_journal.folder) != p["folder"]):
             self.stats_journal = Journal(p["folder"])
         self._refresh_stats()
@@ -716,6 +719,8 @@ class MainWindow(QMainWindow):
             self.log(f"stats: {self.backtest_error}", tone="warn")
         elif self.backtest is not None:
             self.log(f"stats: backtest cargado ({', '.join(g.name for g in self.backtest.groups)})")
+        if self.strategy == "calendario":
+            self._apply_fibs()                                   # las entradas del gráfico salen de este backtest
         if self.backtest_dialog is not None:
             self.backtest_dialog.set_backtest(self.backtest, self.backtest_error)
 
@@ -1165,7 +1170,35 @@ class MainWindow(QMainWindow):
                 continue                                        # fibo en curso de una TBR que ya dio su entrada
             fibs.append(fib)
         self.chart.set_fibs(fibs)
-        self.chart.set_positions(sorted(shown, key=lambda p: p["x0"]))
+        self.chart.set_positions(sorted(shown + self._calendar_positions(), key=lambda p: p["x0"]))
+
+    def _calendar_positions(self) -> list[dict]:
+        """Perfil Calendario: todas las entradas del backtest dentro de las velas cargadas y, encima, las del forwardtest."""
+        if self.strategy != "calendario" or self.candles is None or not len(self.candles):
+            return []
+        from ..skills.calendario.chart import backtest_positions
+        df = self.candles
+        ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
+        n = len(ts)
+        out: dict[int, dict] = {}
+        group = self.backtest.group("calendario") if self.backtest is not None else None
+        if group is not None:
+            for pos in backtest_positions(group, self.charted_symbol, ts, df["open"].to_numpy(), high, low, self.ny_shift):
+                out[pos["x0"]] = pos
+        for trade in self.stats.open + self.stats.done:         # lo que el bot hizo en directo manda sobre el backtest
+            o = trade.order
+            if o.pattern_key != "calendario" or o.symbol != self.charted_symbol or not o.entry_ts:
+                continue
+            x0 = int(np.searchsorted(ts, o.entry_ts, "left"))
+            if x0 >= n or int(ts[x0]) != o.entry_ts:
+                continue
+            c = trade.closed
+            end = c.exit_ts if c else o.close_ts
+            state = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
+            out[x0] = {"x0": x0, "x1": min(int(np.searchsorted(ts, end, "left")), n + 4) if end else n + 4,
+                       "entry": o.price, "stop": o.stop, "target": o.target, "direction": o.direction, "state": state,
+                       "label": "Calendario", "decision": "GO", "reason": "forwardtest", "session": ("calendario", o.entry_ts)}
+        return list(out.values())
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:
         """GO / NO GO que habría dado Cortex a una entrada en la vela `index`, con el sesgo que tenía el bot en esa vela."""

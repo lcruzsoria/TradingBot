@@ -12,7 +12,7 @@ from .skills.bias import BiasEngine
 from .core import EventBus, Services, SkillManager
 from . import envconfig, settings
 from .config import (DEFAULT_CONFIG_FILE, DEFAULT_ENV_FILE, DEMO_PROFILE, PROJECT_ROOT, ConfigError,
-                     load_app_config, load_profiles, profile_dir, select_profile)
+                     load_app_config, load_profiles, profile_dir, select_profile, strategy_skills)
 from .timeframes import TIMEFRAMES
 
 
@@ -116,7 +116,18 @@ def main(argv=None) -> int:
             cfg["app"]["data_dir"] = str(profile_dir(profile.name))
             cfg["app"]["profiles"] = [(p.name, p.display) for p in profiles.values()]
             cfg["app"]["profile_name"] = profile.name
-        cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"])
+            cfg["app"]["strategy"] = profile.strategy
+            cfg["app"]["capital"], cfg["app"]["currency"] = profile.capital, profile.currency
+        strategy = cfg["app"].get("strategy") or ""
+        if strategy:                                              # perfil de estrategia: solo sus skills y sus mercados
+            cfg["skills"] = strategy_skills(cfg["skills"], strategy)
+            own = env.section(strategy).get_list("SYMBOLS", []) or cfg["app"]["watchlist"]
+            cfg["app"]["watchlist"] = settings.load_watchlist(own, profile=cfg["app"]["profile_name"], common=False)
+            if args.symbol is None:                               # arranca en uno de sus mercados
+                cfg["app"]["symbol"] = next((s for s in cfg["app"]["watchlist"] if s.lower().startswith(cfg["app"]["symbol"].lower())),
+                                            cfg["app"]["watchlist"][0])
+        else:
+            cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"])
     except (ConfigError, ValueError) as exc:
         QMessageBox.critical(None, "TradingBot", f"{exc}\n\nPuedes probar la interfaz sin MT5 con  --demo  (o APP_DEMO=true en tradingbot.env)")
         return 2

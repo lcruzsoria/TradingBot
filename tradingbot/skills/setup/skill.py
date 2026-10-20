@@ -64,6 +64,9 @@ class SetupSkill(Skill):
         self.file = store.file_for(self.services.app_cfg)
         self.positions: list = [o for o in store.load(self.file) if trackable(o)]   # órdenes simuladas abiertas (en disco)
         self.account = account.VirtualAccount(account.file_for(self.services.app_cfg))
+        app = (self.services.app_cfg or {}).get("app", {})
+        if app.get("capital"):                          # perfil con capital simulado propio (MT5_<PERFIL>_CAPITAL): no depende del saldo de MT5
+            self.account.start(float(app["capital"]), app.get("currency") or "USD")
         self.set_caption(f"{len(self.positions)} posición(es) abierta(s)" if self.positions else "esperando a Cortex")
         self._consolidate()                             # lo que haya terminado mientras el bot estaba parado
         self._publish_account()

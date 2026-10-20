@@ -322,3 +322,43 @@ def test_la_tarjeta_operaciones_muestra_solo_el_dia_en_curso(tmp_path, monkeypat
     text = win.stat_trades.value.text()
     assert "1 G" in text and "1 P" in text and "1 B" in text                     # la de hace dos días no cuenta
     assert win.stat_trades.sub.text() == "3 cerradas · 1 abierta hoy · +1.00 R"
+
+
+# -- perfil Calendario: la cuenta de PUPrime, solo con su estrategia y 25.000 USD simulados --------------------------
+def test_un_perfil_con_base_usa_la_cuenta_de_otro_y_trae_su_estrategia_y_capital(tmp_path):
+    from tradingbot.config import load_profiles, strategy_skills
+    env = tmp_path / ".env"
+    env.write_text("MT5_PUPRIME_LOGIN=7\nMT5_PUPRIME_SERVER=PUPrime-Demo\nMT5_PUPRIME_PASSWORD=x\n"
+                   "MT5_CALENDARIO_BASE=puprime\nMT5_CALENDARIO_NAME=Calendario\nMT5_CALENDARIO_STRATEGY=Calendario\n"
+                   "MT5_CALENDARIO_CAPITAL=25000\n", encoding="utf-8")
+    profiles, _ = load_profiles(env)
+    cal, pup = profiles["calendario"], profiles["puprime"]
+    assert (cal.login, cal.server, cal.password) == (pup.login, pup.server, pup.password)
+    assert (cal.strategy, cal.capital, cal.currency, cal.display) == ("calendario", 25_000.0, "USD", "Calendario")
+    assert pup.strategy == "" and pup.capital is None
+    kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "calendario")
+    assert [s["type"] for s in kept] == ["cortex", "calendario"]
+
+
+def test_la_base_tiene_que_ser_otro_perfil(tmp_path):
+    from tradingbot.config import ConfigError, load_profiles
+    env = tmp_path / ".env"
+    env.write_text("MT5_A_BASE=nadie\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_profiles(env)
+
+
+def test_el_capital_simulado_fijo_no_depende_del_saldo_de_mt5(tmp_path):
+    acc = VirtualAccount(tmp_path / "cuenta.json")
+    assert acc.start(25_000, "USD") and acc.initial == 25_000 and acc.currency == "USD"
+    assert not acc.start(100_000, "EUR") and VirtualAccount(tmp_path / "cuenta.json").initial == 25_000
+
+
+def test_la_lista_de_mercados_de_un_perfil_de_estrategia_no_hereda_la_comun(tmp_path):
+    from tradingbot import settings
+    path = tmp_path / "s.json"
+    settings.save_watchlist(["EURUSD", "XAUUSD"], path)
+    assert settings.load_watchlist(["NAS100", "DJ30"], path, profile="calendario", common=False) == ["NAS100", "DJ30"]
+    assert settings.load_watchlist(["NAS100", "DJ30"], path, profile="calendario") == ["EURUSD", "XAUUSD"]
+    settings.save_watchlist(["DJ30"], path, profile="calendario")
+    assert settings.load_watchlist(["NAS100"], path, profile="calendario", common=False) == ["DJ30"]

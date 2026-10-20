@@ -87,3 +87,30 @@ def test_ajustes_no_validos_ponen_la_skill_en_error(env):
     loaded(bus, candles("2026-10-12 01:45", n=2))
     manager.stop()
     assert manager.skills["calendario"].state.value == "error"
+
+
+# -- entradas del backtest en el gráfico (perfil Calendario) ---------------------------------------------------------
+def test_las_entradas_del_backtest_se_dibujan_solo_donde_hay_velas():
+    import numpy as np
+    from tradingbot.skills.calendario.chart import backtest_positions, market_key
+    from tradingbot.skills.stats.backtest import Group
+
+    def minutes(ny):                                          # minutos desde 1970 de una hora de NY
+        return int(datetime.fromisoformat(ny).replace(tzinfo=timezone.utc).timestamp() // 60)
+
+    raw = {"cats": {"m": ["NAS100.r", "SP500.r"], "o": ["objetivo", "stop", "tiempo"]}, "dias": [0], "hora": 2, "stop": 1.0,
+           "rr": 2.0, "ops": {"m": [0, 0, 0, 1], "d": [0, 0, 1, 0], "o": [0, 2, 0, 0],
+                              "e": [minutes("2026-10-19 02:00"), minutes("2026-10-12 02:00"), minutes("2026-10-19 02:00"),
+                                    minutes("2026-10-19 02:00")],
+                              "x": [minutes("2026-10-19 10:00")] * 3 + [minutes("2026-10-19 10:00")],
+                              "r": [1.9, 0.1, -1, 1], "k": [0.0] * 4}}
+    group = Group("calendario", "Calendario", raw)
+    df = candles("2026-10-19 01:00", n=40)                    # 01:00-11:00: solo está cargado el lunes 19 (el 12 queda fuera)
+    ts = df["ts"].to_numpy()
+    out = backtest_positions(group, "NAS100.s", ts, df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), AHEAD)
+    assert len(out) == 1                                      # ni el lunes sin velas, ni el corto, ni otro mercado
+    pos = out[0]
+    assert ts[pos["x0"]] == int(datetime.fromisoformat("2026-10-19 02:00").replace(tzinfo=timezone.utc).timestamp()) + AHEAD
+    assert pos["entry"] == 104.0 and pos["stop"] == pytest.approx(104 * 0.99) and pos["target"] == pytest.approx(104 * 1.02)
+    assert pos["state"] == "objetivo" and pos["x1"] > pos["x0"] and pos["direction"] == "long"
+    assert market_key("NAS100.r") == market_key("USTEC.s") == "nas100" and market_key("DJ30.r") == market_key("US30")

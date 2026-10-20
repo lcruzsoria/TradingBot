@@ -56,6 +56,9 @@ class Mt5Profile:
     terminal_path: str | None = None
     title: str = ""          # nombre que se ve en el selector (MT5_<PERFIL>_NAME); vacío = el del perfil
     symbols: tuple[tuple[str, str], ...] = ()   # equivalencias propias (MT5_<PERFIL>_SYMBOLS): (nombre en el bot, del broker)
+    strategy: str = ""       # MT5_<PERFIL>_STRATEGY: el perfil solo opera esa estrategia (calendario) con sus mercados
+    capital: float | None = None   # MT5_<PERFIL>_CAPITAL: capital simulado inicial, en vez del saldo de la cuenta de MT5
+    currency: str = "USD"    # MT5_<PERFIL>_CURRENCY: moneda de ese capital simulado
 
     @property
     def symbol_map(self) -> dict[str, str]:
@@ -73,6 +76,15 @@ class Mt5Profile:
     @property
     def label(self) -> str:
         return f"{self.display} - {self.login} @ {self.server}"
+
+
+STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr")}   # skills que un perfil de estrategia no usa (solo opera la suya)
+
+
+def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:
+    """Las skills de un perfil de estrategia: sin las de los patrones (Calendario no opera patrones)."""
+    off = STRATEGY_SKILLS_OFF.get(strategy, ())
+    return [s for s in skills if s.get("type") not in off]
 
 
 def profile_dir(name: str) -> Path:
@@ -115,20 +127,32 @@ def load_profiles(path: Path = DEFAULT_ENV_FILE) -> tuple[dict[str, Mt5Profile],
     values = parse_env_file(path)
     terminal_path = values.get("MT5_PATH") or None
     profiles: dict[str, Mt5Profile] = {}
-    for key in values:
-        match = re.fullmatch(r"MT5_(.+)_LOGIN", key)
-        if not match:
-            continue
-        tag = match.group(1)
-        raw_login = values[key]
-        server = values.get(f"MT5_{tag}_SERVER", "")
+    tags = [m.group(1) for key in values if (m := re.fullmatch(r"MT5_(.+)_LOGIN", key))]
+    tags += [m.group(1) for key in values if (m := re.fullmatch(r"MT5_(.+)_BASE", key)) and m.group(1) not in tags]
+    for tag in tags:
+        base_name = values.get(f"MT5_{tag}_BASE", "")
+        base = next((t for t in tags if t.lower() == base_name.lower() and f"MT5_{t}_LOGIN" in values), None) if base_name else None
+        if base_name and (base is None or base == tag):
+            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_BASE={base_name} no es otro perfil con MT5_<PERFIL>_LOGIN.")
+        own = base or tag                                          # la cuenta (login, servidor, contraseña) la pone el perfil base
+        raw_login = values.get(f"MT5_{own}_LOGIN", "")
+        server = values.get(f"MT5_{own}_SERVER", "")
         if not raw_login.isdigit() or not server:
-            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_LOGIN debe ser numérico y MT5_{tag}_SERVER no puede estar vacío.")
-        password = values.get(f"MT5_{tag}_PASSWORD") or os.environ.get(f"MT5_{tag}_PASSWORD") or None
-        path = values.get(f"MT5_{tag}_PATH") or terminal_path       # cada broker puede tener su propio terminal
-        profiles[tag.lower()] = Mt5Profile(tag.lower(), int(raw_login), server, password, path,
-                                           values.get(f"MT5_{tag}_NAME", ""),
-                                           parse_symbol_map(values.get(f"MT5_{tag}_SYMBOLS", ""), tag))
+            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{own}_LOGIN debe ser numérico y MT5_{own}_SERVER no puede estar vacío.")
+        password = values.get(f"MT5_{own}_PASSWORD") or os.environ.get(f"MT5_{own}_PASSWORD") or None
+        exe = values.get(f"MT5_{tag}_PATH") or values.get(f"MT5_{own}_PATH") or terminal_path   # cada broker puede tener su terminal
+        raw_symbols = values.get(f"MT5_{tag}_SYMBOLS") or values.get(f"MT5_{own}_SYMBOLS", "")
+        capital = values.get(f"MT5_{tag}_CAPITAL", "")
+        try:
+            capital_value = float(capital.replace(",", ".")) if capital else None
+        except ValueError:
+            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_CAPITAL={capital} debe ser un número.") from None
+        if capital_value is not None and capital_value <= 0:
+            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_CAPITAL debe ser mayor que 0.")
+        profiles[tag.lower()] = Mt5Profile(tag.lower(), int(raw_login), server, password, exe,
+                                           values.get(f"MT5_{tag}_NAME", ""), parse_symbol_map(raw_symbols, tag),
+                                           values.get(f"MT5_{tag}_STRATEGY", "").lower(), capital_value,
+                                           values.get(f"MT5_{tag}_CURRENCY", "USD").upper())
     if not profiles:
         raise ConfigError(f"No hay ningún perfil (MT5_<NOMBRE>_LOGIN) en {path}")
     default = (values.get("MT5_DEFAULT") or "").lower() or None
