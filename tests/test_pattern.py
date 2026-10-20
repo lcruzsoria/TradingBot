@@ -370,3 +370,29 @@ def test_la_posicion_dibujada_se_cierra_por_tiempo_a_las_24_h():
     corta = position_figure(PatternContext("X", "15m", 15, ts[:50], flat[:50], flat[:50] + 0.1, flat[:50] - 0.1, flat[:50], TBR, 0, 49, True),
                             "p", "NY Open", "long", 2, 100.0, 90.0, 120.0, "Patrón")
     assert corta.state == "abierta"                                                  # los datos acaban antes de las 24 h
+
+
+def test_desde_el_inicio_del_forwardtest_se_avisa_tambien_de_las_tbr_pasadas(registry):
+    """Con STATS_FORWARD_START, una TBR de ayer (que ya no es la activa) también da su aviso: así Cortex la decide y el
+    forwardtest recoge la operación; antes de esa fecha solo se dibuja."""
+    from datetime import timedelta
+    next_day = DAY + timedelta(days=1)
+    rows = candles_after_close([FLAT, FLAT, BREAK], tail=306 - 15)      # hasta las 12:30 NY del día siguiente
+    df = m5_frame(rows)
+    sessions = [session(NY, DAY, 9.5), session(NY, next_day, 300.5)]     # la de hoy es la activa; la de ayer, pasada
+    for start, expected in ((DAY, 1), (next_day, 0)):
+        from tradingbot.core import EventBus, Services, SkillManager
+        import tradingbot.skills  # noqa: F401
+        bus, found = EventBus(), []
+        bus.subscribe("t", "pattern.detected", found.append)
+        env = EnvConfig(parse(f"PATTERN_TYPES=rompe_high\nSTATS_FORWARD_START={start}\n"))
+        manager = SkillManager(bus, Services(None, None, {"app": {}}, env), [{"type": "pattern"}])
+        manager.start()
+        bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "5m", "df": df}, source="feed")
+        bus.publish("tbr.updated", {"symbol": "EURUSD", "timeframe": "5m", "sessions": sessions, "available": True},
+                    source="tbr")
+        time.sleep(0.4)
+        manager.stop()
+        assert len(found) == expected, start
+        if expected:
+            assert found[0].payload["tbr"].day == DAY and found[0].payload["hit"].ts == ny(DAY, 12, 10)

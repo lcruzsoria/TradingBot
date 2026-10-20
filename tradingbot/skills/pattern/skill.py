@@ -1,6 +1,8 @@
 """Skill Pattern: identifica los patrones de entrada dentro de la TBR activa (Cortex los valida después con el sesgo)."""
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 
 from ...clock import server_minus_ny
@@ -60,6 +62,7 @@ class PatternSkill(Skill):
         self.history_days = self.settings.get_int("HISTORY_DAYS", DEFAULT_HISTORY_DAYS)
         if self.history_days < 1:
             raise ValueError(f"PATTERN_HISTORY_DAYS={self.history_days} debe ser 1 o más.")
+        self.since = forward_start(self.services.env)       # STATS_FORWARD_START: desde ahí se avisa de todas las TBR
         order = [z.upper() for z in self.settings.get_list("ZONE_ORDER", list(DEFAULT_ZONE_ORDER))]
         self.extend = [z.upper() for z in self.settings.get_list("EXTEND", list(DEFAULT_EXTEND))]
         unknown_zone = [z for z in self.extend if z not in order]
@@ -167,12 +170,26 @@ class PatternSkill(Skill):
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
             self._evaluate_tbr(c, item, window, ahead, results, figures, errors, unavailable, tfs)
-        if self.history_days > 1 and not background:    # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
-            skip = {(r.key, r.day) for r in recents}
-            for item in history_tbrs(t["sessions"], self.zones, skip, self.history_days):
-                window = window_for(item, self.order, ahead, self.extend, self.until)
-                if window is not None and window.end_ts is not None:
-                    self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
+        # TBR pasadas. Las de los últimos PATTERN_HISTORY_DAYS días se dibujan (fibos y entradas, solo en el gráfico); las
+        # del inicio del forwardtest (STATS_FORWARD_START) en adelante además se avisan, para que Cortex las decida y el
+        # forwardtest recoja todas las operaciones de todos los mercados, también lo que pasó con el bot cerrado.
+        skip = {(r.key, r.day) for r in recents}
+        past = history_tbrs(t["sessions"], self.zones, skip, 100_000)
+        drawn_from = max((r.day for r in recents), default=None)
+        drawn_from = drawn_from.toordinal() - self.history_days + 1 if drawn_from else 0
+        for item in past:
+            live = self.since is not None and item.day >= self.since
+            drawn = not background and self.history_days > 1 and item.day.toordinal() >= drawn_from
+            if not (live or drawn):
+                continue
+            window = window_for(item, self.order, ahead, self.extend, self.until)
+            if window is None or window.end_ts is None:
+                continue
+            if live:
+                self._evaluate_tbr(c, item, window, ahead, results, figures if drawn else [], errors, unavailable, tfs)
+            else:
+                self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
+        results.sort(key=lambda r: r[1].ts or 0)           # en orden de hora: así los decide Cortex
         hits = [h for _t, h in results]
         window = windows[tbr.key]
         self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": tbr, "hits": hits, "errors": errors,
@@ -244,3 +261,12 @@ class PatternSkill(Skill):
                 figures += pattern.figures(ctx)
             except Exception as exc:                    # un patrón con error no debe tumbar a los demás
                 errors.append(f"{pattern.title or key}: {exc}")
+
+
+def forward_start(env) -> date | None:
+    """Día (de NY) de STATS_FORWARD_START, o None si no hay o no es una fecha (la skill Stats ya avisa de ese error)."""
+    raw = env.section("STATS").get("FORWARD_START", "") if env is not None else ""
+    try:
+        return date.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None

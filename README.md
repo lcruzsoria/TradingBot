@@ -38,8 +38,13 @@ barrido se hace nada más conectar, y la lista se actualiza al editar la watchli
 patrones, deciden GO / NO GO y siguen las posiciones simuladas de cada mercado, y el forwardtest (Stats) recoge las
 operaciones de todos.
 
-- Las velas del barrido van marcadas como `background`: **el gráfico no se mueve** ni cambian el sesgo, las TBR o los niveles
+- Las velas del barrido van marcadas como `background` y la ventana no las pinta: **el gráfico sigue con su mercado en
+  directo** (añade cada vela nueva, como siempre) y el barrido no le cambia el mercado, el sesgo, las TBR ni los niveles
   que se ven. Los patrones, los GO / NO GO y las operaciones de cualquier mercado sí se anotan en el Registro.
+- **Desde el inicio del forwardtest** (`STATS_FORWARD_START`, 2026-10-19) Pattern avisa de los patrones de **todas** las
+  TBR cerradas, no solo de la última de cada zona: así Cortex decide y Setup simula también lo que pasó con el bot cerrado,
+  y la ventana Forwardtest suma y lista (diario de operaciones) todas las operaciones de todos los mercados desde ese día.
+  Lo ya anotado no se repite. El barrido llega hasta `FEED_SWEEP_DAYS` días atrás (y el gráfico, hasta `TBR_DAYS`).
 - Bias calcula el sesgo de cada mercado del barrido con sus propios TDO y Midnight (ajustes `LEVELS_DAY_START`,
   `LEVELS_INDEX_DAY_START` y `LEVELS_US_INDICES`) y Cortex valida cada patrón con el sesgo **de su mercado**.
 - **Orden de las decisiones.** Con `CORTEX_POSITION_SCOPE=global` (una sola posición en toda la cuenta) importa quién llega

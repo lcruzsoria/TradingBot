@@ -153,3 +153,18 @@ def test_cortex_decide_la_vuelta_entera_en_orden_de_hora():
     assert first["symbol"] == "XAUUSD" and first["decision"].allowed       # el primero en el tiempo se queda la posición
     assert second["symbol"] == "NAS100" and not second["decision"].allowed  # una sola posición en toda la cuenta
     assert "ya hay una posición abierta en XAUUSD" in second["decision"].reason
+
+
+def test_el_grafico_sigue_en_directo_con_el_barrido():
+    skill, src, out = feed()
+    bars = {"ts": 1_790_000_000 + 900 * 199}
+
+    def last_bar(symbol, tf):
+        return bars["ts"]
+    src.last_bar_ts = last_bar
+    skill.handle(Event("feed.load", {"symbol": "EURUSD", "timeframe": "5m"}, "ui"))
+    bars["ts"] += 900                                                   # el terminal ya tiene una vela nueva
+    n = len(out)
+    skill.tick()
+    chart = [e.payload for e in out[n:] if e.topic == "candles.loaded" and not e.payload.get("background")]
+    assert len(chart) == 1 and chart[0]["refresh"] and chart[0]["reason"] == "live"
