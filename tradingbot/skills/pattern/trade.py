@@ -8,6 +8,15 @@ from .patterns import Figure
 MAX_HOLD_SECONDS = 24 * 3600          # igual que en cortex/order.py
 
 
+def day_close(ts: int, ahead: int, end_minutes: int) -> int:
+    """Hora (servidor) del fin del día de trading (`end_minutes` desde medianoche de NY) siguiente a la hora `ts` (servidor)."""
+    ny = int(ts) - ahead
+    end = (ny // 86400) * 86400 + end_minutes * 60
+    while end <= ny:
+        end += 86400
+    return end + ahead
+
+
 def outcome(h: np.ndarray, l: np.ndarray, start: int, direction: str, stop: float, target: float,
             last: int | None = None) -> tuple[str | None, int]:
     """Cómo termina una posición llena en la vela `start`: ("target" | "stop", vela) o (None, última vela mirada) si sigue abierta.
@@ -30,7 +39,10 @@ def outcome(h: np.ndarray, l: np.ndarray, start: int, direction: str, stop: floa
 def position_figure(ctx, key: str, zone: str, direction: str, t: int, entry: float, stop: float, target: float,
                     label: str) -> Figure:
     """Posición para el gráfico: de la vela de la entrada a la del cierre (o a la última vela si sigue abierta)."""
-    limit = int(np.searchsorted(ctx.ts, int(ctx.ts[t]) + MAX_HOLD_SECONDS, "left")) - 1       # 24 h tras la entrada
+    close = int(ctx.ts[t]) + MAX_HOLD_SECONDS                                  # como tope, 24 h tras la entrada
+    if ctx.day_end:
+        close = min(close, day_close(int(ctx.ts[t]), ctx.ahead, ctx.day_end))      # y, antes, el fin del día de trading
+    limit = int(np.searchsorted(ctx.ts, close, "left")) - 1
     kind, idx = outcome(ctx.high, ctx.low, t, direction, stop, target, limit)
     tf_sec = ctx.tf_minutes * 60
     state = {"target": "objetivo", "stop": "stop"}.get(kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")

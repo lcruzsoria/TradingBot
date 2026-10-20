@@ -13,6 +13,7 @@ from ..feed.datasource import aggregate_candles
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from ..tbr.zones import zones_from_settings
 from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
+from .trade import day_close
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
 DEFAULT_UNTIL = ("LONDON:NY_AM:FIN", "NY_AM@18:00")   # London hasta el final de NY Open, NY Open hasta las 18:00 (Asia: hasta London)
@@ -230,16 +231,13 @@ class PatternSkill(Skill):
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
                                                  "session_end": window.session_end_hours, **mark})
 
+    def _day_end(self, symbol: str) -> int:
+        """Fin del día de trading (minutos de NY): 17:00 en forex y metales, 18:00 en los índices USA."""
+        return self.index_day_end if is_us_index(symbol, self.us_indices) else self.day_end
+
     def _session_close(self, symbol: str, ts: int | None, ahead: int) -> int | None:
-        """Fin del día de trading siguiente a la hora `ts` (servidor): 17:00 NY en forex y metales, 18:00 en los índices USA."""
-        if not ts:
-            return None
-        wall = (self.index_day_end if is_us_index(symbol, self.us_indices) else self.day_end) * 60
-        ny = int(ts) - ahead
-        end = (ny // 86400) * 86400 + wall
-        while end <= ny:
-            end += 86400
-        return end + ahead
+        """Fin del día de trading siguiente a la hora `ts` (servidor): ahí se cierra el trade."""
+        return day_close(ts, ahead, self._day_end(symbol)) if ts else None
 
     def _evaluate_tbr(self, c, tbr, window, ahead, results, figures, errors, unavailable, tfs) -> None:
         """Ejecuta los patrones sobre una TBR y recoge sus resultados y dibujos."""
@@ -272,7 +270,7 @@ class PatternSkill(Skill):
             ctx = PatternContext(c["symbol"], ptf, minutes(ptf), ts, df["open"].to_numpy(), df["high"].to_numpy(),
                                  df["low"].to_numpy(), df["close"].to_numpy(), tbr, first, end, closed,
                                  window.next_zone if window else "", window.next_hours if window else "", ahead, start,
-                                 window.limit_verb if window else "empezara")
+                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]))
             try:
                 results += [(tbr, h) for h in pattern.detect(ctx)]
                 figures += pattern.figures(ctx)

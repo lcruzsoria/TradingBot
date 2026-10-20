@@ -103,6 +103,7 @@ class PatternContext:
     ahead: int = 0           # segundos que el servidor va por delante de Nueva York (para mostrar horas de NY)
     start_bar: int = 0       # primera vela de la propia TBR
     limit_verb: str = "empezara"   # cómo se nombra el límite: "antes de que empezara X" o "antes de que terminara X"
+    day_end: int = 0         # fin del día de trading de este mercado (minutos desde medianoche de NY): ahí cierran los trades
 
 
 @dataclass(frozen=True)
