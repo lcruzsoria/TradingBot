@@ -78,6 +78,8 @@ class LevelsSkill(Skill):
             if event.payload.get("server_offset") == self.offset:
                 return
             self.offset = event.payload.get("server_offset")
+        elif event.payload.get("background"):
+            return                                           # barrido de la watchlist: Bias calcula él mismo sus niveles
         else:
             self._last = event.payload
         if self._last is not None:

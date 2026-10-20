@@ -128,8 +128,14 @@ class Mt5Source:
         with self._lock:
             return self._load_candles(symbol, timeframe, progress)
 
-    def _load_candles(self, symbol: str, timeframe: str, progress: ProgressFn | None = None) -> pd.DataFrame:
-        """Carga todas las velas que el terminal pueda entregar, de la más reciente hacia atrás."""
+    def load_recent(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+        """Solo las últimas `bars` velas (base): lo que usa el barrido de mercados en segundo plano."""
+        with self._lock:
+            return self._load_candles(symbol, timeframe, None, max(1, min(bars, self.max_bars)))
+
+    def _load_candles(self, symbol: str, timeframe: str, progress: ProgressFn | None = None,
+                      limit: int | None = None) -> pd.DataFrame:
+        """Carga todas las velas que el terminal pueda entregar (o las `limit` últimas), de la más reciente hacia atrás."""
         mt5 = self._require()
         base = base_timeframe(timeframe)
         tf = mt5_constant(mt5, base)
@@ -144,8 +150,9 @@ class Mt5Source:
 
         frames: list[pd.DataFrame] = []
         total = 0
-        while total < self.max_bars:
-            count = min(CHUNK, self.max_bars - total)
+        limit = self.max_bars if limit is None else limit
+        while total < limit:
+            count = min(CHUNK, limit - total)
             rates = self._copy_rates(mt5, symbol, tf, total, count, first=(total == 0))
             if rates is None or len(rates) == 0:
                 break

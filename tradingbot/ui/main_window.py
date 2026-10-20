@@ -42,6 +42,10 @@ from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesLis
 RIGHT_WIDTH = 392                    # columna de la derecha (Skills y debajo) y área Stats, encima: mismo ancho
 
 
+# Lo que el barrido de la watchlist publica en segundo plano y no se pinta (sí se anotan patrones, GO / NO GO y operaciones)
+CHART_TOPICS = frozenset({"candles.loaded", "tbr.updated", "levels.updated", "bias.updated", "bias.history",
+                          "pattern.updated", "pattern.session", "feed.failed"})
+
 class MainWindow(QMainWindow):
     first_loaded = Signal()
 
@@ -682,6 +686,8 @@ class MainWindow(QMainWindow):
 
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
     def _on_event(self, event: Event) -> None:
+        if event.payload.get("background") and event.topic in CHART_TOPICS:
+            return                                  # barrido de la watchlist en segundo plano: no mueve el gráfico
         handler = self._handlers.get(event.topic)
         if handler:
             handler(event.payload)

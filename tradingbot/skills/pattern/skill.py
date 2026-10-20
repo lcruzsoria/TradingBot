@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...clock import server_minus_ny
-from ...core import Event, Skill, register_skill
+from ...core import Event, Skill, background_of, register_skill
 from ...envconfig import EnvConfig
 from ...timeframes import display_label, minutes
 from ..feed.datasource import aggregate_candles
@@ -36,7 +36,7 @@ class PatternSkill(Skill):
                    "identifica (y de los que se invalidan, anulan o vencen). Cortex valida cada patrón con el sesgo "
                    "(GO / NO GO). Solo informa: no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
-    publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.session")
+    publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.session", "pattern.swept")
     slot = 4
 
     def on_start(self) -> None:
@@ -45,6 +45,7 @@ class PatternSkill(Skill):
         self._tbr: dict | None = None
         self._offset: int | None = None
         self._seen: set = set()                        # resultados ya avisados: no se repiten
+        self._bg: dict[str, dict] = {}                 # barrido de la watchlist: velas y TBR de cada mercado, hasta juntarse
         try:
             self._load_settings()
         except ValueError as exc:
@@ -113,6 +114,9 @@ class PatternSkill(Skill):
     def handle(self, event: Event) -> None:
         if self.error:
             raise ValueError(self.error)
+        if event.payload.get("background") and event.topic != "clock.offset":
+            self._background(event)
+            return
         if event.topic == "candles.loaded":
             self._candles = event.payload
         elif event.topic == "tbr.updated":
@@ -123,15 +127,34 @@ class PatternSkill(Skill):
             self._offset = event.payload.get("server_offset")
         self.update()
 
-    def update(self) -> None:
-        c, t = self._candles, self._tbr
+    def _background(self, event: Event) -> None:
+        """Un mercado del barrido de la watchlist: cuando están sus velas y sus TBR de la misma vuelta, se evalúa como el del
+        gráfico (sus avisos llegan a Cortex) y se avisa con `pattern.swept` de que ese mercado ya está repasado."""
+        p = event.payload
+        slot = self._bg.setdefault(p["symbol"], {})
+        slot["candles" if event.topic == "candles.loaded" else "tbr"] = p
+        c, t = slot.get("candles"), slot.get("tbr")
+        if c is None or t is None or c.get("sweep") != t.get("sweep") or c["timeframe"] != t["timeframe"]:
+            return
+        del self._bg[p["symbol"]]
+        try:
+            self.update(c, t)
+        finally:
+            self.publish("pattern.swept", {"symbol": c["symbol"], "timeframe": c["timeframe"], **background_of(c)})
+
+    def update(self, c: dict | None = None, t: dict | None = None) -> None:
+        background = c is not None
+        if not background:
+            c, t = self._candles, self._tbr
         if c is None or t is None or (c["symbol"], c["timeframe"]) != (t["symbol"], t["timeframe"]):
             return                                      # aún no han llegado las zonas de estas velas
         symbol, tf = c["symbol"], c["timeframe"]
+        mark = background_of(c)
+        caption = self.set_caption if not background else (lambda _text: None)   # el hexágono habla del gráfico
         recents = recent_tbrs(t["sessions"], self.zones) if t["available"] else []
         if not recents:
-            self.set_caption("sin TBR" if not t["available"] else "sin TBR cerrada")
-            self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": None, "hits": []})
+            caption("sin TBR" if not t["available"] else "sin TBR cerrada")
+            self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": None, "hits": [], **mark})
             return
         ahead, _ = server_minus_ny(self._offset)
         chart_ts = c["df"]["ts"].to_numpy()
@@ -144,7 +167,7 @@ class PatternSkill(Skill):
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
             self._evaluate_tbr(c, item, window, ahead, results, figures, errors, unavailable, tfs)
-        if self.history_days > 1:                       # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
+        if self.history_days > 1 and not background:    # TBR pasadas: solo fibos y entradas dibujados, sin avisos ni órdenes
             skip = {(r.key, r.day) for r in recents}
             for item in history_tbrs(t["sessions"], self.zones, skip, self.history_days):
                 window = window_for(item, self.order, ahead, self.extend, self.until)
@@ -153,36 +176,36 @@ class PatternSkill(Skill):
         hits = [h for _t, h in results]
         window = windows[tbr.key]
         self.publish("pattern.updated", {"symbol": symbol, "timeframe": tf, "tbr": tbr, "hits": hits, "errors": errors,
-                                         "unavailable": sorted(set(unavailable)), "tfs": tfs, "figures": figures})
+                                         "unavailable": sorted(set(unavailable)), "tfs": tfs, "figures": figures, **mark})
         found = [h for h in hits if h.status == DETECTED]
         ended = window is not None and window.session_end_ts is not None and int(chart_ts[-1]) >= window.session_end_ts
         if errors:
-            self.set_caption("error en un patrón")
+            caption("error en un patrón")
         elif unavailable and not hits and not figures:
-            self.set_caption(f"necesita {display_label(next(iter(tfs.values())))}")
+            caption(f"necesita {display_label(next(iter(tfs.values())))}")
         elif not self.types:
-            self.set_caption("sin patrones definidos")
+            caption("sin patrones definidos")
         elif ended:
-            self.set_caption("fin de jornada")
+            caption("fin de jornada")
         elif found:
-            self.set_caption(f"{len(found)} patrón(es) en {next(i.zone for i, h in results if h is found[-1])}")
+            caption(f"{len(found)} patrón(es) en {next(i.zone for i, h in results if h is found[-1])}")
         elif figures:
-            self.set_caption(f"{len(figures)} fibo(s) en curso")
+            caption(f"{len(figures)} fibo(s) en curso")
         else:
-            self.set_caption(f"TBR {tbr.zone}: buscando")
+            caption(f"TBR {tbr.zone}: buscando")
         for item, hit in results:
             key = (symbol, hit.key, hit.status, hit.direction, item.key, item.day, hit.ts or hit.x)
             if key in self._seen:
                 continue
             self._seen.add(key)
-            payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit}
+            payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit, **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
         if ended:
             key = (symbol, "session", tbr.key, tbr.day)
             if key not in self._seen:
                 self._seen.add(key)
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
-                                                 "session_end": window.session_end_hours})
+                                                 "session_end": window.session_end_hours, **mark})
 
     def _evaluate_tbr(self, c, tbr, window, ahead, results, figures, errors, unavailable, tfs) -> None:
         """Ejecuta los patrones sobre una TBR y recoge sus resultados y dibujos."""

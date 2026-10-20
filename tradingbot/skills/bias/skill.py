@@ -6,9 +6,10 @@ from datetime import datetime
 import numpy as np
 
 from ...clock import NY, server_minus_ny
-from ...core import Event, Skill, register_skill
+from ...core import Event, Skill, background_of, register_skill
 from ...timeframes import minutes
-from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
+from ..levels.daylevels import (DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_MAX_TF_MINUTES, DEFAULT_US_INDICES,
+                                compute as day_lines, is_us_index, parse_time)
 from .htf import DEFAULT_HOURS as DEFAULT_SWEEP_HOURS, DEFAULT_INDEX_HOURS as DEFAULT_SWEEP_INDEX_HOURS, htf_break, htf_sweep
 from ..levels.daylevels import DEFAULT_SMA_PERIOD
 from .history import block_ids, frozen_votes, lateral_flags
@@ -48,10 +49,20 @@ class BiasSkill(Skill):
         for key, value in (("HTF_SWEEP_INDEX_HOURS", self.sweep_index_hours), ("HTF_SWEEP_HOURS", self.sweep_hours)):
             if value < 1:
                 raise ValueError(f"BIAS_{key}={value} debe ser 1 o más.")
+        # Para el barrido de la watchlist el sesgo calcula él mismo el TDO y el Midnight, con los ajustes de la skill Levels
+        levels = self.services.env.section("LEVELS") if self.services.env is not None else self.settings
+        self.day_start = parse_time(levels.get("DAY_START", DEFAULT_DAY_START), "LEVELS_DAY_START")
+        self.index_day_start = parse_time(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START), "LEVELS_INDEX_DAY_START")
+        self.us_indices = levels.get_list("US_INDICES", list(DEFAULT_US_INDICES))
+        self.levels_max_tf = levels.get_int("MAX_TF_MINUTES", DEFAULT_MAX_TF_MINUTES)
+        self.levels_sma_period = levels.get_int("SMA_PERIOD", DEFAULT_SMA_PERIOD)
 
     # -- mensajes -----------------------------------------------------------------------------------
     def handle(self, event: Event) -> None:
         topic, p = event.topic, event.payload
+        if topic == "candles.loaded" and p.get("background"):
+            self._background(p)                                  # barrido de la watchlist: no toca el sesgo del gráfico
+            return
         if topic == "levels.updated":
             self._schedule(p["symbol"], p["timeframe"], p["day_start"], p.get("us_index", False))
             self._levels = p
@@ -90,7 +101,7 @@ class BiasSkill(Skill):
         if self._last is None:
             return
         self._eval_levels = self._day_levels()
-        htf, brk = self._htf()
+        htf, brk = self._htf(self._last)
         self.result = self.services.engine.evaluate(self._last["df"], levels={**self._eval_levels, **self._sma_level()},
                                                     htf=htf, htf_break=brk)
         self.result_symbol = self._last["symbol"]
@@ -132,19 +143,37 @@ class BiasSkill(Skill):
         if not self._sma_active() or self._last is None:
             return {}
         self._sma_period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD))
-        close = self._last["df"]["close"]
-        if len(close) < self._sma_period:
-            return {"sma_period": self._sma_period}
-        return {"sma": float(close.tail(self._sma_period).mean()), "sma_period": self._sma_period}
+        return sma_of(self._last["df"]["close"], self._sma_period)
 
-    def _htf(self):
+    def _background(self, c: dict) -> None:
+        """Sesgo de un mercado del barrido de la watchlist, con sus propios niveles del día: lo usa Cortex para validar los
+        patrones de ese mercado. No cambia el sesgo del gráfico, ni su histórico, ni el recálculo programado."""
+        tf, df = c["timeframe"], c["df"]
+        if minutes(tf) > 1440 or not len(df):
+            return
+        index = is_us_index(c["symbol"], self.us_indices)
+        start = self.index_day_start if index else self.day_start
+        levels: dict = {}
+        if minutes(tf) <= self.levels_max_tf:
+            ahead, _ = server_minus_ny(self._offset)
+            levels = today_levels(day_lines(df["ts"].to_numpy(), df["open"].to_numpy(), df["high"].to_numpy(),
+                                            df["low"].to_numpy(), ahead, start, 2))
+        if self._sma_active():
+            levels.update(sma_of(df["close"], int((self._levels or {}).get("sma_period", self.levels_sma_period))))
+        htf, brk = self._htf(c, index, start)
+        result = self.services.engine.evaluate(df, levels=levels, htf=htf, htf_break=brk)
+        self.publish("bias.updated", {"result": result, "symbol": c["symbol"], "timeframe": tf,
+                                      "reason": "barrido de la watchlist", **background_of(c)})
+
+    def _htf(self, c: dict, index: bool | None = None, start: int | None = None):
         """(barrido, continuación) de la vela anterior en H3 (índices) / H4 (resto); None en la que no esté activa."""
         active = {getattr(r, "key", "") for r in getattr(self.services.engine, "rules", [])}
         if not active & {"htf_sweep", "htf_break"}:
             return None, None
-        c = self._last
-        index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
-        start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
+        if index is None:
+            index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
+        if start is None:
+            start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
         ahead, _ = server_minus_ny(self._offset)
         args = (c["df"], ahead, start, self.sweep_index_hours if index else self.sweep_hours, minutes(c["timeframe"]))
         return (htf_sweep(*args) if "htf_sweep" in active else None), (htf_break(*args) if "htf_break" in active else None)
@@ -154,15 +183,7 @@ class BiasSkill(Skill):
         p, c = self._levels, self._last
         if p is None or c is None or not p.get("available") or (p["symbol"], p["timeframe"]) != (c["symbol"], c["timeframe"]):
             return {}
-        today: dict[str, float] = {}
-        tdo = max((ln for ln in p["lines"] if ln.kind == "tdo"), key=lambda ln: ln.x0, default=None)
-        if tdo is not None:
-            today["tdo"] = tdo.price
-            # el Midnight del día en curso: el que empieza después del TDO de hoy (antes de las 00:00 NY aún no existe)
-            mid = max((ln for ln in p["lines"] if ln.kind == "midnight" and ln.x0 > tdo.x0), key=lambda ln: ln.x0, default=None)
-            if mid is not None:
-                today["midnight"] = mid.price
-        return today
+        return today_levels(p["lines"])
 
     def tick(self) -> None:
         """Si ha llegado la hora del recálculo, pide velas nuevas al feed (el sesgo se recalcula al llegar)."""
@@ -186,3 +207,23 @@ class BiasSkill(Skill):
         self._next = next_recalc(datetime.now(NY), day_start, hours) if hours > 0 else None
         self.publish("bias.schedule", {"symbol": symbol, "next": self._next, "hours": hours, "us_index": us_index,
                                        "day_start": day_start})
+
+
+def today_levels(lines) -> dict:
+    """TDO y Midnight del día en curso a partir de las líneas de la skill Levels."""
+    today: dict[str, float] = {}
+    tdo = max((ln for ln in lines if ln.kind == "tdo"), key=lambda ln: ln.x0, default=None)
+    if tdo is not None:
+        today["tdo"] = tdo.price
+        # el Midnight del día en curso: el que empieza después del TDO de hoy (antes de las 00:00 NY aún no existe)
+        mid = max((ln for ln in lines if ln.kind == "midnight" and ln.x0 > tdo.x0), key=lambda ln: ln.x0, default=None)
+        if mid is not None:
+            today["midnight"] = mid.price
+    return today
+
+
+def sma_of(close, period: int) -> dict:
+    """Última SMA de `period` velas (sin ella si aún no hay tantas)."""
+    if len(close) < period:
+        return {"sma_period": period}
+    return {"sma": float(close.tail(period).mean()), "sma_period": period}

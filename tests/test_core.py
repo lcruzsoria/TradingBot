@@ -20,6 +20,11 @@ def wait_for(cond, timeout=5.0):
     return False
 
 
+def chart_bias(e):
+    """Sesgo del gráfico (no el de los mercados del barrido de la watchlist en segundo plano)."""
+    return e.topic == "bias.updated" and not e.payload.get("background")
+
+
 def test_patrones():
     assert matches("*", "a.b") and matches("a.b", "a.b") and matches("a.*", "a.b")
     assert not matches("a.*", "b.a") and not matches("a.b", "a.c")
@@ -60,12 +65,12 @@ def system():
 def test_cadena_feed_bias_cortex(system):
     bus, manager, events = system
     bus.publish("feed.load", {"symbol": "EURUSD", "timeframe": "15m"}, source="ui")
-    assert wait_for(lambda: any(e.topic == "bias.updated" for e in events))
+    assert wait_for(lambda: any(chart_bias(e) for e in events))
     topics = [e.topic for e in events]
     assert topics.index("feed.connected") < topics.index("candles.loaded") < topics.index("bias.updated")
 
     # Cortex ya conoce el Bias: responde a una petición de operar según ese sesgo
-    bias = next(e for e in events if e.topic == "bias.updated").payload["result"]
+    bias = next(e for e in events if chart_bias(e)).payload["result"]
     assert wait_for(lambda: manager.skills["cortex"].filter.result is not None)
     bus.publish("trade.request", {"request_id": 7, "direction": Direction.LONG}, source="test")
     bus.publish("trade.request", {"request_id": 8, "direction": Direction.SHORT}, source="test")
@@ -88,12 +93,12 @@ def test_recalcular_bias(system):
     bus, _, events = system
     bus.publish("bias.recalc", source="ui")           # sin velas: se ignora
     time.sleep(0.3)
-    assert not any(e.topic == "bias.updated" for e in events)
+    assert not any(chart_bias(e) for e in events)
     bus.publish("feed.load", {"symbol": "EURUSD", "timeframe": "5m"}, source="ui")
-    assert wait_for(lambda: any(e.topic == "bias.updated" for e in events))
-    n = sum(e.topic == "bias.updated" for e in events)
+    assert wait_for(lambda: any(chart_bias(e) for e in events))
+    n = sum(chart_bias(e) for e in events)
     bus.publish("bias.recalc", source="ui")
-    assert wait_for(lambda: sum(e.topic == "bias.updated" for e in events) == n + 1)
+    assert wait_for(lambda: sum(chart_bias(e) for e in events) == n + 1)
 
 
 def test_skill_con_error_no_tumba_el_sistema():

@@ -39,6 +39,14 @@ class SkillState(str, Enum):
     ERROR = "error"
 
 
+def background_of(payload: dict) -> dict:
+    """Marcas del barrido de la watchlist ({"background": True, "sweep": n}) que hay que copiar en lo que se publica a partir
+    de un mensaje en segundo plano, o {} si el mensaje es del gráfico. La ventana no pinta lo que lleva `background`."""
+    if not payload.get("background"):
+        return {}
+    return {"background": True, "sweep": payload.get("sweep")}
+
+
 def register_skill(key: str):
     def decorator(cls: type["Skill"]) -> type["Skill"]:
         cls.key = key

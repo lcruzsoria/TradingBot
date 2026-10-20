@@ -82,11 +82,13 @@ class CalendarioSkill(Skill):
             self._offset = event.payload.get("server_offset")
             return
         symbol, tf, df = event.payload["symbol"], event.payload["timeframe"], event.payload["df"]
+        background = bool(event.payload.get("background"))      # barrido de la watchlist: el hexágono habla del gráfico
+        caption = self.set_caption if not background else (lambda _text: None)
         if not matches(symbol, self.symbols):
-            self.set_caption(f"{symbol} no está en CALENDARIO_SYMBOLS")
+            caption(f"{symbol} no está en CALENDARIO_SYMBOLS")
             return
         if len(df) == 0 or minutes(tf) > 60 or (60 % minutes(tf)):
-            self.set_caption("necesita velas de 60 min o menos")
+            caption("necesita velas de 60 min o menos")
             return
         ahead, _ = server_minus_ny(self._offset)
         ts = df["ts"].to_numpy().astype(np.int64)
@@ -107,4 +109,4 @@ class CalendarioSkill(Skill):
                 "close_at": f"{self.exit // 60:02d}:{self.exit % 60:02d} NY ({ny:%d/%m/%Y})"})
             self.set_caption(f"señal {symbol}")
             return
-        self.set_caption(f"{symbol}: esperando {self.entry // 60:02d}:{self.entry % 60:02d} NY")
+        caption(f"{symbol}: esperando {self.entry // 60:02d}:{self.entry % 60:02d} NY")

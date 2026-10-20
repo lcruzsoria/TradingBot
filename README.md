@@ -29,6 +29,26 @@ Low y su 50 %. Cada skill tiene un papel:
   **Por ahora funciona en modo simulación:** prepara la orden y la anota en el Registro, pero no la envía a MT5
   (`SETUP_SEND_ORDERS=true` da error hasta que se implemente el envío real). El bot sigue sin enviar órdenes a MT5.
 
+#### Todos los mercados, aunque no estén en pantalla (barrido de la watchlist)
+
+El gráfico solo carga el mercado que pinchas, pero el bot evalúa **todos los mercados del panel Quotes**: la skill Feed los
+barre en segundo plano cada `FEED_SWEEP_MINUTES` minutos (5; `0` lo apaga), en el timeframe de trabajo
+(`FEED_SWEEP_TIMEFRAME`, vacío = el de `FEED_TIMEFRAME`) y con los últimos `FEED_SWEEP_DAYS` días de velas (10). El primer
+barrido se hace nada más conectar, y la lista se actualiza al editar la watchlist. Así Pattern, Cortex y Setup buscan
+patrones, deciden GO / NO GO y siguen las posiciones simuladas de cada mercado, y el forwardtest (Stats) recoge las
+operaciones de todos.
+
+- Las velas del barrido van marcadas como `background`: **el gráfico no se mueve** ni cambian el sesgo, las TBR o los niveles
+  que se ven. Los patrones, los GO / NO GO y las operaciones de cualquier mercado sí se anotan en el Registro.
+- Bias calcula el sesgo de cada mercado del barrido con sus propios TDO y Midnight (ajustes `LEVELS_DAY_START`,
+  `LEVELS_INDEX_DAY_START` y `LEVELS_US_INDICES`) y Cortex valida cada patrón con el sesgo **de su mercado**.
+- **Orden de las decisiones.** Con `CORTEX_POSITION_SCOPE=global` (una sola posición en toda la cuenta) importa quién llega
+  primero. Por eso, mientras dura una vuelta del barrido, Cortex **retiene** los patrones (también los del gráfico) y, cuando
+  Pattern y Bias han repasado todos los mercados cargados, los decide juntos **en orden de hora**: un patrón de las 09:00 de
+  un mercado va antes que uno de las 10:00 de otro aunque llegue después. Si una vuelta no se completa, Cortex decide igualmente
+  un minuto después de que termine la carga (15 minutos como mucho por vuelta). Entre una vuelta y otra, lo que llega en
+  directo del gráfico se decide al momento.
+
 Se configuran en los bloques **PATTERN** (`PATTERN_TYPES`, `PATTERN_ZONES`, `PATTERN_ZONE_ORDER`), **CORTEX**
 (`CORTEX_ALLOW_NO_BIAS`) y **SETUP** (`SETUP_SEND_ORDERS`) de `tradingbot.env`. El antiguo setup de continuación (toma de
 liquidez, retest del 50 %, segunda ruptura) se retiró de la skill Setup; su código y sus resultados se conservan solo para el
@@ -207,6 +227,9 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `FEED_SYMBOL` | `NAS100` | Mercado que se carga al arrancar. Nombre exacto del broker, con mayúsculas y sufijos (`NAS100FT.r`). |
 | `FEED_TIMEFRAME` | `M15` | Timeframe al arrancar: `M1` `M3` `M5` `M15` `H1` `H3` `H4` `H7` `H12` `1D` `1W` (también vale `15m`, `1h`...). |
 | `FEED_MAX_BARS` | `2000000` | Tope de seguridad de velas a cargar por mercado y timeframe. |
+| `FEED_SWEEP_MINUTES` | `5` | Minutos entre vueltas del barrido en segundo plano de toda la watchlist (`0` = sin barrido). Ver «Todos los mercados, aunque no estén en pantalla». |
+| `FEED_SWEEP_TIMEFRAME` | *(vacío)* | Timeframe del barrido; vacío = el de `FEED_TIMEFRAME`. |
+| `FEED_SWEEP_DAYS` | `10` | Días de velas que se cargan de cada mercado en cada vuelta del barrido. |
 | **QUOTES** — cotizaciones y cuenta | | |
 | `QUOTES_INTERVAL` | `1` | Segundos entre refrescos del panel Quotes y de las cifras de la cuenta (admite decimales). |
 | `QUOTES_SERVER_UTC_OFFSET` | vacío | Desfase del servidor del broker respecto a UTC, en horas. Vacío: se detecta solo con los ticks en vivo. |
@@ -424,7 +447,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | Skill | Hexágono | Qué hace |
 |---|---|---|
 | `cortex` | centro | Coordinador. Guarda activo, temporalidad y Bias; valida con el sesgo cada patrón de Pattern (GO / NO GO) y, con GO, le pasa la orden a Setup (`pattern.detected` + `bias.updated` -> `cortex.decision` + `setup.order`). También responde a `trade.request` con `trade.verdict`. Lee el bloque CORTEX. |
-| `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). |
+| `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). Además barre en segundo plano toda la watchlist (`feed.sweep` y `candles.loaded` con `background`), que el gráfico no pinta. Lee el bloque FEED. |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |
 | `levels` | 3 | TDO, Midnight, PDH/PDL y separadores de día (`candles.loaded` + `clock.offset` -> `levels.updated`). Lee el bloque LEVELS. |

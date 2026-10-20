@@ -1,7 +1,7 @@
 """Skill TBR: zonas horarias (Time-Based Ranges) en hora de Nueva York y sus niveles High, Low y 50 %."""
 from __future__ import annotations
 
-from ...core import Event, Skill, register_skill
+from ...core import Event, Skill, background_of, register_skill
 from ...clock import server_minus_ny
 from .zones import (DEFAULT_DAYS, DEFAULT_LINE_OPACITY, DEFAULT_MAX_TF_MINUTES, DEFAULT_OPACITY, compute,
                     zones_from_settings)
@@ -51,13 +51,17 @@ class TbrSkill(Skill):
             if event.payload.get("server_offset") == self.offset:
                 return
             self.offset = event.payload.get("server_offset")
+        elif event.payload.get("background"):            # barrido de la watchlist: se calcula y se publica, sin tocar el gráfico
+            self.update(event.payload)
+            return
         else:
             self._last = event.payload
         if self._last is not None:
             self.update()
 
-    def update(self) -> None:
-        p = self._last
+    def update(self, p: dict | None = None) -> None:
+        background = p is not None
+        p = p if background else self._last
         tf = p["timeframe"]
         available = minutes(tf) <= self.max_tf
         ahead, estimated = server_minus_ny(self.offset)
@@ -66,8 +70,9 @@ class TbrSkill(Skill):
             df = p["df"]
             sessions = compute(df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), self.zones, ahead,
                                minutes(tf), self.days)
-        self.set_caption(f"{len(sessions)} zonas" if available else f"no en {display_label(tf)}")
+        if not background:
+            self.set_caption(f"{len(sessions)} zonas" if available else f"no en {display_label(tf)}")
         self.publish("tbr.updated", {"symbol": p["symbol"], "timeframe": tf, "sessions": sessions,
                                      "available": available, "estimated": estimated, "opacity": self.opacity,
                                      "line_opacity": self.line_opacity,
-                                     "zones": self.zones, "max_tf": self.max_tf})
+                                     "zones": self.zones, "max_tf": self.max_tf, **background_of(p)})
