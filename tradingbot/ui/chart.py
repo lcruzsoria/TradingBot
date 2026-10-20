@@ -17,7 +17,8 @@ from . import theme
 from .fmt import DIAS, fecha_hora
 
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
-NO_GO_OPACITY = 0.35       # fibos y posiciones de las entradas que Cortex no opera (NO GO)
+NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
+NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
 LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
 LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
@@ -714,13 +715,13 @@ class ChartView(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
-            if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada (su píldora, no)
-                for item in self._pos_items[first:]:
-                    item.setOpacity(NO_GO_OPACITY)
             pill = PositionPill(pos)
             pill.setPos(x0, entry)
             pi.addItem(pill, ignoreBounds=True)
             self._pos_items.append(pill)
+            if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada, como su fibo
+                for item in self._pos_items[first:]:
+                    item.setOpacity(NO_GO_PILL_OPACITY if item is pill else NO_GO_OPACITY)
             self._pos_pills.append(pill)
         self._fit_pills()
         self._update_card()
