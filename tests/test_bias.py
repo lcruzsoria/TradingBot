@@ -204,7 +204,9 @@ def test_voto_de_barrido_de_la_vela_anterior():
     assert sweep_vote(105, 95, 102, 93, 99)[0] == 1         # barre el Low y cierra dentro: alcista
     assert sweep_vote(105, 95, 107, 98, 106)[0] == 0        # barre el High pero cierra fuera: ruptura
     assert sweep_vote(105, 95, 102, 93, 94)[0] == 0         # barre el Low pero cierra fuera
-    assert sweep_vote(105, 95, 107, 93, 100)[0] == 0        # barre los dos lados
+    assert sweep_vote(105, 95, 107, 93, 100)[0] == 0        # barre los dos lados y cierra dentro
+    assert sweep_vote(105, 95, 107, 93, 106)[0] == 1        # barre los dos lados y cierra sobre el High: la mecha inferior fue el barrido
+    assert sweep_vote(105, 95, 107, 93, 94)[0] == -1        # barre los dos lados y cierra bajo el Low: bajista
     assert sweep_vote(105, 95, 104, 96, 100)[0] == 0        # no barre ninguno
     assert sweep_vote(105, 95, 107, 98, 105)[0] == -1       # cerrar justo en el High anterior cuenta como dentro
 
@@ -288,7 +290,7 @@ def test_la_continuacion_usa_la_n1_y_la_n2_y_complementa_al_barrido():
     assert htf_break(dentro, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(dentro, AHEAD_H, 17 * 60, 4, 15).vote == -1
     assert htf_break(htf_frame([(105, 95, 100), (107, 98, 101)]), AHEAD_H, 17 * 60, 4, 15).vote == 0   # faltan velas
     envolvente = htf_frame([(105, 95, 100), (110, 90, 108), (110, 90, 100)])      # la n-1 barre los dos lados y cierra sobre el High
-    assert htf_break(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 0
+    assert htf_break(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(envolvente, AHEAD_H, 17 * 60, 4, 15).vote == 1
     interna = htf_frame([(105, 95, 100), (103, 97, 100), (110, 90, 100)])         # la n-1 es interna a la n-2
     assert htf_break(interna, AHEAD_H, 17 * 60, 4, 15).vote == 0 and htf_sweep(interna, AHEAD_H, 17 * 60, 4, 15).vote == 0
 

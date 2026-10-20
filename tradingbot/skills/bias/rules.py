@@ -137,7 +137,9 @@ class HtfSweepRule(BiasRule):
     """Sweep mecha de la vela anterior: el sesgo de la vela actual (H3 en índices, H4 en el resto) sale de las dos anteriores.
 
     Si la vela n-1 barrió el High de la n-2 y cerró dentro de su rango -> bajista; si barrió el Low y cerró dentro -> alcista.
-    Barrer los dos lados, cerrar fuera o no barrer no puntúa. La vela actual (0) no interviene. Ver bias/htf.py.
+    Si barrió los dos lados (envolvente) y cerró sobre el High de la n-2 -> alcista; si cerró bajo su Low -> bajista.
+    Barrer un lado y cerrar fuera, la envolvente que cierra dentro o no barrer no puntúa. La vela actual (0) no interviene.
+    Ver bias/htf.py.
     Parámetros: BIAS_HTF_SWEEP_INDEX_HOURS (3) y BIAS_HTF_SWEEP_HOURS (4): tamaño de las velas en índices / resto.
     """
     title = "Sweep mecha de la vela anterior"

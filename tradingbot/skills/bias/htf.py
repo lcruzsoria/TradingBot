@@ -5,14 +5,17 @@ barrió el High o el Low de la n-2 y cerró de vuelta dentro de su rango:
 
 - n-1 barre el High de la n-2 (su máximo lo supera) y cierra dentro del rango de la n-2   -> bajista
 - n-1 barre el Low de la n-2 (su mínimo lo pierde) y cierra dentro del rango de la n-2     -> alcista
-- barre los dos lados, barre y cierra fuera (ruptura) o no barre ninguno                  -> sin sesgo (no vota)
+- barre los dos lados (envolvente) y cierra sobre el High de la n-2: la mecha inferior fue el barrido -> alcista
+- barre los dos lados (envolvente) y cierra bajo el Low de la n-2: la mecha superior fue el barrido  -> bajista
+- barre los dos lados y cierra dentro, barre un lado y cierra fuera (ruptura) o no barre ninguno     -> sin sesgo (no vota)
 
 Continuación (la regla complementaria): si la n-1 cierra POR ENCIMA del High de la n-2 -> continuación alcista; si cierra
 POR DEBAJO del Low de la n-2 -> continuación bajista; si cierra dentro de su rango, no vota. Como cerrar fuera y cerrar
 dentro son excluyentes, esta regla y la de barrido nunca puntúan a la vez con el mismo par de velas.
 
-Sin sesgo en las dos reglas: la n-1 interna a la n-2 (no la supera por ningún lado) y la n-1 que barre con mecha el High y el
-Low de la n-2 a la vez (envolvente), cierre donde cierre.
+La envolvente (la n-1 barre con mecha el High y el Low de la n-2) puntúa en el barrido si cierra fuera, en el lado contrario a
+la mecha que barrió; la Continuación sigue sin puntuarla. Sin sesgo en las dos reglas: la n-1 interna a la n-2 (no la supera
+por ningún lado) y la envolvente que cierra dentro del rango de la n-2.
 
 Las velas se forman agrupando las del gráfico (M15, H1...) en bloques del tamaño elegido, alineados con el inicio del día de
 trading del activo en hora de Nueva York: 18:00 en los índices americanos (H3: 18, 21, 00, 03, 06, 09, 12, 15) y 17:00 en el
@@ -61,7 +64,11 @@ def sweep_vote(hi2: float, lo2: float, hi1: float, lo1: float, close1: float) ->
     swept_high, swept_low = hi1 > hi2, lo1 < lo2
     inside = lo2 <= close1 <= hi2
     if swept_high and swept_low:
-        return 0, "barrió el High y el Low de la anterior: sin sesgo"
+        if close1 > hi2:
+            return 1, "barrió el Low con su mecha y cerró sobre el High de la anterior: alcista"
+        if close1 < lo2:
+            return -1, "barrió el High con su mecha y cerró bajo el Low de la anterior: bajista"
+        return 0, "barrió el High y el Low de la anterior y cerró dentro: sin sesgo"
     if swept_high:
         return (-1, "barrió el High de la anterior y cerró dentro: bajista") if inside else \
             (0, "barrió el High pero cerró fuera (ruptura): sin sesgo")
