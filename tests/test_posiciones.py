@@ -81,3 +81,21 @@ def test_setup_cierra_la_posicion_con_las_velas_que_reenvia_cortex():
     manager.stop()
     assert len(closed) == 1 and closed[0].payload["closed"].result == "objetivo" and closed[0].payload["sent"] is False
     assert manager.skills["setup"].positions == []
+
+
+def test_si_el_mercado_cierra_la_posicion_cierra_al_precio_de_cierre():
+    o = order(close_after=500)
+    ts, h, l, c = bars([(100.5, 99.5, 100.4), (100.8, 100.0, 100.6), (100.9, 100.2, 100.5)])
+    ts[2] += 48 * 3600                                                    # fin de semana sin velas entre la 2.ª y la 3.ª
+    cerrada = resolve(o, ts, h, l, c, bar_seconds=STEP)
+    assert cerrada.result == "tiempo" and cerrada.exit_price == 100.6 and cerrada.exit_ts == int(ts[1])
+    ts[2] = T0 + 2 * STEP + 3600                                          # parón de 1 h: el mercado sigue abierto
+    assert resolve(o, ts, h, l, c, bar_seconds=STEP) is None
+
+
+def test_si_el_mercado_esta_cerrado_ahora_cierra_con_la_ultima_vela():
+    o = order(close_after=500)
+    ts, h, l, c = bars([(100.5, 99.5, 100.4), (100.8, 100.0, 100.6)])
+    assert resolve(o, ts, h, l, c, bar_seconds=STEP, now=T0 + 2 * STEP + 600) is None             # velas al día
+    cerrada = resolve(o, ts, h, l, c, bar_seconds=STEP, now=T0 + 2 * STEP + 3 * 3600)
+    assert cerrada.result == "tiempo" and cerrada.exit_price == 100.6

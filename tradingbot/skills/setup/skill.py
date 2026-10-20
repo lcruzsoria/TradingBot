@@ -143,9 +143,10 @@ class SetupSkill(Skill):
         df = payload["df"]
         ts, high, low, close = (df[k].to_numpy() for k in ("ts", "high", "low", "close"))
         minutes = TIMEFRAMES.get(payload.get("timeframe") or "")
+        now = self.server_now()
         still = []
         for order in self.positions:
-            closed = (resolve(order, ts, high, low, close, self.be_r, minutes * 60 if minutes else None)
+            closed = (resolve(order, ts, high, low, close, self.be_r, minutes * 60 if minutes else None, now)
                       if order.symbol == payload["symbol"] else None)
             if closed is None:
                 still.append(order)

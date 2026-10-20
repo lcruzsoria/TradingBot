@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 BE_CHECK_SECONDS = 15 * 60           # el paso del stop a breakeven se mira al cierre de cada vela de 15 min
+MARKET_CLOSED_SECONDS = 2 * 3600     # sin velas durante más de esto = mercado cerrado (el parón diario de 1 h no cuenta)
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,8 @@ def closes_m15(ts: int, bar_seconds: int | None) -> bool:
     return (int(ts) + bar_seconds) % BE_CHECK_SECONDS == 0
 
 
-def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds: int | None = None) -> Closed | None:
+def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds: int | None = None,
+            now: int | None = None) -> Closed | None:
     """Cierre de la posición `order` (larga o corta) con las velas dadas, o None si sigue abierta.
 
     Misma regla que el backtest: desde la vela de la entrada, si caben stop y objetivo en una vela cuenta el stop; el cierre por
@@ -40,6 +42,9 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
     Breakeven (`be_r`, en R; None = sin breakeven): si una vela de 15 min cierra con la posición `be_r` R o más a favor, el stop
     pasa al precio de entrada desde la vela siguiente; si después lo toca, la operación cierra a 0 R («breakeven»).
     `bar_seconds` es la duración de las velas, para saber cuáles cierran con una de 15 min.
+
+    Si el mercado cierra (más de MARKET_CLOSED_SECONDS sin velas, o sin velas hasta `now`, la hora del servidor) la posición
+    se cierra al precio de cierre de la última vela antes del cierre del mercado («tiempo»).
     """
     ts = np.asarray(ts, dtype=np.int64)
     long = order.direction == "long"
@@ -56,7 +61,10 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
 
     start = int(np.searchsorted(ts, order.entry_ts, "left"))
     last = None
+    bar = bar_seconds or 0
     for i in range(start, len(ts)):
+        if last is not None and ts[i] - (ts[last] + bar) > MARKET_CLOSED_SECONDS:
+            return done("tiempo", float(close[last]), last)        # el mercado cerró entre las dos velas
         if ts[i] >= order.close_ts:
             return done("tiempo", float(close[last]), last) if last is not None else None
         current = entry if be_ts is not None else stop
@@ -70,4 +78,6 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
                 and sign * (close[i] - entry) / risk >= be_r):
             be_ts = int(ts[i])          # vela cerrada (ya hay otra después): el stop pasa a la entrada
         last = i
+    if last is not None and now is not None and bar and now - (ts[last] + bar) > MARKET_CLOSED_SECONDS:
+        return done("tiempo", float(close[last]), last)            # el mercado está cerrado ahora: se cierra con su última vela
     return None

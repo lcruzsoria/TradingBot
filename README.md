@@ -48,6 +48,7 @@ operaciones de todos.
 - Bias calcula el sesgo de cada mercado del barrido con sus propios TDO y Midnight (ajustes `LEVELS_DAY_START`,
   `LEVELS_INDEX_DAY_START` y `LEVELS_US_INDICES`) y Cortex valida cada patrón con el sesgo **de su mercado**.
 - **Cierre por tiempo.** Un trade de patrón abierto se cierra solo al fin del día de trading (17:00 NY en forex y metales, `LEVELS_DAY_START`; 18:00 en los índices USA, `LEVELS_INDEX_DAY_START`), y como tope 24 h tras la entrada. Los de Calendario cierran a `CALENDARIO_EXIT_HOUR`.
+- **Mercado cerrado.** Si el mercado cierra con una operación abierta (más de 2 h sin velas: fin de semana o festivo; el parón diario de 1 h no cuenta), se cierra al precio de cierre de su última vela.
 - **Posiciones.** Con `CORTEX_POSITION_SCOPE=mercado` (por defecto) cada mercado opera independiente de los demás, pero
   nunca hay dos operaciones abiertas a la vez en el mismo mercado; con `global`, una sola en toda la cuenta.
 - **Orden de las decisiones.** Dentro de un mercado (y, con `CORTEX_POSITION_SCOPE=global`, entre todos) importa quién llega
