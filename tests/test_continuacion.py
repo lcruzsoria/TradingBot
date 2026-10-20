@@ -329,3 +329,36 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
     assert win.chart.position_count == 1
     win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})                    # otro activo: se olvidan
     assert win.chart.position_count == 0
+
+
+def test_el_grafico_respeta_el_no_go_real_de_cortex_aunque_el_sesgo_lo_dejaria_pasar(tmp_path, monkeypatch):
+    """Caso US30: Cortex dio NO GO (posición abierta en otro mercado) y el gráfico lo pintaba GO por mirar solo su mercado."""
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.cortex.validation import Decision
+    from tradingbot.skills.pattern.patterns import Figure
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}]), cfg, "t")
+    monkeypatch.setattr(win, "_entry_decision", lambda index, direction: ("GO", "sin sesgo +1"))
+    df = m5_from_m15(ROWS)
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    day = DAY.isoformat()
+    entry_ts = ny(DAY, 10, 30)
+    figures = [Figure("pos", "reversion", "NY Open", "long", entry_ts, ny(DAY, 10, 45),
+                      {"entrada": 100.0, "stop": 96.0, "objetivo": 108.0}, "stop", "NY Open ▲ Rev", day)]
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures})
+    assert win.chart._positions[0]["decision"] == "GO"                                         # sin la decisión real, la estimación local
+    hit = SimpleNamespace(ts=entry_ts, direction="long", title="Reversión", key="reversion", detail="", levels={}, price=100.0)
+    from tradingbot.skills.pattern.patterns import ActiveTbr
+    tbr = ActiveTbr("NY_AM", "NY Open", DAY, 105.0, 95.0, -0.5, 9.5)
+    win._on_cortex_decision({"symbol": "EURUSD", "timeframe": "5m", "hit": hit, "tbr": tbr, "bias": None,
+                             "decision": Decision(False, "ya hay una posición abierta en XAUUSD (Reversión): hasta que no cierre")})
+    pos = win.chart._positions[0]
+    assert pos["decision"] == "NO GO" and pos["reason"] == "Posición abierta en el mercado"
