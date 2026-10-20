@@ -101,8 +101,10 @@ def test_el_sesgo_del_barrido_no_cambia_el_del_grafico():
     skill.on_start()
     skill.handle(Event("candles.loaded", {"symbol": "XAUUSD", "timeframe": "15m", "df": candles(), "background": True,
                                           "sweep": 3}, "feed"))
-    assert [e.topic for e in out] == ["bias.updated"]                   # sin histórico ni recálculo programado
-    p = out[0].payload
+    # el sesgo de cada vela (para que Cortex valide con el de la vela de entrada) va antes; sin recálculo programado
+    assert [e.topic for e in out] == ["bias.history", "bias.updated"]
+    assert out[0].payload["background"] and len(out[0].payload["ts"]) == len(out[0].payload["scores"]) == 200
+    p = out[1].payload
     assert p["symbol"] == "XAUUSD" and p["background"] and p["sweep"] == 3
     assert skill.result is None and skill._last is None
 
@@ -200,3 +202,28 @@ def test_con_barrido_la_senal_del_grafico_espera_a_la_vuelta():
     first, second = (d.payload for d in decisions)
     assert first["symbol"] == "XAUUSD" and first["decision"].allowed       # el de las 09:00 va antes que el de las 10:00
     assert second["symbol"] == "EURUSD" and not second["decision"].allowed
+
+
+def test_cortex_juzga_cada_patron_con_el_sesgo_de_su_vela():
+    """Un patrón pasado (repaso al arrancar) se valida con el sesgo que había en su vela de entrada, no con el de ahora:
+    el mismo con el que el gráfico marca GO / NO GO en la entrada."""
+    from tradingbot.ui.main_window import short_reason
+    bus, decisions = EventBus(), []
+    bus.subscribe("t", "cortex.decision", decisions.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig()), [{"type": "cortex"}])
+    manager.start()
+    ts = np.array([1_000, 1_900, 2_800])
+    bus.publish("bias.history", {"symbol": "EURUSD", "timeframe": "15m", "ts": ts, "scores": np.array([3.0, 3.0, -4.0]),
+                                 "min_score": 3.0, "lateral": None}, source="bias")
+    bus.publish("bias.updated", {"result": bias(Bias.BEARISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón", "long", 1, 100.0, "", {"stop": 95.0, "target": 115.0}, 1_900)
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    deadline = time.time() + 3
+    while not decisions and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    d = decisions[0].payload
+    assert d["decision"].allowed and d["bias"] is Bias.BULLISH                 # ahora es Bearish, pero en su vela era Bullish
+    assert "a favor del sesgo Bullish" in d["decision"].reason
+    assert short_reason("ya hay una posición abierta en GBPUSD (Continuación): hasta...") == "posición abierta en GBPUSD"
+    assert short_reason(d["decision"].reason) == "a favor +3"

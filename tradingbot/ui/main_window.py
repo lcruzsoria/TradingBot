@@ -48,6 +48,20 @@ BE_GREY = "#9E9E9E"                  # punto de las operaciones en breakeven (G 
 CHART_TOPICS = frozenset({"candles.loaded", "tbr.updated", "levels.updated", "bias.updated", "bias.history",
                           "pattern.updated", "pattern.session", "feed.failed"})
 
+
+def short_reason(reason: str) -> str:
+    """Motivo corto de una decisión de Cortex para la etiqueta de la entrada en el gráfico."""
+    if reason.startswith("ya hay una posición abierta en "):
+        return "posición abierta en " + reason.split("ya hay una posición abierta en ", 1)[1].split(" ")[0]
+    if reason.startswith("la sesión "):
+        return "sesión ya operada"
+    if "puntuación" in reason:
+        score = reason.split("puntuación", 1)[1].split()[0].rstrip(",;)")
+        side = "lateral" if "lateral" in reason else ("a favor" if "a favor" in reason else
+                                                       "en contra" if "contra" in reason else "sin sesgo")
+        return f"{side} {score}"
+    return reason.split(":")[0][:30]
+
 class MainWindow(QMainWindow):
     first_loaded = Signal()
 
@@ -329,6 +343,7 @@ class MainWindow(QMainWindow):
         self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
+        self._decisions: dict = {}                              # (mercado, TBR, día, lado) -> GO / NO GO de Cortex y motivo corto
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -1099,6 +1114,13 @@ class MainWindow(QMainWindow):
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran
         used = set()                                            # y una misma sesión no puede dar dos trades
         for pos in positions:
+            real = self._decisions.get((self.charted_symbol, *pos["session"], pos["direction"]))
+            if real is not None:                                # lo que decidió Cortex (con todos los mercados): manda
+                pos["decision"], pos["reason"] = real
+                if real[0] == "GO":
+                    busy_until = max(busy_until, pos["x1"])
+                    used.add(pos["session"])
+                continue
             if not pos["decision"]:
                 continue
             if pos["x0"] < busy_until:
@@ -1210,6 +1232,11 @@ class MainWindow(QMainWindow):
     def _on_cortex_decision(self, p: dict) -> None:
         side, when, lines = self._pattern_lines(p)
         hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
+        key = (p["symbol"], tbr.zone, tbr.day.isoformat(), hit.direction)
+        if key not in self._decisions or decision.allowed:     # de una sesión, el GO si lo hubo (solo puede haber uno)
+            self._decisions[key] = (decision.verdict, short_reason(decision.reason))
+            if p["symbol"] == self.charted_symbol:
+                self._apply_fibs()
         lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]
         lines += ["", "Con GO, Cortex le pasa la orden a Setup." if decision.allowed else "Con NO GO, Setup no recibe ninguna orden."]
         self.log(f"cortex: {decision.verdict} {side} ({hit.title}, {tbr.zone}, {p['symbol']} {display_label(p['timeframe'])}, {when}) - "

@@ -106,22 +106,26 @@ class BiasSkill(Skill):
                                                     htf=htf, htf_break=brk)
         self.result_symbol = self._last["symbol"]
         self.set_caption(f"{self.result.bias.value} ({self.result.score:+g})")      # sesgo y puntuación que lo define
+        self._history()                       # antes que el sesgo: Cortex valida cada patrón con el de su vela de entrada
         self.publish("bias.updated", {"result": self.result, "symbol": self._last["symbol"],
                                       "timeframe": self._last["timeframe"], "reason": self._reason})
         self._reason = "carga de velas"
-        self._history()
 
-    def _history(self) -> None:
-        """Puntuación que habría tenido el sesgo en cada vela del gráfico (histograma bajo el precio)."""
-        c = self._last
+    def _history(self, c: dict | None = None, index: bool | None = None, start: int | None = None) -> None:
+        """Puntuación que habría tenido el sesgo en cada vela del gráfico (histograma bajo el precio). Cortex la usa para
+        validar cada patrón con el sesgo que había en su vela de entrada (también en los mercados del barrido, `c`)."""
+        background = c is not None
+        c = c if background else self._last
         rules = [(r.key, r.weight) for r in getattr(self.services.engine, "rules", []) if getattr(r, "key", "")]
-        index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
-        start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
+        if index is None:
+            index = self._plan[4] if self._plan else is_us_index(c["symbol"], DEFAULT_US_INDICES)
+        if start is None:
+            start = self._plan[2] if self._plan else parse_time(DEFAULT_INDEX_DAY_START if index else DEFAULT_DAY_START, "inicio del día")
         ahead, _ = server_minus_ny(self._offset)
         htf_hours = self.sweep_index_hours if index else self.sweep_hours
-        recalc = self._plan[3] if self._plan else (self.index_hours if index else self.hours)
+        recalc = self._plan[3] if self._plan and not background else (self.index_hours if index else self.hours)
         df = c["df"]
-        period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD))
+        period = int((self._levels or {}).get("sma_period", DEFAULT_SMA_PERIOD if not background else self.levels_sma_period))
         votes = frozen_votes(df["ts"].to_numpy(), df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(),
                              df["close"].to_numpy(), rules, ahead, start, recalc, htf_hours, period)
         scores = votes @ np.array([float(w) for _k, w in rules]) if len(rules) else np.zeros(len(df))
@@ -133,7 +137,7 @@ class BiasSkill(Skill):
             lateral = lateral_flags(df["ts"].to_numpy(), df["close"].to_numpy(), engine.lateral_hours, engine.lateral_min, ids)
         self.publish("bias.history", {"symbol": c["symbol"], "timeframe": c["timeframe"], "scores": scores,
                                       "min_score": getattr(engine, "min_score", 1.0), "lateral": lateral,
-                                      "rules": titles, "votes": votes})
+                                      "rules": titles, "votes": votes, "ts": df["ts"].to_numpy(), **background_of(c)})
 
     def _sma_active(self) -> bool:
         return any(getattr(r, "key", "") == "sma" for r in getattr(self.services.engine, "rules", []))
@@ -162,6 +166,7 @@ class BiasSkill(Skill):
             levels.update(sma_of(df["close"], int((self._levels or {}).get("sma_period", self.levels_sma_period))))
         htf, brk = self._htf(c, index, start)
         result = self.services.engine.evaluate(df, levels=levels, htf=htf, htf_break=brk)
+        self._history(c, index, start)
         self.publish("bias.updated", {"result": result, "symbol": c["symbol"], "timeframe": tf,
                                       "reason": "barrido de la watchlist", **background_of(c)})
 

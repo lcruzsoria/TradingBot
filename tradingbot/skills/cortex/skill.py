@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
+
 from ..bias import Direction, TradeFilter
+from ..bias.models import Bias, BiasResult
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
 from .order import build_calendar_order, build_order
@@ -26,7 +29,7 @@ class CortexSkill(Skill):
                    "responde a las peticiones de operar (Bullish solo Long, Bearish solo Short). Mientras dura una vuelta "
                    "del barrido de la watchlist retiene los patrones y los decide al final, todos los mercados juntos y en "
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
-    subscribes = ("bias.updated", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal", "setup.closed",
+    subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal", "setup.closed",
                   "feed.sweep", "pattern.swept")
     publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
@@ -38,6 +41,7 @@ class CortexSkill(Skill):
         self.timeframe = ""
         self._bias: dict | None = None                  # último sesgo del gráfico
         self._biases: dict[str, dict] = {}              # mercado -> su último sesgo (gráfico o barrido)
+        self._history: dict[str, dict] = {}             # mercado -> el sesgo de cada vela (bias.history)
         self._pending: list[dict] = []                 # patrones (y señales de calendario) que esperan a su sesgo o al barrido
         self._round: dict | None = None                 # vuelta del barrido de la watchlist en curso
         env = self.services.env
@@ -78,6 +82,9 @@ class CortexSkill(Skill):
                 self.filter.update(p["result"])
                 self.set_caption(f"{self.symbol} {p['result'].bias.value}")
             self._decide()
+        elif event.topic == "bias.history":
+            if p.get("ts") is not None and len(p["ts"]) == len(p["scores"]):
+                self._history[p["symbol"]] = p
         elif event.topic == "pattern.detected":
             self._pending = (self._pending + [p])[-MAX_PENDING:]
             self._decide()
@@ -132,6 +139,24 @@ class CortexSkill(Skill):
 
     def tick(self) -> None:
         self._check_round()
+
+    def _bias_at(self, symbol: str, ts: int | None) -> BiasResult | None:
+        """El sesgo que tenía el bot en la vela `ts` de ese mercado (el mismo con el que el gráfico marca GO / NO GO en cada
+        entrada). Así un patrón pasado que se repasa al arrancar se juzga como en directo, no con el sesgo de ahora."""
+        h = self._history.get(symbol)
+        if h is None or not ts:
+            return None
+        times = np.asarray(h["ts"])
+        i = int(np.searchsorted(times, int(ts), "right")) - 1
+        if i < 0 or int(ts) > int(times[-1]):
+            return None                                   # fuera de las velas conocidas: vale el sesgo actual
+        score, least = float(h["scores"][i]), float(h["min_score"])
+        lateral = h.get("lateral")
+        side = bool(lateral[i]) if lateral is not None and len(lateral) == len(times) else False
+        bias = (Bias.NO_BIAS if side else Bias.BULLISH if score >= least else Bias.BEARISH if score <= -least
+                else Bias.NO_BIAS)
+        summary = f"sesgo en la vela de entrada: {'mercado lateral, ' if side else ''}puntuación {score:+g} (mínimo {least:g})"
+        return BiasResult(bias, None, (), {}, summary, score, least, side)
 
     def _busy(self, symbol: str, entry_ts: int | None = None):
         """La orden abierta que impide abrir otra en `symbol` (en toda la cuenta o solo en ese mercado), o None.
@@ -206,7 +231,7 @@ class CortexSkill(Skill):
             if bias is None:                                    # aún sin el sesgo de su mercado
                 waiting.append(p)
                 continue
-            result = bias["result"]
+            result = self._bias_at(p["symbol"], p["hit"].ts) or bias["result"]
             busy = self._busy(p["symbol"], p["hit"].ts)
             if busy is not None:                         # una sola posición abierta a la vez
                 decision = Decision(False, self._busy_reason(busy))
