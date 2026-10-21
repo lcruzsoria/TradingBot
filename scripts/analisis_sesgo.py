@@ -18,6 +18,7 @@ VALIDA con el 40 % restante, que no se ha usado para elegir nada.
 
 Uso:
     uv run python scripts/analisis_sesgo.py
+    uv run python scripts/analisis_sesgo.py --perfil puprime      (velas de analisis/m5/<perfil>/, de descargar_m5.py --perfil)
 """
 from __future__ import annotations
 
@@ -210,8 +211,9 @@ def final_report(parts: list[dict]) -> None:
 
 def main() -> None:
     only_refs = "--referencias" in sys.argv
+    profile = sys.argv[sys.argv.index("--perfil") + 1].lower() if "--perfil" in sys.argv else ""
     parts = []
-    for path in sorted(DATA.glob("*.parquet")):
+    for path in sorted((DATA / profile).glob("*.parquet")):
         b = load_symbol(path)
         parts.append(b)
         print(f"  {b['symbol']}: {b['n']} bloques ({b['when'][0]:%Y-%m-%d} -> {b['when'][-1]:%Y-%m-%d})")
@@ -232,7 +234,7 @@ def main() -> None:
     if only_refs:
         return
     res = grid(d)
-    res.to_parquet("analisis/sesgo_grid.parquet")
+    res.to_parquet(f"analisis/sesgo_grid{'_' + profile if profile else ''}.parquet")
     print(f"\nCombinaciones evaluadas: {len(res)}")
     ok = res[(res["cob_train"] >= 0.10) & (res["n_test"] >= 100)]
     best = ok.sort_values("t_train", ascending=False).head(25)
