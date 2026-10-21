@@ -396,3 +396,20 @@ def test_desde_el_inicio_del_forwardtest_se_avisa_tambien_de_las_tbr_pasadas(reg
         assert len(found) == expected, start
         if expected:
             assert found[0].payload["tbr"].day == DAY and found[0].payload["hit"].ts == ny(DAY, 12, 10)
+
+
+def test_la_posicion_dibujada_pasa_a_breakeven_como_la_simulada():
+    """Una vela de 15 min que cierra con +1 R sube el stop a la entrada; si luego lo toca, el dibujo es BE y no SL."""
+    import numpy as np
+    from tradingbot.skills.pattern.trade import position_figure
+    n = 10
+    ts = np.arange(n) * 900
+    close = np.full(n, 100.0)
+    high, low = close + 0.1, close - 0.1
+    close[3], high[3] = 110.0, 110.5                  # cierra con +1 R (riesgo 10)
+    low[5], close[5] = 89.0, 90.0                     # vuelve y toca el stop original, ya en la entrada
+    args = ("p", "NY Open", "long", 2, 100.0, 90.0, 130.0, "Patrón")
+    be = position_figure(PatternContext("X", "15m", 15, ts, close, high, low, close, TBR, 0, n - 1, True, be_r=1.0), *args)
+    assert be.state == "be" and be.x1_ts == int(ts[4]) + 900              # toca la entrada en la vela 4 (low 100 - 0,1)
+    sl = position_figure(PatternContext("X", "15m", 15, ts, close, high, low, close, TBR, 0, n - 1, True), *args)
+    assert sl.state == "stop"                                           # sin breakeven (be_r None) se dibuja como antes
