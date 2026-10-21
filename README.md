@@ -70,7 +70,8 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
 
 1. **Rotura con cuerpo:** una vela de M15 **cierra** por encima del High de la TBR (o por debajo del Low). Una mecha sola no activa
    la TBR. Se evalúa la última TBR cerrada de cada zona (Asia, London, NY Open) mientras dura su plazo; las que no se han activado
-   no dejan nada, y no se usan TBR de hace más de un día.
+   no dejan nada, y no se usan TBR de hace más de un día. Si antes de la rotura una vela ya había tomado ese mismo lado
+   solo con la mecha (cerrando dentro), el lado es de Reversión y la Continuación no se da.
 2. **Swing points tras la rotura** (`PATTERN_CONTINUACION_SWING_BARS` velas de cada lado, 1 al inicio: el patrón de tres velas):
    el **0** es un swing high y el **1** el swing low que viene después de él (en la rotura bajista, al revés). Mientras no hay swing
    low, un swing high más alto sustituye al 0; si el precio pierde el 1 antes de superar el 0, se busca otro swing low.

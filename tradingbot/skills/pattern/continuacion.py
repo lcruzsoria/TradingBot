@@ -3,7 +3,8 @@
 Ejemplo alcista (el bajista es el espejo exacto, con el Low):
 
 1. Rotura: una vela de M15 CIERRA por encima del High de la TBR (rotura con cuerpo; una mecha sola no activa la TBR). La primera
-   vela de ese tipo tras el cierre de la TBR, dentro de su plazo, la activa.
+   vela de ese tipo tras el cierre de la TBR, dentro de su plazo, la activa. Si antes de esa rotura una vela ya tomó ese mismo lado
+   con la mecha (y cerró dentro), el lado es de Reversión y la Continuación se bloquea.
 2. Swing points tras la rotura (pivotes de `PATTERN_CONTINUACION_SWING_BARS` velas a cada lado, 1 al inicio: el patrón de tres velas,
    con el extremo en la del medio): el 0 es un swing high y el 1 es el swing low que viene después de él. Mientras no hay swing low, un
    swing high más alto sustituye al 0; si el precio pierde el 1 antes de superar el 0, el 1 se busca de nuevo (un swing low más bajo).
@@ -116,6 +117,8 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
                                                   f"{ctx.next_zone} ({ctx.next_hours} NY)")], []
         return [], []
     j, up = brk
+    if (h[start:j] > tbr.high).any() if up else (l[start:j] < tbr.low).any():
+        return [], []                                         # el lado ya se tomó con mecha: es de Reversión, no de Continuación
     sign = 1 if up else -1
     # espejo: el bajista se calcula con los precios cambiados de signo, así la lógica es una sola
     H, L = (h, l) if up else (-l, -h)

@@ -102,6 +102,15 @@ def test_una_mecha_sola_no_activa_la_tbr_solo_el_cuerpo():
     assert analyze(ctx_for(wick), 1) == ([], [])
 
 
+def test_una_toma_previa_con_mecha_del_mismo_lado_bloquea_la_continuacion():
+    pre = ROWS[:8] + [(103.5, 106, 103, 104)]                          # 8: toma el High con la mecha (106) y cierra dentro
+    rows = pre + ROWS[9:]                                              # y después llega la rotura con cuerpo
+    assert analyze(ctx_for(rows), 1) == ([], [])
+    assert analyze(ctx_for(mirror(rows)), 1) == ([], [])               # y el espejo con el Low
+    other = ROWS[:8] + [(103.5, 104.5, 94, 104)] + ROWS[9:]            # una mecha por el Low no bloquea la rotura del High
+    assert analyze(ctx_for(other), 1)[0][0].status == DETECTED
+
+
 def test_swing_bars_cambia_que_cuenta_como_pivote():
     rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 111, 106.5, 109), (109, 110.5, 105, 106), (106, 108, 103, 104), (104, 109, 104, 108)]
     assert analyze(ctx_for(rows), 1)[1][0].levels["1"] == 103.0
