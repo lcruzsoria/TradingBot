@@ -97,8 +97,8 @@ Ejemplo bajista; el alcista es el espejo exacto. También trabaja siempre con ve
    alcista). Si cerrara fuera sería una rotura con cuerpo y la TBR es del patrón Continuación. Se evalúa la primera toma de un lado.
 2. **Mecha pivote:** el pivote de tres velas que forma esa mecha (su máximo es el más alto de las tres). Si antes de confirmarse
    una vela cierra por encima del High, el patrón se invalida.
-3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): el **1** es la mecha pivote y el **0** el último pivote bajo confirmado que
-   genera a continuación (uno posterior más bajo, antes de revertir al 0,5, lo sustituye); 0,5 y -0,5 como en Continuación.
+3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): el **1** es la mecha pivote y el **0** el primer pivote bajo confirmado que
+   genera a continuación (queda fijo: uno posterior más bajo no lo sustituye); 0,5 y -0,5 como en Continuación.
 4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí), **stop** en la mecha pivote (el 1) y **objetivo** en el -0,5: **2R**.
    Si el precio supera la mecha pivote antes de la entrada, el patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5,
    vence. Ambos patrones pueden dar señal en la misma TBR: Cortex las valida con el sesgo.

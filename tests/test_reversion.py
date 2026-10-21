@@ -77,15 +77,14 @@ def test_una_misma_vela_con_mecha_en_los_dos_lados_no_da_patron():
     assert h.status == INVALIDATED and h.direction == "" and "High y el Low" in h.detail
 
 
-def test_el_0_se_desplaza_al_pivote_mas_bajo_antes_de_revertir_al_05():
+def test_el_0_es_el_primer_pivote_y_no_se_desplaza_a_uno_posterior_mas_bajo():
     rows = ROWS[:9] + [(98.5, 99.0, 93, 94),                          # 9: no revierte (máx. 99 < 101) y baja más
-                       (94, 96, 93.5, 95),                            # 10: confirma el pivote bajo 93 (el 0 pasa a 93)
-                       (95, 99.6, 94.5, 99)]                          # 11: 0,5 nuevo = (93+106)/2 = 99,5 -> entrada
+                       (94, 96, 93.5, 95),                            # 10: confirma el pivote bajo 93, pero el 0 sigue en el primero (96)
+                       (95, 99.6, 94.5, 99)]                          # 11: con el 0 en 96 el 0,5 sigue en 101: no entra
     hits, figs = run(rows)
-    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 11, 99.5)]
-    assert figs[0].levels["0"] == 93.0 and hits[0].levels["target"] == 86.5
-    hits, figs = run(rows[:11])                                       # antes de la entrada: el 0 ya es el nuevo pivote
-    assert hits == [] and figs[0].levels["0"] == 93.0 and figs[0].state == "en curso"
+    assert hits == [] and figs[0].levels == {"-0,5": 91.0, "0": 96.0, "0,5": 101.0, "1": 106.0} and figs[0].state == "en curso"
+    hits, figs = run(rows + [(99, 101.2, 98, 101)])                   # 12: retrocede al 0,5 del primer tramo: entrada
+    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 12, 101.0)] and figs[0].levels["0"] == 96.0
 
 
 def test_si_el_precio_supera_la_mecha_pivote_antes_de_la_entrada_se_invalida():
