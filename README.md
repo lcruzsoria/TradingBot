@@ -71,18 +71,15 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
 1. **Rotura con cuerpo:** una vela de M15 **cierra** por encima del High de la TBR (o por debajo del Low). Una mecha sola no activa
    la TBR. Se evalúa la última TBR cerrada de cada zona (Asia, London, NY Open) mientras dura su plazo; las que no se han activado
    no dejan nada, y no se usan TBR de hace más de un día.
-2. **Swing previo:** el último pivote bajo (el patrón de tres velas: el mínimo más bajo en la del medio; `PATTERN_CONTINUACION_SWING_BARS`
-   velas de cada lado, 1 al inicio) anterior a la rotura,
-   desde el inicio de la TBR (a la derecha se miran las velas hasta la propia rotura, así que el pico justo antes de la vela de rotura
-   también cuenta); si no hay ninguno, el mínimo más bajo desde su inicio. En la rotura bajista, el pivote alto.
-3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): el **1** es el swing, el **0** el extremo que va alcanzando
-   el último **pivote de tres velas** confirmado tras la rotura (el mínimo más bajo, o el máximo más alto, en la del medio; un pivote
-   posterior más extremo alarga el tramo y, hasta que hay uno confirmado, el 0 provisional es el extremo que lleva el precio),
-   el **0,5** el punto medio y el **-0,5** (en rojo) media
-   vuelta del tramo más allá del 0.
-4. **Entrada:** la primera vela que revierte hasta el 0,5 (su mínimo lo toca): se identifica en ese momento y el 0 queda fijo.
-   **Stop** en el swing (el 1) y **objetivo** en el -0,5: con entrada en el 0,5 son **2R**. Si el plazo de la TBR termina sin
-   reversión al 0,5, el patrón vence y el Registro lo indica.
+2. **Swing points tras la rotura** (`PATTERN_CONTINUACION_SWING_BARS` velas de cada lado, 1 al inicio: el patrón de tres velas):
+   el **0** es un swing high y el **1** el swing low que viene después de él (en la rotura bajista, al revés). Mientras no hay swing
+   low, un swing high más alto sustituye al 0; si el precio pierde el 1 antes de superar el 0, se busca otro swing low.
+3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): del swing high (0) al swing low (1), con el **0,5**
+   como punto medio y el **-0,5** (en rojo) media vuelta del tramo más allá del 0. El tramo queda fijo. Se **activa** cuando el
+   precio supera el 0; hasta entonces solo se dibuja.
+4. **Entrada:** ya activado, la primera vela que retrocede hasta el 0,5 (su mínimo lo toca).
+   **Stop** en el swing low (el 1) y **objetivo** en el -0,5: con entrada en el 0,5 son **2R**. Si pierde el 1 antes de entrar, el
+   patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5, vence y el Registro lo indica.
 
 Solo se trata el fibonacci en curso; stop y objetivo viajan en la orden que Cortex le pasa a Setup (en simulación).
 

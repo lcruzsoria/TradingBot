@@ -1,4 +1,4 @@
-"""Patrón «Continuación»: rotura con cuerpo de la TBR en M15, fibonacci desde el swing previo y entrada en el 0,5."""
+"""Patrón «Continuación»: rotura con cuerpo de la TBR en M15, fibonacci del swing high al swing low posterior y entrada en el 0,5."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -9,18 +9,21 @@ import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.pattern.continuacion import Continuacion, analyze
-from tradingbot.skills.pattern.patterns import DETECTED, EXPIRED, PATTERN_REGISTRY, PatternContext
+from tradingbot.skills.pattern.patterns import DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY, PatternContext
 
 from tests.test_pattern import DAY, NY, TBR, ny, run_skill, session
 
-# TBR 95-105. Velas M15 (open, high, low, close): 0-7 dentro de la TBR (con un pivote bajo en la 2), 8 en adelante tras su cierre.
+# TBR 95-105. Velas M15 (open, high, low, close): 0-7 dentro de la TBR, 8 en adelante tras su cierre; swing_bars = 1 (tres velas).
 ROWS = [(101, 103, 100, 102), (102, 103, 99, 100), (100, 101, 97, 98), (98, 100, 98, 99.5), (99.5, 102, 99, 101),
         (101, 102, 100, 101.5), (101.5, 103, 101, 102.5), (102.5, 104, 102, 103.5),
         (103.5, 104.5, 103, 104),      # 8: no rompe (cierra bajo el High)
         (104, 108, 103.5, 107),        # 9: ROTURA CON CUERPO (cierra sobre el High 105)
-        (107, 110, 106, 109),          # 10: el precio sigue (nuevo máximo, 110)
-        (109, 109.5, 104, 105),        # 11: baja pero no llega al 0,5 (103,5)
-        (105, 106, 103, 105)]          # 12: baja hasta el 0,5: entrada
+        (107, 111, 106.5, 109),        # 10: swing high (111): su máximo es el más alto de las tres velas 9, 10 y 11
+        (109, 110.5, 105, 106),        # 11: confirma el swing high: el 0 es 111
+        (106, 108, 103, 104),          # 12: swing low (103)
+        (104, 109, 104, 108),          # 13: confirma el swing low: el 1 es 103 y el 0,5 es 107
+        (108, 113, 107.5, 112),        # 14: supera el 0 (113 > 111): activa el tramo, sin tocar aún el 0,5
+        (112, 114, 106, 107)]          # 15: retrocede al 0,5: entrada
 
 
 def ctx_for(rows, first_bar=8, last_bar=None, closed=False, start_bar=0, tbr=TBR):
@@ -34,65 +37,84 @@ def mirror(rows):
     return [(200 - o, 200 - l, 200 - h, 200 - c) for o, h, l, c in rows]
 
 
-def test_alcista_rotura_con_cuerpo_swing_previo_fibo_y_entrada_en_el_05():
-    hits, figs = analyze(ctx_for(ROWS), 2)
+def test_alcista_fibo_del_swing_high_al_swing_low_posterior_y_entrada_en_el_05():
+    hits, figs = analyze(ctx_for(ROWS), 1)
     assert len(hits) == 1
     h = hits[0]
-    assert (h.key, h.status, h.direction, h.x, h.price) == ("continuacion", DETECTED, "long", 12, 103.5)    # entrada en el 0,5
-    assert h.levels["stop"] == 97.0 and h.levels["target"] == 116.5                                       # swing y -0,5: 2R
-    assert (110 - 103.5) * 2 == pytest.approx(116.5 - 103.5) and (103.5 - 97) * 2 == pytest.approx(13.0)
+    assert (h.key, h.status, h.direction, h.x, h.price) == ("continuacion", DETECTED, "long", 15, 107.0)    # entrada en el 0,5
+    assert h.levels["stop"] == 103.0 and h.levels["target"] == 115.0                                      # swing low y -0,5: 2R
+    assert (115 - 107) == pytest.approx((107 - 103) * 2)
     assert [f.kind for f in figs] == ["fib", "pos"]                                                       # el fibonacci y la posición
     f = figs[0]
     assert (f.kind, f.zone, f.direction, f.state) == ("fib", "NY Open", "long", "entrada")
-    assert f.levels == {"-0,5": 116.5, "0": 110.0, "0,5": 103.5, "1": 97.0}
-    assert f.x0_ts == int(ctx_for(ROWS).ts[2])                                                            # desde el swing (la vela 2)
+    assert f.levels == {"-0,5": 115.0, "0": 111.0, "0,5": 107.0, "1": 103.0}
+    assert f.x0_ts == int(ctx_for(ROWS).ts[10])                                                           # desde el swing high (la vela 10)
 
 
 def test_bajista_es_el_espejo_exacto():
-    hits, figs = analyze(ctx_for(mirror(ROWS)), 2)
+    hits, figs = analyze(ctx_for(mirror(ROWS)), 1)
     h = hits[0]
-    assert (h.status, h.direction, h.x, h.price) == (DETECTED, "short", 12, 96.5)
-    assert h.levels["stop"] == 103.0 and h.levels["target"] == 83.5
-    assert figs[0].levels == {"-0,5": 83.5, "0": 90.0, "0,5": 96.5, "1": 103.0} and figs[0].direction == "short"
+    assert (h.status, h.direction, h.x, h.price) == (DETECTED, "short", 15, 93.0)
+    assert h.levels["stop"] == 97.0 and h.levels["target"] == 85.0
+    assert figs[0].levels == {"-0,5": 85.0, "0": 89.0, "0,5": 93.0, "1": 97.0} and figs[0].direction == "short"
 
 
-def test_fibo_en_curso_el_0_se_actualiza_hasta_que_revierte():
-    hits, figs = analyze(ctx_for(ROWS, last_bar=10), 2)
+def test_el_fibo_se_dibuja_con_los_dos_swing_points_y_no_hay_entrada_hasta_que_retrocede():
+    hits, figs = analyze(ctx_for(ROWS, last_bar=14), 1)                                                   # activado, sin retroceso aún
     assert hits == [] and len(figs) == 1 and figs[0].state == "en curso"
-    assert figs[0].levels["0"] == 110.0 and figs[0].levels["0,5"] == 103.5                                # el máximo sube a 110
-    hits, figs = analyze(ctx_for(ROWS, last_bar=9), 2)
-    assert hits == [] and figs[0].levels["0"] == 108.0 and figs[0].levels["0,5"] == 102.5                 # justo en la rotura
-    assert hits == [] and analyze(ctx_for(ROWS, last_bar=8), 2) == ([], [])                              # sin rotura: nada
+    assert figs[0].levels == {"-0,5": 115.0, "0": 111.0, "0,5": 107.0, "1": 103.0}                        # el tramo queda fijo
+    hits, figs = analyze(ctx_for(ROWS, last_bar=13), 1)                                                   # swing low confirmado, sin activar
+    assert hits == [] and figs[0].levels["1"] == 103.0 and figs[0].levels["0"] == 111.0
+    assert analyze(ctx_for(ROWS, last_bar=11), 1) == ([], [])                                             # aún no hay swing low
+    assert analyze(ctx_for(ROWS, last_bar=8), 1) == ([], [])                                              # sin rotura: nada
+
+
+def test_no_hay_entrada_si_el_precio_no_supera_el_0_aunque_toque_el_05():
+    rows = ROWS[:14] + [(108, 110, 106, 107)]                              # toca el 0,5 (107) pero su máximo no supera el 0 (111)
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert hits == [] and figs[0].state == "en curso"
+
+
+def test_si_pierde_el_1_antes_de_superar_el_0_se_busca_otro_swing_low():
+    rows = ROWS[:14] + [(108, 109, 101, 102), (102, 105, 102, 104), (104, 114, 103, 113), (113, 114, 105, 106)]
+    # 14: pierde el 103 (mínimo 101); 15: confirma el swing low 101; 16: supera el 0; 17: retrocede al 0,5 de 111 y 101 (106)
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert figs[0].levels == {"-0,5": 116.0, "0": 111.0, "0,5": 106.0, "1": 101.0}
+    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 17, 106.0)]
+
+
+def test_un_swing_high_mas_alto_antes_del_swing_low_sustituye_al_0():
+    rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 111, 106.5, 109), (109, 110, 108, 109.5), (109.5, 113, 109, 112),
+                       (112, 112.5, 108, 109), (109, 110, 105, 106), (106, 110, 106, 109)]
+    # 10: swing high 111, 12: swing high más alto 113 (sin swing low entre medias), 14: swing low 105 confirmado en 15
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert figs[0].levels["0"] == 113.0 and figs[0].levels["1"] == 105.0
+
+
+def test_perder_el_1_con_el_tramo_activo_invalida_el_patron():
+    rows = ROWS[:15] + [(112, 112.5, 102, 103)]                            # activado en la 14; la 15 pierde el 103 (y toca el 0,5)
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 15)] and figs == []
 
 
 def test_una_mecha_sola_no_activa_la_tbr_solo_el_cuerpo():
     wick = ROWS[:9] + [(104, 108, 103.5, 104.5)]                         # el máximo supera el High pero cierra dentro
-    assert analyze(ctx_for(wick), 2) == ([], [])
-    body = ROWS[:9] + [(104, 106, 103.5, 105.1)]                         # cierra apenas por encima: rotura con cuerpo
-    hits, figs = analyze(ctx_for(body), 2)
-    assert hits == [] and figs[0].state == "en curso"
-
-
-def test_sin_pivote_el_swing_es_el_minimo_mas_bajo_antes_de_la_rotura():
-    rows = [(104, 105, 103, 104), (103, 104, 102, 103), (102, 103, 101, 102), (101.5, 102, 100, 101), (101, 108, 100.5, 107)]
-    hits, figs = analyze(ctx_for(rows, first_bar=3), 2)
-    assert figs[0].levels["1"] == 100.0 and figs[0].x0_ts == int(ctx_for(rows).ts[3])
+    assert analyze(ctx_for(wick), 1) == ([], [])
 
 
 def test_swing_bars_cambia_que_cuenta_como_pivote():
-    lows = [100, 99, 97, 98, 99, 98.5, 99.5, 102, 103]
-    rows = [(l + 2, l + 3, l, l + 1.5) for l in lows] + [(104, 108, 103.5, 107)]                  # rotura con cuerpo en la vela 9
-    assert analyze(ctx_for(rows), 1)[1][0].levels["1"] == 98.5                                    # con 1 vela a cada lado, el último pivote es la 5
-    assert analyze(ctx_for(rows), 2)[1][0].levels["1"] == 97.0                                    # con 2, la 5 ya no es pivote: el último es la 2
+    rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 111, 106.5, 109), (109, 110.5, 105, 106), (106, 108, 103, 104), (104, 109, 104, 108)]
+    assert analyze(ctx_for(rows), 1)[1][0].levels["1"] == 103.0
+    assert analyze(ctx_for(rows), 2) == ([], [])                           # con dos velas a cada lado aún no se confirma el swing low
 
 
 def test_al_acabar_el_plazo_de_la_tbr_vence_con_el_motivo():
-    no_break = analyze(ctx_for(ROWS[:9], closed=True), 2)[0][0]
+    no_break = analyze(ctx_for(ROWS[:9], closed=True), 1)[0][0]
     assert no_break.status == EXPIRED and "no hubo rotura con cuerpo" in no_break.detail and "NY-PM (13:30 NY)" in no_break.detail
-    no_entry = analyze(ctx_for(ROWS[:12], closed=True), 2)[0][0]
+    no_entry = analyze(ctx_for(ROWS[:15], closed=True), 1)[0][0]
     assert no_entry.status == EXPIRED and "sin reversión al 0,5" in no_entry.detail
-    assert analyze(ctx_for(ROWS[:12], closed=True), 2)[1] == []                                           # y ya no se dibuja
-    assert analyze(ctx_for(ROWS, closed=True), 2)[0][0].status == DETECTED                               # si revirtió a tiempo, vale
+    assert analyze(ctx_for(ROWS[:15], closed=True), 1)[1] == []                                           # y ya no se dibuja
+    assert analyze(ctx_for(ROWS, closed=True), 1)[0][0].status == DETECTED                               # si revirtió a tiempo, vale
 
 
 def test_ajustes_del_patron():
@@ -121,10 +143,10 @@ def test_la_skill_con_el_grafico_en_m5_agrupa_en_m15_y_publica_el_fibo():
     manager.stop()
     assert len(found) == 1 and dropped == []
     p = found[0].payload
-    assert p["timeframe"] == "15m" and p["hit"].direction == "long" and p["hit"].price == 103.5 and p["tbr"].zone == "NY Open"
-    assert p["hit"].ts == ny(DAY, 10, 0) + 12 * 900
+    assert p["timeframe"] == "15m" and p["hit"].direction == "long" and p["hit"].price == 107.0 and p["tbr"].zone == "NY Open"
+    assert p["hit"].ts == ny(DAY, 10, 0) + 15 * 900
     figs = [f for f in updated[-1].payload["figures"] if f.kind == "fib"]
-    assert len(figs) == 1 and figs[0].levels["1"] == 97.0 and updated[-1].payload["tfs"] == {"continuacion": "15m"}
+    assert len(figs) == 1 and figs[0].levels["1"] == 103.0 and updated[-1].payload["tfs"] == {"continuacion": "15m"}
     assert manager.skills["pattern"].caption == "1 patrón(es) en NY Open"
 
 
@@ -215,66 +237,20 @@ def test_el_grafico_dibuja_una_sola_entrada_por_tbr_la_que_opera_cortex(tmp_path
     assert pill.border.color().name().upper() == "#EF5350"                                       # borde rojo: saltó el stop
 
 
-def test_el_pico_justo_antes_de_la_vela_de_rotura_es_el_swing_y_no_el_maximo_de_la_tbr():
-    rows = [(100, 104, 99, 101), (101, 105, 100, 104),                      # 1: el máximo de la TBR (105)
-            (104, 104.5, 101, 102), (102, 102.8, 100, 101),                 # dentro de la TBR
-            (101, 102.5, 100, 102),                                         # primera vela tras el cierre
-            (102, 103, 101, 101.5),                                         # 5: el pico inmediatamente anterior a la rotura (103)
-            (101.5, 102, 93, 94)]                                           # 6: cierra bajo el Low (95): rotura con cuerpo
-    hits, figs = analyze(ctx_for(rows, first_bar=4), 2)
-    assert figs[0].direction == "short" and figs[0].levels["1"] == 103.0                                    # el 1 en el pico de la vela 5
-    assert figs[0].x0_ts == int(ctx_for(rows).ts[5]) and figs[0].levels["0"] == 93.0
-    long_rows = mirror(rows)
-    assert analyze(ctx_for(long_rows, first_bar=4), 2)[1][0].levels["1"] == 97.0                            # y su espejo en el largo
-
-
-def test_por_defecto_el_swing_es_el_patron_de_tres_velas():
-    rows = [(100, 104, 99, 101), (101, 105, 100, 104), (104, 104.5, 101, 102), (102, 102.8, 100, 101), (101, 102.5, 100, 102),
-            (102, 103, 101, 101.5), (101.5, 102, 93, 94)]
-    # la vela 5 tiene el máximo más alto de las tres (4, 5 y 6): ese es el swing, aunque otras velas anteriores lleguen más arriba
-    assert analyze(ctx_for(rows, first_bar=4), Continuacion().swing_bars)[1][0].levels["1"] == 103.0
-
-
-PIVOTS = ROWS[:9] + [(104, 108, 103.5, 107),          # 9: rotura con cuerpo
-                     (107, 109, 106.5, 108.5),        # 10: primer pivote: su máximo (109) es el más alto de las tres velas 9, 10 y 11
-                     (108.5, 108.8, 107, 108),        # 11: confirma el pivote 10 (no toca el 0,5: 103)
-                     (108, 111, 107.5, 110.5),        # 12: nuevo máximo...
-                     (110.5, 110.9, 109, 109.5),      # 13: ...que se confirma como pivote más alto: el 0 pasa a 111 (0,5 = 104)
-                     (109.5, 110, 103, 103.5),        # 14: baja hasta el 0,5: entrada
-                     (103.5, 120, 103, 119)]          # 15: el precio sigue después (no mueve el 0 ya fijado)
-
-
-def test_el_0_es_el_pivote_de_tres_velas_con_el_extremo_en_la_del_medio():
-    hits, figs = analyze(ctx_for(PIVOTS), 1)
-    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 14, 104.0)]                           # 0,5 de 97 a 111
-    assert hits[0].levels["target"] == 118.0 and figs[0].levels["0"] == 111.0 and figs[0].levels["-0,5"] == 118.0
-    hits, figs = analyze(ctx_for(PIVOTS, last_bar=11), 1)                                                # solo el primer pivote (109)
-    assert hits == [] and figs[0].levels["0"] == 109.0 and figs[0].levels["0,5"] == 103.0
-    sh, sf = analyze(ctx_for(mirror(PIVOTS)), 1)                                                         # el corto: el bajo más bajo en la del medio
-    assert sh[0].direction == "short" and sf[0].levels["0"] == 89.0 and sf[0].levels["1"] == 103.0 and sh[0].price == 96.0
-
-
-def test_la_vela_que_confirma_el_pivote_puede_ser_la_que_toca_el_05():
-    rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 110, 106, 109), (109, 109.5, 103, 103.5)]
-    hits, figs = analyze(ctx_for(rows), 1)
-    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 11, 103.5)] and figs[0].levels["0"] == 110.0
-
-
 def test_la_posicion_se_dibuja_con_entrada_stop_y_objetivo_y_su_resultado():
     from tradingbot.skills.pattern.trade import outcome
-    pos = analyze(ctx_for(PIVOTS[:15]), 1)[1][1]
-    assert (pos.kind, pos.direction, pos.state) == ("pos", "long", "abierta")                              # aún no llega a 118 ni a 97
-    assert pos.levels == {"entrada": 104.0, "stop": 97.0, "objetivo": 118.0} and pos.x0_ts == int(ctx_for(PIVOTS).ts[14])
-    assert analyze(ctx_for(PIVOTS), 1)[1][1].state == "objetivo"                                           # la vela 15 (máx. 120) lo alcanza
-    hits, figs = analyze(ctx_for(PIVOTS[:15] + [(103.5, 118.5, 103, 118)]), 1)                              # la vela siguiente llega al objetivo
-    assert figs[1].state == "objetivo" and figs[1].x1_ts == int(ctx_for(PIVOTS[:15] + [(0, 0, 0, 0)]).ts[15]) + 900
-    stop_first = PIVOTS[:15] + [(103.5, 119, 96, 100)]                                                      # caben objetivo y stop: cuenta el stop
+    pos = analyze(ctx_for(ROWS), 1)[1][1]
+    assert (pos.kind, pos.direction, pos.state) == ("pos", "long", "abierta")                              # aún no llega a 115 ni a 103
+    assert pos.levels == {"entrada": 107.0, "stop": 103.0, "objetivo": 115.0} and pos.x0_ts == int(ctx_for(ROWS).ts[15])
+    hits, figs = analyze(ctx_for(ROWS + [(107, 115.5, 106, 115)]), 1)                                      # la vela siguiente llega al objetivo
+    assert figs[1].state == "objetivo"
+    stop_first = ROWS + [(107, 116, 102.5, 105)]                                                            # caben objetivo y stop: cuenta el stop
     assert analyze(ctx_for(stop_first), 1)[1][1].state == "stop"
     h = np.array([105.0, 108.0, 120.0]); l = np.array([100.0, 99.0, 101.0])
     assert outcome(h, l, 0, "long", 98.0, 118.0) == ("target", 2) and outcome(h, l, 0, "short", 121.0, 99.5) == ("target", 1)
     assert outcome(h, l, 0, "long", 99.5, 150.0) == ("stop", 1) and outcome(h, l, 0, "long", 90.0, 150.0) == (None, 2)
-    short = analyze(ctx_for(mirror(PIVOTS)), 1)[1][1]
-    assert short.direction == "short" and short.levels == {"entrada": 96.0, "stop": 103.0, "objetivo": 82.0}
+    short = analyze(ctx_for(mirror(ROWS)), 1)[1][1]
+    assert short.direction == "short" and short.levels == {"entrada": 93.0, "stop": 97.0, "objetivo": 85.0}
 
 
 def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(tmp_path, monkeypatch):

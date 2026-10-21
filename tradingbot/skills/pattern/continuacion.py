@@ -1,30 +1,28 @@
-"""Patrón «Continuación»: rotura con cuerpo de un lado de la TBR, fibonacci del tramo y entrada en la reversión al 0,5.
+"""Patrón «Continuación»: rotura con cuerpo de un lado de la TBR, fibonacci del último tramo de estructura y entrada en el 0,5.
 
 Ejemplo alcista (el bajista es el espejo exacto, con el Low):
 
 1. Rotura: una vela de M15 CIERRA por encima del High de la TBR (rotura con cuerpo; una mecha sola no activa la TBR). La primera
    vela de ese tipo tras el cierre de la TBR, dentro de su plazo, la activa.
-2. Swing previo: el último mínimo relevante (pivote: más bajo que las `PATTERN_CONTINUACION_SWING_BARS` velas de cada lado, 1 al
-   inicio: el patrón de tres velas, con el extremo en la del medio) anterior
-   a la rotura, desde el inicio de la TBR. A la derecha solo se miran las velas hasta la propia rotura, que confirma el pivote: así
-   el pico inmediatamente anterior a la vela de rotura también es swing. Si no hay ninguno, el mínimo más bajo desde el inicio de la
-   TBR hasta la rotura.
-3. Fibonacci de ese tramo, con tres niveles: el 1 es el swing (origen del tramo), el 0 es el último pivote confirmado tras la rotura (el
-   mismo patrón de tres velas: el máximo más alto en la vela del medio; un pivote más alto lo alarga) y el 0,5 es el punto medio. Hasta que
-   hay un pivote confirmado, el 0 provisional es el extremo que lleva el precio.
-4. Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca). Se identifica en ese momento y el 0 queda fijo; el precio de
-   referencia es el 0,5. Si termina el plazo de la TBR sin que el precio revierta al 0,5, el patrón vence.
-5. Stop en el swing (el nivel 1) y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R.
+2. Swing points tras la rotura (pivotes de `PATTERN_CONTINUACION_SWING_BARS` velas a cada lado, 1 al inicio: el patrón de tres velas,
+   con el extremo en la del medio): el 0 es un swing high y el 1 es el swing low que viene después de él. Mientras no hay swing low, un
+   swing high más alto sustituye al 0; si el precio pierde el 1 antes de superar el 0, el 1 se busca de nuevo (un swing low más bajo).
+3. Fibonacci de ese tramo (del swing high al swing low), con el 0,5 como punto medio. Queda fijo.
+4. Activación: el precio supera el 0 (rompe la estructura). Hasta entonces el fibo solo se dibuja, sin entrada.
+5. Entrada: la primera vela, ya activado, que retrocede hasta el 0,5 (su mínimo lo toca). Si pierde el 1 antes de eso, el patrón se
+   invalida; si termina el plazo de la TBR sin entrada, vence.
+6. Stop en el swing low (el nivel 1) y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5, 2R.
 
 Solo trata el fibonacci en curso de las TBR recientes que se han activado.
 Trabaja siempre con velas de `PATTERN_CONTINUACION_TF` (M15 al inicio), sea cual sea el timeframe del gráfico.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from ...timeframes import parse_timeframe
-from .fibo import run_fibo
 from .trade import position_figure
 from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
@@ -56,16 +54,41 @@ class Continuacion(Pattern):
         return analyze(ctx, self.swing_bars)[1]
 
 
-def _swing(L: np.ndarray, start: int, brk: int, k: int) -> int:
-    """Índice del último pivote bajo (más bajo que `k` velas a cada lado) entre `start` y la rotura; si no hay, el mínimo más bajo."""
-    for i in range(brk - 1, max(start, 0) - 1, -1):
-        if i - k < 0:
+@dataclass(frozen=True)
+class Leg:
+    zero: float | None        # swing high (el 0)
+    zero_idx: int
+    origin: float | None      # swing low posterior (el 1); None si todavía no hay
+    origin_idx: int
+    active: bool              # el precio ya superó el 0
+    entry: tuple[int, float] | None   # (vela de la entrada, nivel 0,5)
+    breach: int | None        # vela en la que el precio perdió el 1 con el tramo activado
+
+
+def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int) -> Leg:
+    """Recorre las velas `brk + 1 .. end` buscando el swing high (0), el swing low posterior (1), la activación y la entrada."""
+    zero, zero_idx, origin, origin_idx, act = None, -1, None, -1, None
+    for t in range(brk + 1, end + 1):
+        if act is not None:
+            if L[t] < origin:
+                return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
+            half = (zero + origin) / 2
+            if t > act and L[t] <= half:
+                return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None)
             continue
-        right = L[i + 1:min(i + k, brk) + 1]                    # a la derecha, hasta la propia vela de rotura (que confirma el pivote)
-        if L[i] < L[i - k:i].min() and L[i] < right.min():
-            return i
-    window = L[max(start, 0):brk]
-    return max(start, 0) + int(len(window) - 1 - np.argmin(window[::-1]))          # último mínimo (el más reciente si hay empate)
+        if origin is not None and L[t] < origin:
+            origin = None                                                   # perdió el 1 sin superar el 0: se busca otro swing low
+        p = t - k
+        if p >= max(brk, k):
+            if origin is None and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
+                if zero is None or H[p] > zero:
+                    zero, zero_idx = float(H[p]), p                         # un swing high más alto sustituye al 0
+            if zero is not None and p > zero_idx and L[p] < L[p - k:p].min() and L[p] < L[p + 1:p + k + 1].min():
+                if origin is None or L[p] < origin:
+                    origin, origin_idx = float(L[p]), p
+        if origin is not None and H[t] > zero:
+            act = t                                                         # superó el 0: el tramo queda fijo
+    return Leg(zero, zero_idx, origin, origin_idx, act is not None, None, None)
 
 
 def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], list[Figure]]:
@@ -98,36 +121,39 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     H, L = (h, l) if up else (-l, -h)
     side = "High" if up else "Low"
     direction = "long" if up else "short"
-    # 2) swing previo a la rotura
-    s = _swing(L, ctx.start_bar, j, swing_bars)
-    swing = float(L[s])
-    # 3) fibonacci del tramo (el 0 es el último pivote confirmado, ver fibo.py) y 4) reversión al 0,5
-    state = run_fibo(H, L, j, end, swing, swing_bars, j, float(H[j]))
-    zero, zero_idx, entry = state.zero, state.zero_idx, state.entry
-    extreme = state.extreme
-    half = (extreme + swing) / 2
-    target = extreme + (extreme - swing) / 2                  # nivel -0,5: media vuelta del tramo más allá del 0
-    levels = {"-0,5": sign * target, "0": sign * extreme, "0,5": sign * half, "1": sign * swing}
-    if state.breach is not None:
-        return [hit(INVALIDATED, direction, state.breach, sign * swing,
-                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing ({sign * swing:.5g}) antes de llegar "
+    # 2) swing high (0) y swing low posterior (1) tras la rotura; 3) activación al superar el 0 y 4) reversión al 0,5
+    leg = run_leg(H, L, j, end, swing_bars)
+    if leg.origin is None:
+        if ctx.window_closed:
+            x = min(max(end, 0), len(ts) - 1)
+            return [hit(EXPIRED, direction, x, tbr.mid, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin swing high y swing low "
+                                                        f"posteriores antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)")], []
+        return [], []
+    zero, swing, entry = leg.zero, leg.origin, leg.entry
+    half = (zero + swing) / 2
+    target = zero + (zero - swing) / 2                        # nivel -0,5: media vuelta del tramo más allá del 0
+    levels = {"-0,5": sign * target, "0": sign * zero, "0,5": sign * half, "1": sign * swing}
+    if leg.breach is not None:
+        return [hit(INVALIDATED, direction, leg.breach, sign * swing,
+                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing low ({sign * swing:.5g}) antes de llegar "
                     f"al 0,5: patrón invalidado")], []
     arrow = "▲" if up else "▼"
     label = f"{tbr.zone} {arrow}"
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
     if entry is not None:
         t, half = entry
-        detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing previo en {_when(ctx, s)}, 0 en {_when(ctx, zero_idx)}; reversión al 0,5 "
-                  f"({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el swing y objetivo en el -0,5 (2R)")
+        detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing high (0) en {_when(ctx, leg.zero_idx)} y swing low (1) en "
+                  f"{_when(ctx, leg.origin_idx)}; reversión al 0,5 ({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el "
+                  f"swing low y objetivo en el -0,5 (2R)")
         found = hit(DETECTED, direction, t, sign * half, detail,
-                    {"stop": sign * swing, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
+                    {"stop": sign * swing, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half})
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * swing, sign * target, label)
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "entrada", label, tbr.day.isoformat()), pos]
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "entrada", label, tbr.day.isoformat()), pos]
     if ctx.window_closed:
         x = min(max(end, 0), len(ts) - 1)
         return [hit(EXPIRED, direction, x, sign * half, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin reversión al 0,5 "
                                                         f"antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)")], []
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[s]), x_end, levels, "en curso", label, tbr.day.isoformat())]
+    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "en curso", label, tbr.day.isoformat())]
 
 
 def _when(ctx: PatternContext, i: int) -> str:
