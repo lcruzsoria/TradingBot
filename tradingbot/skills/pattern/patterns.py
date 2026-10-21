@@ -104,6 +104,7 @@ class PatternContext:
     start_bar: int = 0       # primera vela de la propia TBR
     limit_verb: str = "empezara"   # cómo se nombra el límite: "antes de que empezara X" o "antes de que terminara X"
     day_end: int = 0         # fin del día de trading de este mercado (minutos desde medianoche de NY): ahí cierran los trades
+    be_r: float | None = None   # R a favor que, al cierre de una vela de 15 min, pasan el stop a la entrada (como Setup); None: sin breakeven
 
 
 @dataclass(frozen=True)
