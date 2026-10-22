@@ -129,25 +129,3 @@ def test_el_boton_backtest_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
     assert dlg.isVisible() and win.backtest_btn.isChecked() and dlg.group_key == "oro"
     win.backtest_btn.click()
     assert not dlg.isVisible() and not win.backtest_btn.isChecked()
-
-
-def test_las_senales_no_go_se_siguen_en_la_sombra_sin_sumar_y_se_guardan(tmp_path):
-    from dataclasses import replace
-    from datetime import date
-    from tradingbot.skills.cortex.order import Order
-    from tradingbot.skills.setup.positions import Closed
-    from tradingbot.skills.stats.journal import Journal
-    from tradingbot.skills.stats.session import TradeStats
-    o = Order("USTEC", "15m", "long", "Reversión", "reversion", "London", date(2026, 10, 22), 1, 1, 1, 100.0, 99.0, 102.0,
-              "Bearish", -4.0, "contra el sesgo", "fin del día", 1_000, 2_000)
-    s = TradeStats()
-    assert s.shadow_executed(o) and not s.shadow_executed(replace(o))               # sin repetir
-    assert s.shadow_closed(o, Closed("objetivo", 102.0, 1_500, 2.0, 2.0)) and not s.shadow_closed(o, Closed("stop", 99.0, 1_600, -1.0, -1.0))
-    assert s.wins == 0 and s.total_r == 0 and not s.trades                          # no suma en nada
-    j = Journal(tmp_path)
-    j.shadow_opened(o)
-    j.shadow_closed(o, Closed("objetivo", 102.0, 1_500, 2.0, 2.0))
-    back = j.load_recent()
-    assert len(back.shadows) == 1 and back.shadows[0].closed.r == 2.0 and not back.trades
-    assert j.closes() == []                                                          # la cuenta virtual no las consolida
-    assert len(back.snapshot().shadows) == 1 and len(back.only(lambda t: False).shadows) == 0

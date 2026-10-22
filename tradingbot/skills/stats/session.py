@@ -121,7 +121,6 @@ class TradeStats:
     signals: list[Signal] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
     since: str | None = None             # inicio de la etapa (fecha y hora local) si se empezó una con «Nueva etapa»
-    shadows: list[Trade] = field(default_factory=list)   # las señales NO GO seguidas en simulado: no suman en ninguna cifra
 
     # -- registro ----------------------------------------------------------------------------
     def decision(self, allowed: bool, signal: Signal | None = None) -> bool:
@@ -162,48 +161,18 @@ class TradeStats:
         t.closed, t.stale = closed, False
         return True
 
-    def shadow_find(self, order) -> Trade | None:
-        key = trade_key(order)
-        for t in self.shadows:
-            if t.order is order or (key is not None and trade_key(t.order) == key):
-                return t
-        return None
-
-    def shadow_executed(self, order) -> bool:
-        """Anota una señal NO GO que se sigue en simulado; False si ya estaba."""
-        if self.shadow_find(order) is not None:
-            return False
-        self.shadows.append(Trade(order))
-        return True
-
-    def shadow_closed(self, order, closed) -> bool:
-        """Anota el resultado hipotético de una señal NO GO; False si no hay cierre o ya estaba anotado."""
-        if closed is None:
-            return False
-        t = self.shadow_find(order)
-        if t is None:
-            self.shadows.append(Trade(order, closed))
-            return True
-        if t.closed is not None:
-            return False
-        t.closed = closed
-        return True
-
     def reset(self, since: str | None = None) -> None:
         self.signals.clear()
         self.trades.clear()
-        self.shadows.clear()
         self.since = since
 
     def snapshot(self) -> TradeStats:
         """Copia independiente (para pasarla a otro hilo: la skill sigue anotando sobre la suya)."""
-        return TradeStats(list(self.signals), [Trade(t.order, t.closed, t.stale) for t in self.trades], self.since,
-                          [Trade(t.order, t.closed, t.stale) for t in self.shadows])
+        return TradeStats(list(self.signals), [Trade(t.order, t.closed, t.stale) for t in self.trades], self.since)
 
     def only(self, keep: Callable[[Trade], bool], keep_signal: Callable[[Signal], bool] = lambda s: True) -> TradeStats:
         """Las mismas cifras con solo las operaciones (y señales) que cumplan el filtro."""
-        return TradeStats([x for x in self.signals if keep_signal(x)], [t for t in self.trades if keep(t)], self.since,
-                          [t for t in self.shadows if keep(t)])
+        return TradeStats([x for x in self.signals if keep_signal(x)], [t for t in self.trades if keep(t)], self.since)
 
     @property
     def go(self) -> int:

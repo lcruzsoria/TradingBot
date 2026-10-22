@@ -21,8 +21,7 @@ class StatsSkill(Skill):
                    "lo publica para la ventana Forwardtest (acierto, R, drawdown, rachas, libros...). Backtest: carga el "
                    "histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia Calendario para la "
                    "ventana Backtest. No opera ni decide nada.")
-    subscribes = ("clock.offset", "cortex.decision", "setup.executed", "setup.closed", "setup.shadow.opened", "setup.shadow.closed",
-                  "stats.reset", "stats.reload")
+    subscribes = ("clock.offset", "cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload")
     publishes = ("stats.session", "stats.backtest")
     slot = "aux3"
 
@@ -70,14 +69,6 @@ class StatsSkill(Skill):
                 return
             if self.stats.executed(order):
                 self._save(self.journal.opened, order)
-        elif event.topic == "setup.shadow.opened":      # una señal NO GO, seguida en simulado (no suma en las cifras)
-            order = p["order"]
-            if self.counts(order.entry_ts) and self.stats.shadow_executed(order):
-                self._save(self.journal.shadow_opened, order)
-        elif event.topic == "setup.shadow.closed":
-            order = p["order"]
-            if self.counts(order.entry_ts) and self.stats.shadow_closed(order, p["closed"]):
-                self._save(self.journal.shadow_closed, order, p["closed"])
         elif event.topic == "setup.closed":
             if self.stats.find(p["order"]) is None and not self.counts(p["order"].entry_ts):
                 return

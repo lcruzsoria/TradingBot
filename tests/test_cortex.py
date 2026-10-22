@@ -255,23 +255,3 @@ def test_el_fin_del_dia_de_trading_es_17h_ny_y_18h_en_indices():
     assert ny(skill._session_close("USTEC", entry, ahead)) == "19 18:00"
     late = entry + 8 * 3600                                                                    # 18:00 NY
     assert ny(skill._session_close("EURUSD", late, ahead)) == "20 17:00"
-
-
-def test_un_no_go_se_sigue_en_la_sombra_sin_abrir_posicion():
-    import numpy as np
-    import pandas as pd
-    manager, bus, decisions, orders, executed = run_skills("")
-    shadow, closed = [], []
-    bus.subscribe("t", "setup.shadow.opened", shadow.append)
-    bus.subscribe("t", "setup.shadow.closed", closed.append)
-    bus.publish("bias.updated", {"result": bias(Bias.BEARISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
-    hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_000_000)
-    df = pd.DataFrame({"ts": np.array([1_000_000, 1_000_900]), "open": [105.0, 110.0], "high": [106.0, 116.0],
-                       "low": [104.0, 109.0], "close": [105.5, 115.0]})
-    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": df}, source="feed")
-    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
-    wait(closed)
-    manager.stop()
-    assert [d.payload["decision"].allowed for d in decisions] == [False] and not orders and not executed
-    assert len(shadow) == 1 and shadow[0].payload["order"].reason                    # lleva el motivo del NO GO
-    assert len(closed) == 1 and closed[0].payload["closed"].result == "objetivo" and closed[0].payload["closed"].r == 1.0

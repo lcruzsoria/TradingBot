@@ -31,7 +31,7 @@ class CortexSkill(Skill):
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
     subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal", "setup.closed",
                   "feed.sweep", "pattern.swept")
-    publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.shadow", "setup.candles")
+    publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
     interval = 5.0                   # para no esperar para siempre a una vuelta del barrido que no se completa
 
@@ -195,15 +195,6 @@ class CortexSkill(Skill):
         if df is not None:                              # si la operación ya terminó con las velas actuales, el resultado sale al momento
             self.publish("setup.candles", {"symbol": order.symbol, "timeframe": order.timeframe, "df": df})
 
-    def _shadow(self, order) -> None:
-        """Pasa a Setup una señal rechazada (NO GO) para que la siga en simulado: no abre posición ni ocupa el mercado."""
-        if not trackable(order):
-            return
-        self.publish("setup.shadow", {"order": order})
-        df = self._candles.get(order.symbol)
-        if df is not None:
-            self.publish("setup.candles", {"symbol": order.symbol, "timeframe": order.timeframe, "df": df})
-
     def _calendar(self, payload: dict) -> None:
         """Señal de calendario: GO sin consultar el sesgo (el backtest no lo usa), salvo CORTEX_CALENDAR_USE_BIAS=true."""
         direction = payload["direction"]
@@ -254,8 +245,6 @@ class CortexSkill(Skill):
             if decision.allowed:
                 self._used.add((p["symbol"], p["tbr"].zone, p["tbr"].day))
                 self._send(build_order(p, decision, result))
-            else:                                        # el NO GO se sigue en simulado: así se sabe qué habría pasado
-                self._shadow(build_order(p, decision, result))
             self.set_caption(f"{decision.verdict} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
         self._pending = waiting
 

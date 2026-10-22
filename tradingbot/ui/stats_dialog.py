@@ -439,7 +439,7 @@ class StatsDialog(QDialog):
         self._fill(self.by_symbol, s.groups(lambda t: t.order.symbol, self._symbols()))
         self._fill(self.by_bias, s.groups(lambda t: alignment_of(t.order), ALIGNMENTS))
         self._fill_signals(s)
-        self._fill_history(s.trades, s.shadows)
+        self._fill_history(s.trades)
 
     def _fill_signals(self, s: TradeStats) -> None:
         total = len(s.signals)
@@ -534,40 +534,17 @@ class StatsDialog(QDialog):
             item.setForeground(QBrush(QColor(color)))
         table.setItem(row, col, item)
 
-    def _fill_nogo_row(self, i: int, t: Trade) -> None:
-        o, dim = t.order, theme.MUTED
-        self._cell(self.history, i, 0, fecha_hora(self._to_ny(o.entry_ts)) if o.entry_ts else "-", dim)
-        self._cell(self.history, i, 1, f"{o.symbol} {display_label(o.timeframe)}", dim)
-        market = self.history.item(i, 1)
-        market.setData(Qt.ItemDataRole.UserRole, o.symbol)
-        market.setToolTip(f"NO GO de Cortex: {o.reason}\nVer {o.symbol} en el gráfico")
-        self._cell(self.history, i, 2, "Largo" if o.direction == "long" else "Corto", dim)
-        self._cell(self.history, i, 3, o.pattern, dim)
-        self._cell(self.history, i, 4, self._session(t), dim)
-        if t.closed:
-            self._cell(self.history, i, 5, "NG · " + RESULT_NAMES.get(t.closed.result, t.closed.result), dim)
-            self._cell(self.history, i, 6, _span(t.duration), dim)
-            self._cell(self.history, i, 7, _r(t.r), dim)
-        else:
-            self._cell(self.history, i, 5, "NG · en seguimiento", dim)
-            self._cell(self.history, i, 6, "-", dim)
-            self._cell(self.history, i, 7, "-", dim)
-
     def _on_history_click(self, row: int, col: int) -> None:
         """Pinchar el mercado de una operación del diario lo muestra en el gráfico."""
         item = self.history.item(row, 1)
         if col == 1 and item is not None and item.data(Qt.ItemDataRole.UserRole):
             self.market_clicked.emit(str(item.data(Qt.ItemDataRole.UserRole)))
 
-    def _fill_history(self, trades: list[Trade], shadows: list[Trade] = ()) -> None:
-        rows = sorted([*trades, *shadows], key=lambda t: t.order.entry_ts or 0, reverse=True)     # las más recientes arriba
-        nogo = {id(t) for t in shadows}                  # señales NO GO seguidas en simulado: atenuadas y sin sumar
+    def _fill_history(self, trades: list[Trade]) -> None:
+        rows = sorted(trades, key=lambda t: t.order.entry_ts or 0, reverse=True)     # las más recientes arriba
         self.history.setRowCount(len(rows))
         for i, t in enumerate(rows):
             o = t.order
-            if id(t) in nogo:
-                self._fill_nogo_row(i, t)
-                continue
             when = fecha_hora(self._to_ny(o.entry_ts)) if o.entry_ts else "-"
             side_color = theme.BULL if o.direction == "long" else theme.BEAR
             self._cell(self.history, i, 0, when)
