@@ -1,8 +1,11 @@
 """Operación de un patrón: cómo termina (stop u objetivo) y el dibujo de la posición, como la herramienta de posición de TradingView."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
+from ..setup.positions import resolve
 from .patterns import Figure
 
 MAX_HOLD_SECONDS = 24 * 3600          # igual que en cortex/order.py
@@ -43,8 +46,15 @@ def position_figure(ctx, key: str, zone: str, direction: str, t: int, entry: flo
     if ctx.day_end:
         close = min(close, day_close(int(ctx.ts[t]), ctx.ahead, ctx.day_end))      # y, antes, el fin del día de trading
     limit = int(np.searchsorted(ctx.ts, close, "left")) - 1
-    kind, idx = outcome(ctx.high, ctx.low, t, direction, stop, target, limit)
     tf_sec = ctx.tf_minutes * 60
-    state = {"target": "objetivo", "stop": "stop"}.get(kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")
+    kind, idx = None, min(limit, len(ctx.ts) - 1)
+    if limit >= t:      # la misma regla que la posición simulada de Setup, con su breakeven (stop a la entrada al cierre de una vela de 15 min)
+        order = SimpleNamespace(direction=direction, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close)
+        end = limit + 1
+        done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], ctx.be_r, tf_sec)
+        if done is not None:
+            kind, idx = done.result, int(np.searchsorted(ctx.ts, done.exit_ts, "left"))
+    state = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(
+        kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")
     return Figure("pos", key, zone, direction, int(ctx.ts[t]), int(ctx.ts[idx]) + tf_sec,
                   {"entrada": float(entry), "stop": float(stop), "objetivo": float(target)}, state, label, ctx.tbr.day.isoformat())

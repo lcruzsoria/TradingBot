@@ -80,6 +80,9 @@ class PatternSkill(Skill):
         self.day_end = parse_time(levels.get("DAY_START", DEFAULT_DAY_START), "LEVELS_DAY_START")
         self.index_day_end = parse_time(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START), "LEVELS_INDEX_DAY_START")
         self.us_indices = levels.get_list("US_INDICES", list(DEFAULT_US_INDICES))
+        setup = env.section("SETUP")                    # el breakeven del dibujo es el mismo que aplica Setup a la posición simulada
+        risk_pct, be_pct = setup.get_float("RISK_PCT", 1.0), setup.get_float("BE_TRIGGER_PCT", 1.0)
+        self.be_r = be_pct / risk_pct if risk_pct > 0 and be_pct > 0 else None
         wanted = [t.lower() for t in self.settings.get_list("TYPES", [])]
         unknown = [t for t in wanted if t not in PATTERN_REGISTRY]
         if unknown:
@@ -270,7 +273,7 @@ class PatternSkill(Skill):
             ctx = PatternContext(c["symbol"], ptf, minutes(ptf), ts, df["open"].to_numpy(), df["high"].to_numpy(),
                                  df["low"].to_numpy(), df["close"].to_numpy(), tbr, first, end, closed,
                                  window.next_zone if window else "", window.next_hours if window else "", ahead, start,
-                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]))
+                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]), self.be_r)
             try:
                 results += [(tbr, h) for h in pattern.detect(ctx)]
                 figures += pattern.figures(ctx)
