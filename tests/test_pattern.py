@@ -413,3 +413,18 @@ def test_la_posicion_dibujada_pasa_a_breakeven_como_la_simulada():
     assert be.state == "be" and be.x1_ts == int(ts[4]) + 900              # toca la entrada en la vela 4 (low 100 - 0,1)
     sl = position_figure(PatternContext("X", "15m", 15, ts, close, high, low, close, TBR, 0, n - 1, True), *args)
     assert sl.state == "stop"                                           # sin breakeven (be_r None) se dibuja como antes
+
+
+def test_la_entrada_del_fibo_espera_al_swing_y_viene_de_arriba():
+    import numpy as np
+    from tradingbot.skills.pattern.fibo import run_fibo
+    #            0     1     2     3     4     5     6
+    H = np.array([10., 12., 11., 8.5, 11.5, 9.5, 9.2])
+    L = np.array([5., 8., 6.5, 5.5, 8., 8.7, 6.5])
+    O = np.array([6., 9., 11., 6., 8.5, 9.4, 9.0])
+    # origen 5 (nivel 1); el pivote del 0 es la vela 1 (máx. 12), confirmado por la 2; 0,5 = 8,5
+    s = run_fibo(H, L, 0, 6, 5.0, 1, 1, 10.0, O)
+    assert s.zero == 12.0 and s.zero_idx == 1
+    # la vela 2 (confirma el swing) llega a 6,5 pero no vale; la 3 abre en 6 (ya por debajo del 0,5): tampoco; la 4 abre en 8,5 sin tocarlo...
+    # la 6 abre en 9 por encima del 0,5 y baja a 6,5: es la entrada
+    assert s.entry == (6, 8.5)

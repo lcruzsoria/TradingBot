@@ -104,7 +104,8 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
         return [], []
     origin_price = float(L[origin])
     # 3) fibonacci de la mecha pivote al pivote siguiente y 4) reversión al 0,5
-    state = run_fibo(H, L, confirmed, end, origin_price, k, origin + 1, float(H[origin:confirmed + 1].max()))
+    state = run_fibo(H, L, confirmed, end, origin_price, k, origin + 1, float(H[origin:confirmed + 1].max()),
+                     -o if up else o)
     zero_idx, entry = state.zero_idx, state.entry
     extreme = state.extreme
     half = (extreme + origin_price) / 2

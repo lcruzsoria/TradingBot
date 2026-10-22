@@ -5,7 +5,9 @@ Todo se calcula «en largo» (el origen es un mínimo y el tramo sube); el corto
 - Nivel 1: el origen del tramo (la mecha pivote en Reversión).
 - Nivel 0: el primer pivote confirmado (el máximo más alto en la vela del medio de `k` velas a cada lado) tras el origen. Queda fijo:
   un pivote posterior más alto no lo alarga. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
-- Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca).
+- Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca) viniendo de arriba (abre por encima del 0,5) y
+  después de la vela que confirma el pivote del 0: no se puede entrar en la propia vela que confirma el swing, porque hasta
+  que cierra no se sabe que el 0 existe.
 - Si el precio pierde el origen antes de la entrada (mínimo por debajo del nivel 1), el tramo se anula.
 - Stop en el nivel 1 y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5 son 2R.
 """
@@ -31,8 +33,9 @@ class FiboState:
 
 
 def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: float, k: int, first_pivot: int,
-             running: float) -> FiboState:
-    """Recorre las velas `last_done + 1 .. end`. `first_pivot`: primera vela que puede ser el pivote del 0; `running`: extremo ya visto."""
+             running: float, O: np.ndarray | None = None) -> FiboState:
+    """Recorre las velas `last_done + 1 .. end`. `first_pivot`: primera vela que puede ser el pivote del 0; `running`: extremo ya visto.
+    `O`: aperturas (con el mismo signo que H y L): si se dan, la vela de la entrada debe abrir por encima del 0,5."""
     zero, zero_idx = None, -1
     for t in range(last_done + 1, end + 1):
         if L[t] < origin:
@@ -42,6 +45,6 @@ def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: flo
             if zero is None:
                 zero, zero_idx = float(H[p]), p                             # el primer pivote fija el 0
         running = max(running, float(H[t]))
-        if zero is not None and t > zero_idx and L[t] <= (zero + origin) / 2:
+        if zero is not None and t > zero_idx + k and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
             return FiboState(zero, zero_idx, running, (t, (zero + origin) / 2), None)
     return FiboState(zero, zero_idx, running, None, None)
