@@ -247,11 +247,18 @@ def overlap_flags(trades: pd.DataFrame, take: pd.Series | None = None, exit_col:
     return flags
 
 
+NAS_DOW = ("NAS100", "US100", "USTEC", "NDX", "DJ30", "US30")        # Nasdaq y Dow con los nombres de los distintos brokers
+
+
+def is_nas_or_dow(market: str) -> bool:
+    return str(market).upper().startswith(NAS_DOW)
+
+
 IMPROVEMENTS = {
     "bot actual (sin mejoras)": lambda d: pd.Series(True, index=d.index),
     "solo largos de lunes (Asia y London)": lambda d: (d["entrada (NY)"].dt.dayofweek == 0) & (d["dirección"] == "long") & d["zona"].isin(["Asia", "London"]),
-    "solo NAS100 y DJ30": lambda d: d["mercado"].isin(["NAS100.r", "DJ30.r"]),
-    "largos de lunes (Asia y London) en NAS100 y DJ30": lambda d: (d["entrada (NY)"].dt.dayofweek == 0) & (d["dirección"] == "long") & d["zona"].isin(["Asia", "London"]) & d["mercado"].isin(["NAS100.r", "DJ30.r"]),
+    "solo NAS100 y DJ30": lambda d: d["mercado"].map(is_nas_or_dow),
+    "largos de lunes (Asia y London) en NAS100 y DJ30": lambda d: (d["entrada (NY)"].dt.dayofweek == 0) & (d["dirección"] == "long") & d["zona"].isin(["Asia", "London"]) & d["mercado"].map(is_nas_or_dow),
     "solo riesgo del stop >= 0,15 % del precio": lambda d: d["riesgo %"] >= 0.15,
 }
 
@@ -353,8 +360,8 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
 
 NOTES = [
     ("Qué es", "Backtest de los patrones Continuación y Reversión del bot (con sus fibonacci) en M15 sobre los índices americanos."),
-    ("Datos", "Velas M15 de MT5 (bid) con todo el histórico intradía que tiene el broker (antes de 2018 solo hay velas diarias, que se descartan; "
-              "US2000 empieza en 2020). Ver la hoja Datos."),
+    ("Datos", "Velas M15 de MT5 (bid) con todo el histórico intradía que tiene el broker (se descartan los tramos en que solo hay velas "
+              "diarias o de varias horas). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
     ("Breakeven", "Como el bot (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT, +1 R por defecto): si una vela M15 cierra con la posición a favor en esos R, el stop pasa a la entrada desde la vela siguiente; si lo toca, cierra a 0 R (resultado «breakeven»; solo queda el coste del spread). Con --be-r 0 se desactiva."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
@@ -370,7 +377,7 @@ NOTES = [
     ("Estadístico t", "R medio / (desviación típica / raíz de n): por debajo de 2 la ventaja no es estadísticamente distinguible de cero."),
     ("Drawdown", "Máxima caída de la curva de R acumulado, con las operaciones ordenadas por su hora de cierre."),
     ("Mitades", "Se parte el histórico por la mediana de las fechas: si una mitad gana y la otra pierde, el resultado es poco fiable."),
-    ("Límites", "Datos de un solo broker y ~4 años; con muchas variantes probadas parte de lo que gana puede ser azar."),
+    ("Límites", "Datos de demo de un solo broker; con muchas variantes probadas parte de lo que gana puede ser azar."),
 ]
 
 

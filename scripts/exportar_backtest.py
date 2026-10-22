@@ -34,6 +34,11 @@ sys.path.insert(0, str(ROOT))
 from tradingbot.envconfig import load as load_env                                     # noqa: E402
 from tradingbot.skills.stats.backtest import DAYS, Group                              # noqa: E402
 
+sys.path.insert(0, str(ROOT / "scripts"))
+import backtest_patrones as BT                                                         # noqa: E402
+
+CURRENT_NOTES = dict(BT.NOTES)                                                         # los textos de metodología al día
+
 OUT = ROOT / "tradingbot" / "skills" / "stats" / "backtest.json.gz"
 PROFILES = (("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"))      # carpetas analisis/<perfil>/
 GROUPS = (("indices", "Índices americanos", "backtest_indices.xlsx"), ("forex", "Forex", "backtest_forex.xlsx"),
@@ -93,10 +98,21 @@ def pattern_group(key: str, name: str, path: Path, profile: str, profile_name: s
     for sheet_name, short in STATIC.items():
         rows = sheet(path, sheet_name)
         out[short] = [[r["tema"], r["explicación"]] for r in rows] if short == "metodologia" else rows
+    out["metodologia"] = [[t, CURRENT_NOTES.get(t, e) if t != "Qué es" else e] for t, e in out["metodologia"]]
+    out["mejoras"] = improvements(path)
     for r in out["mejoras"]:
         r["n"], r["wr"] = r.pop("operaciones", None), r.pop("win rate %", None)
     check(Group(out["key"], f"{profile_name} · {name}", out), pd.read_excel(path, sheet_name="Resumen"))
     return out
+
+
+def improvements(path: Path) -> list[dict]:
+    """La hoja de mejoras, recalculada con las operaciones del Excel y los filtros actuales del script (los mercados por nombre
+    de broker: así no sale vacía con NAS100ft.s, USTEC...)."""
+    trades = pd.read_excel(path, sheet_name="Operaciones")
+    trades = trades.assign(**{c: pd.to_datetime(trades[c]) for c in trades.columns if c.startswith(("entrada (NY)", "cierre"))})
+    df = BT.improvements_sheet(trades)
+    return [{k: clean(v) for k, v in row.items()} for row in df.to_dict("records")]
 
 
 def check(group: Group, summary: pd.DataFrame) -> None:
