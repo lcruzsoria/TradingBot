@@ -329,3 +329,36 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
     assert win.chart.position_count == 1
     win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})                    # otro activo: se olvidan
     assert win.chart.position_count == 0
+
+
+def test_el_grafico_marca_con_una_s_roja_el_no_go_por_spread(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.pattern.patterns import Figure
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}]), cfg, "t")
+    monkeypatch.setattr(win, "_entry_decision", lambda index, direction: ("GO", "sin sesgo +1"))
+    df = m5_from_m15(ROWS)
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    df["spread"] = 1.0                                                                          # 1 sobre un riesgo de 4: 0,25 R
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    day = DAY.isoformat()
+    figures = [Figure("fib", "reversion", "NY Open", "long", ny(DAY, 10, 0), ny(DAY, 12, 0), {"0": 104.0, "0,5": 100.0, "1": 96.0},
+                      "entrada", "NY Open ▲ Rev"),
+               Figure("pos", "reversion", "NY Open", "long", ny(DAY, 10, 30), ny(DAY, 10, 45),
+                      {"entrada": 100.0, "stop": 96.0, "objetivo": 108.0}, "stop", "NY Open ▲ Rev", day)]
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures})
+    pos, = win.chart._positions
+    assert pos["decision"] == "NO GO" and pos["spread_abort"] and pos["reason"].startswith("spread alto")
+    pill, = win.chart._pos_pills
+    assert "S" in pill.toPlainText().replace("SL", "") and "ff1744" in pill.textItem.document().toHtml().lower()
+    df["spread"] = 0.05                                                                          # 0,01 R: pasa el spread
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": figures})
+    pos, = win.chart._positions
+    assert pos["decision"] == "GO" and not pos["spread_abort"]
