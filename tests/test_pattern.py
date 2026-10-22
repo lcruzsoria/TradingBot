@@ -65,7 +65,7 @@ class Descarta(Pattern):
 @pytest.fixture
 def registry(monkeypatch):
     """Solo los patrones de prueba (los patrones reales salen del registro durante el test)."""
-    for real in ("continuacion", "reversion"):
+    for real in ("continuacion", "reversion", "doble_barrido"):
         monkeypatch.delitem(PATTERN_REGISTRY, real)
     for key, cls in (("rompe_high", RompeElHigh), ("en_m5", EnM5), ("descarta", Descarta)):
         monkeypatch.setitem(PATTERN_REGISTRY, key, cls)
@@ -161,7 +161,7 @@ def run_skill(env_text="", df=None, timeframe="5m"):
 
 
 def test_sin_patrones_definidos_la_skill_lo_dice(monkeypatch):
-    for real in ("continuacion", "reversion"):
+    for real in ("continuacion", "reversion", "doble_barrido"):
         monkeypatch.delitem(PATTERN_REGISTRY, real)
     manager, _bus, found, dropped, _s, updated = run_skill()
     manager.stop()

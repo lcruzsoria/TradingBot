@@ -12,7 +12,7 @@ from ...timeframes import display_label, minutes
 from ..feed.datasource import aggregate_candles
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from ..tbr.zones import zones_from_settings
-from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, history_tbrs, recent_tbrs, window_for
+from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, PeerTbr, history_tbrs, recent_tbrs, window_for
 from .trade import day_close
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
@@ -173,12 +173,13 @@ class PatternSkill(Skill):
         tbr = recents[-1]                               # la TBR activa: la última que ha cerrado
         results, figures, errors, unavailable, tfs = [], [], [], [], {}
         windows = {}
+        peers = self._peers(t["sessions"], ahead)
         for item in recents:
             window = window_for(item, self.order, ahead, self.extend, self.until)
             windows[item.key] = window
             if window is not None and int(chart_ts[-1]) - window.close_ts > RECENT_SECONDS:
                 continue                                # una TBR de hace más de un día no se evalúa: ya es pasado
-            self._evaluate_tbr(c, item, window, ahead, results, figures, errors, unavailable, tfs)
+            self._evaluate_tbr(c, item, window, ahead, results, figures, errors, unavailable, tfs, peers)
         # TBR pasadas. Las de los últimos PATTERN_HISTORY_DAYS días se dibujan (fibos y entradas, solo en el gráfico); las
         # del inicio del forwardtest (STATS_FORWARD_START) en adelante además se avisan, para que Cortex las decida y el
         # forwardtest recoja todas las operaciones de todos los mercados, también lo que pasó con el bot cerrado.
@@ -195,9 +196,9 @@ class PatternSkill(Skill):
             if window is None or window.end_ts is None:
                 continue
             if live:
-                self._evaluate_tbr(c, item, window, ahead, results, figures if drawn else [], errors, unavailable, tfs)
+                self._evaluate_tbr(c, item, window, ahead, results, figures if drawn else [], errors, unavailable, tfs, peers)
             else:
-                self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {})
+                self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {}, peers)
         results.sort(key=lambda r: r[1].ts or 0)           # en orden de hora: así los decide Cortex
         hits = [h for _t, h in results]
         window = windows[tbr.key]
@@ -234,6 +235,15 @@ class PatternSkill(Skill):
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
                                                  "session_end": window.session_end_hours, **mark})
 
+    def _peers(self, sessions, ahead: int) -> tuple[PeerTbr, ...]:
+        """Todas las TBR cerradas (de cualquier zona, aunque PATTERN_ZONES no las busque) con sus horas, para los patrones que cruzan varias."""
+        peers = []
+        for item in history_tbrs(sessions, None, set(), 100_000):
+            window = window_for(item, self.order, ahead, self.extend, self.until)
+            if window is not None:
+                peers.append(PeerTbr(item.key, item.zone, item.day, item.high, item.low, window.start_ts, window.close_ts))
+        return tuple(peers)
+
     def _day_end(self, symbol: str) -> int:
         """Fin del día de trading (minutos de NY): 17:00 en forex y metales, 18:00 en los índices USA."""
         return self.index_day_end if is_us_index(symbol, self.us_indices) else self.day_end
@@ -242,7 +252,7 @@ class PatternSkill(Skill):
         """Fin del día de trading siguiente a la hora `ts` (servidor): ahí se cierra el trade."""
         return day_close(ts, ahead, self._day_end(symbol)) if ts else None
 
-    def _evaluate_tbr(self, c, tbr, window, ahead, results, figures, errors, unavailable, tfs) -> None:
+    def _evaluate_tbr(self, c, tbr, window, ahead, results, figures, errors, unavailable, tfs, peers=()) -> None:
         """Ejecuta los patrones sobre una TBR y recoge sus resultados y dibujos."""
         tf = c["timeframe"]
         chart_ts = c["df"]["ts"].to_numpy()
@@ -273,7 +283,7 @@ class PatternSkill(Skill):
             ctx = PatternContext(c["symbol"], ptf, minutes(ptf), ts, df["open"].to_numpy(), df["high"].to_numpy(),
                                  df["low"].to_numpy(), df["close"].to_numpy(), tbr, first, end, closed,
                                  window.next_zone if window else "", window.next_hours if window else "", ahead, start,
-                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]), self.be_r)
+                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]), self.be_r, peers)
             try:
                 results += [(tbr, h) for h in pattern.detect(ctx)]
                 figures += pattern.figures(ctx)

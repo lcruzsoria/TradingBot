@@ -72,6 +72,18 @@ class ActiveTbr:
 
 
 @dataclass(frozen=True)
+class PeerTbr:
+    """Otra TBR cerrada (no solo la activa), con sus horas en el servidor: para los patrones que cruzan varias TBR."""
+    key: str
+    zone: str
+    day: date
+    high: float
+    low: float
+    start_ts: int            # inicio de la TBR (hora del servidor, segundos)
+    close_ts: int            # cierre de la TBR
+
+
+@dataclass(frozen=True)
 class TbrWindow:
     """Plazo en el que se buscan patrones en una TBR: desde su cierre hasta el inicio de la siguiente."""
     close_ts: int            # cierre de la TBR (hora del servidor, segundos)
@@ -105,6 +117,7 @@ class PatternContext:
     limit_verb: str = "empezara"   # cómo se nombra el límite: "antes de que empezara X" o "antes de que terminara X"
     day_end: int = 0         # fin del día de trading de este mercado (minutos desde medianoche de NY): ahí cierran los trades
     be_r: float | None = None   # R a favor que, al cierre de una vela de 15 min, pasan el stop a la entrada (como Setup); None: sin breakeven
+    peers: tuple[PeerTbr, ...] = ()   # todas las TBR cerradas (la activa incluida), para los patrones que miran más de una
 
 
 @dataclass(frozen=True)
@@ -251,4 +264,4 @@ def window_for(tbr: ActiveTbr, order, ahead: int, extend=(), until=None) -> TbrW
                      session_end, last_hours, start_ts)
 
 
-from . import continuacion, reversion  # noqa: E402,F401  (registran los patrones definidos)
+from . import continuacion, doble_barrido, reversion  # noqa: E402,F401  (registran los patrones definidos)

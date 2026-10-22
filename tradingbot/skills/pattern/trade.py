@@ -49,7 +49,7 @@ def position_figure(ctx, key: str, zone: str, direction: str, t: int, entry: flo
     tf_sec = ctx.tf_minutes * 60
     kind, idx = None, min(limit, len(ctx.ts) - 1)
     if limit >= t:      # la misma regla que la posición simulada de Setup, con su breakeven (stop a la entrada al cierre de una vela de 15 min)
-        order = SimpleNamespace(direction=direction, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close)
+        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close)
         end = limit + 1
         done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], ctx.be_r, tf_sec)
         if done is not None:

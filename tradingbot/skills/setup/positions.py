@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 BE_CHECK_SECONDS = 15 * 60           # el paso del stop a breakeven se mira al cierre de cada vela de 15 min
+TOUCH_BE_PATTERNS = ("doble_barrido",)   # patrones cuyo stop pasa a la entrada en cuanto el precio toca +be_r (sin esperar al cierre de la vela)
 MARKET_CLOSED_SECONDS = 2 * 3600     # sin velas durante más de esto = mercado cerrado (el parón diario de 1 h no cuenta)
 
 
@@ -41,7 +42,8 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
 
     Breakeven (`be_r`, en R; None = sin breakeven): si una vela de 15 min cierra con la posición `be_r` R o más a favor, el stop
     pasa al precio de entrada desde la vela siguiente; si después lo toca, la operación cierra a 0 R («breakeven»).
-    `bar_seconds` es la duración de las velas, para saber cuáles cierran con una de 15 min.
+    `bar_seconds` es la duración de las velas, para saber cuáles cierran con una de 15 min. Los patrones de TOUCH_BE_PATTERNS no
+    esperan al cierre: el stop pasa a la entrada desde la vela siguiente a la que toca +`be_r` R con su máximo o mínimo.
 
     Si el mercado cierra (más de MARKET_CLOSED_SECONDS sin velas, o sin velas hasta `now`, la hora del servidor) la posición
     se cierra al precio de cierre de la última vela antes del cierre del mercado («tiempo»).
@@ -54,6 +56,7 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
         return None
     sign = 1.0 if long else -1.0
     be_ts = None
+    touch = getattr(order, "pattern_key", "") in TOUCH_BE_PATTERNS
 
     def done(result: str, price: float, i: int) -> Closed:
         move = sign * (price - entry)
@@ -74,7 +77,9 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
             return done("breakeven" if be_ts is not None else "stop", current, i)
         if hit_target:
             return done("objetivo", target, i)
-        if (be_r is not None and be_ts is None and i < len(ts) - 1 and closes_m15(ts[i], bar_seconds)
+        if be_r is not None and be_ts is None and touch and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r:
+            be_ts = int(ts[i])          # el precio tocó +be_r R: el stop pasa a la entrada desde la vela siguiente
+        elif (be_r is not None and be_ts is None and not touch and i < len(ts) - 1 and closes_m15(ts[i], bar_seconds)
                 and sign * (close[i] - entry) / risk >= be_r):
             be_ts = int(ts[i])          # vela cerrada (ya hay otra después): el stop pasa a la entrada
         last = i

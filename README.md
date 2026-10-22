@@ -199,6 +199,18 @@ Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *A
 
 Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long), con **Bearish** solo bajistas (Short), y con **No Bias** ambas. La futura capa de ejecución debe consultar `TradeFilter.check(direction)` antes de abrir cualquier trade.
 
+
+#### Patrón «Doble barrido TBR» (`doble_barrido`)
+
+Solo en NY Open, con velas de M5 (`PATTERN_DOBLE_BARRIDO_TF`). Ejemplo bajista; el alcista es el espejo exacto, con los Low.
+
+1. **Toma con cuerpo:** una vela cierra por encima de los High de Asia y London (basta cerrar sobre el más alto; el orden da igual), a partir del cierre de la última de las dos TBR. Puede ocurrir antes de que empiece NY Open.
+2. **Swing high:** el máximo absoluto del barrido; se va actualizando hasta que el precio baja de los dos High (paso 3) y entonces queda fijo.
+3. **Confirmación:** una vela pasa por debajo de los dos High (basta la mecha).
+4. **Entrada:** retesteo del más alto de los dos High (basta la mecha), desde el inicio de NY Open y viniendo de abajo. Stop en el 0,618 del fibonacci que va del nivel (0) al swing (1) (`PATTERN_DOBLE_BARRIDO_STOP_FIB`; 1 = el propio swing); objetivo en el Low más bajo entre Asia y London. Con la posición a +1 R (`SETUP_BE_TRIGGER_PCT` / `SETUP_RISK_PCT`) el stop pasa a la entrada en cuanto el precio toca ese nivel.
+
+Un solo trade al día: si los dos lados dan entrada, cuenta la primera. Se busca hasta el cierre del día de trading.
+
 ## Requisitos
 
 - Windows con MetaTrader 5 instalado, abierto y con la cuenta iniciada.
