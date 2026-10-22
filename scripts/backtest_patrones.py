@@ -135,6 +135,13 @@ def run_symbol(source, sym: str, order, zones):
     ids = block_ids(ts - AHEAD, day_start * 60, recalc)
     lateral = lateral_flags(ts, c, 6.0, 0.15, ids)
     bias = np.where(lateral, 0, np.where(score >= BIAS_MIN, 1, np.where(score <= -BIAS_MIN, -1, 0)))
+    # volatilidad conocida al entrar: ATR de M15 hasta la vela anterior a la entrada, y spread típico de esa hora del día
+    prev_c = np.concatenate([[c[0]], c[:-1]])
+    tr = np.maximum(h - l, np.maximum(np.abs(h - prev_c), np.abs(l - prev_c)))
+    atr14 = pd.Series(tr).rolling(14, min_periods=14).mean().shift(1).to_numpy()
+    atr100 = pd.Series(tr).rolling(100, min_periods=100).mean().shift(1).to_numpy()
+    slot = ((ts - AHEAD) % 86400) // (TF_MIN * 60)
+    spread_slot = pd.Series(spread).groupby(slot).transform("median").to_numpy()
     sessions = compute(ts, h, l, zones, AHEAD, TF_MIN, days=int((ts[-1] - ts[0]) // 86400) + 3)
     trades, funnel = [], []
     for s in sessions:
@@ -171,6 +178,10 @@ def run_symbol(source, sym: str, order, zones):
                    "día": tbr.day, "entrada": entry, "stop": stop, "objetivo": target, "riesgo (precio)": risk, "riesgo %": 100 * risk / entry,
                    "spread (precio)": float(spread[t]), "resultado": res, "velas": bars, "R bruto": r_gross, "coste (R)": cost,
                    "R neto": r_gross - cost, "MAE (R)": mae, "MFE (R)": mfe, "puntuación sesgo": float(score[t]),
+                   "ATR14": float(atr14[t]), "ATR100": float(atr100[t]), "riesgo/ATR": risk / float(atr14[t]),
+                   "spread/ATR": float(spread[t]) / float(atr14[t]), "ATR14/ATR100": float(atr14[t] / atr100[t]),
+                   "spread relativo": float(spread[t] / spread_slot[t]) if spread_slot[t] > 0 else float("nan"),
+                   "caja TBR/ATR": (tbr.high - tbr.low) / float(atr14[t]), "velas hasta entrada": int(t - first),
                    "sesgo": {1: "Bullish", -1: "Bearish", 0: "Sin sesgo"}[int(bias[t])], "lateral": bool(lateral[t]),
                    "cierre (NY)": pd.Timestamp(int(ts[min(t + bars, n - 1)]) - AHEAD, unit="s")}
             want = 1 if direction == "long" else -1
@@ -426,6 +437,7 @@ def main() -> None:
     sheets = build_sheets(trades, funnel, infos)
     out = Path(args.salida)
     out.parent.mkdir(parents=True, exist_ok=True)
+    sheets["Operaciones"].to_pickle(out.with_suffix(".pkl"))             # para scripts/analiza_filtros.py
     write_excel(out, sheets)
     print(f"Excel: {out} ({len(trades)} operaciones)")
     pd.set_option("display.width", 220)
