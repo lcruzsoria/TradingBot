@@ -28,8 +28,9 @@ class SetupSkill(Skill):
                    "cada operación (R x riesgo). Las cerradas del forwardtest pasan a la cuenta al consolidar: al cierre de la "
                    "vela de 3 h (índices) o de 4 h (resto) en la que cerraron. Las abiertas y la cuenta se guardan en "
                    "data/perfiles/<perfil>/: se pueden consultar y siguen ahí al reiniciar el bot.")
-    subscribes = ("setup.order", "setup.candles", "feed.connected", "clock.offset")
-    publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated")
+    subscribes = ("setup.order", "setup.shadow", "setup.candles", "feed.connected", "clock.offset")
+    publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated", "setup.shadow.opened",
+                 "setup.shadow.closed")
     slot = "aux1"
     interval = CONSOLIDATE_CHECK_SECONDS
 
@@ -67,6 +68,8 @@ class SetupSkill(Skill):
         app = (self.services.app_cfg or {}).get("app", {})
         if app.get("capital"):                          # perfil con capital simulado propio (MT5_<PERFIL>_CAPITAL): no depende del saldo de MT5
             self.account.start(float(app["capital"]), app.get("currency") or "USD")
+        self.shadows: list = []                         # señales NO GO que se siguen en simulado (solo en memoria)
+        self._shadow_keys: set = set()
         self.set_caption(f"{len(self.positions)} posición(es) abierta(s)" if self.positions else "esperando a Cortex")
         self._consolidate()                             # lo que haya terminado mientras el bot estaba parado
         self._publish_account()
@@ -86,6 +89,14 @@ class SetupSkill(Skill):
             return
         if event.topic == "setup.candles":
             self._follow(event.payload)
+            return
+        if event.topic == "setup.shadow":                # una señal que Cortex rechazó: se sigue sin abrir posición
+            order = event.payload["order"]
+            key = (order.symbol, order.timeframe, order.direction, order.pattern_key, order.entry_ts)
+            if trackable(order) and key not in self._shadow_keys:
+                self._shadow_keys.add(key)
+                self.shadows.append(order)
+                self.publish("setup.shadow.opened", {"order": order})
             return
         order = event.payload["order"]
         self.executed += 1
@@ -158,6 +169,15 @@ class SetupSkill(Skill):
                                           "consolidate_at": self.schedule.due(order.symbol, closed.exit_ts),
                                           "consolidate_hours": self.schedule.hours(order.symbol)})
             self.set_caption(f"cerrada: {closed.result} {closed.r:+.2f} R")
+        shadows = []
+        for order in self.shadows:
+            closed = (resolve(order, ts, high, low, close, self.be_r, minutes * 60 if minutes else None, now)
+                      if order.symbol == payload["symbol"] else None)
+            if closed is None:
+                shadows.append(order)
+            else:
+                self.publish("setup.shadow.closed", {"order": order, "closed": closed})
+        self.shadows = shadows
         if len(still) != len(self.positions):
             store.save(still, self.file)
             self.positions = still

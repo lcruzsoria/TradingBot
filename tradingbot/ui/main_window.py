@@ -933,8 +933,10 @@ class MainWindow(QMainWindow):
                             lambda x: bool(x.ts) and self._ny(x.ts).date() == today)
         wins, losses, be, opened = s.wins, s.losses, s.flat, len(s.open)
         dot = '<span style="color:{};">●</span>'
+        hollow = '<span style="color:{};">○</span>'                  # bola transparente: las NO GO de Cortex (NG)
         self.stat_trades.value.setText(f"{dot.format(theme.BULL)} {wins} G&nbsp;&nbsp;{dot.format(theme.BEAR)} {losses} P"
-                                       f"&nbsp;&nbsp;{dot.format(BE_GREY)} {be} B")
+                                       f"&nbsp;&nbsp;{dot.format(BE_GREY)} {be} B"
+                                       f"&nbsp;&nbsp;{hollow.format(theme.MUTED)} {s.nogo} NG")
         n = wins + losses + be
         parts = [f"{n} cerrada{'s' if n != 1 else ''}"] if n else []
         if opened:

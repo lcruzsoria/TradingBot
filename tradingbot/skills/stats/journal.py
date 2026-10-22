@@ -5,6 +5,8 @@ Cada línea de `data/perfiles/<perfil>/forwardtest/AAAA-MM.jsonl` (un diario por
 - `signal`  una señal que evaluó Cortex: veredicto, motivo, mercado, temporalidad, patrón, lado, TBR y hora de la vela
 - `open`    una operación simulada que abre Setup: la orden completa de Cortex (precio, stop, objetivo, sesgo, TBR...)
 - `close`   su cierre: la orden otra vez (así cada mes se entiende solo) y el resultado (objetivo, stop o tiempo, R, %)
+- `nogo_open` / `nogo_close`  lo mismo para una señal que Cortex rechazó (NO GO), seguida en simulado: su resultado hipotético
+            no suma en ninguna cifra, solo se ve en el historial y en la tarjeta Operaciones (NG)
 - `stage`   «Nueva etapa»: las cifras en vivo empiezan desde aquí; los meses guardados se ven completos
 
 Al arrancar se cargan todos los meses desde el inicio del forwardtest (STATS_FORWARD_START), sea cual sea el perfil de MT5:
@@ -96,6 +98,12 @@ class Journal:
     def closed(self, order, closed) -> None:
         self._write({"t": "close", "order": _order_to_json(order), "closed": asdict(closed)})
 
+    def shadow_opened(self, order) -> None:
+        self._write({"t": "nogo_open", "order": _order_to_json(order)})
+
+    def shadow_closed(self, order, closed) -> None:
+        self._write({"t": "nogo_close", "order": _order_to_json(order), "closed": asdict(closed)})
+
     def stage(self) -> str:
         at = self._now().isoformat(timespec="seconds")
         self._write({"t": "stage"})
@@ -128,6 +136,10 @@ class Journal:
                     stats.trades[-1].stale = stale
             elif rec["t"] == "close":
                 stats.closed(_order_from_json(rec["order"]), Closed(**_pick(Closed, rec["closed"])))
+            elif rec["t"] == "nogo_open":
+                stats.shadow_executed(_order_from_json(rec["order"]))
+            elif rec["t"] == "nogo_close":
+                stats.shadow_closed(_order_from_json(rec["order"]), Closed(**_pick(Closed, rec["closed"])))
         except (KeyError, TypeError, ValueError):
             pass                                        # línea de otra versión o incompleta: se salta
 

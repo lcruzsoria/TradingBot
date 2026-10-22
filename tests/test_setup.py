@@ -47,7 +47,7 @@ def test_setup_solo_ejecuta_las_ordenes_de_cortex():
 def test_setup_solo_esta_conectado_a_cortex():
     from tradingbot.skills.setup.skill import SetupSkill
     # órdenes de Cortex; la conexión solo para el capital inicial y la hora del servidor para consolidar
-    assert SetupSkill.subscribes == ("setup.order", "setup.candles", "feed.connected", "clock.offset")
+    assert SetupSkill.subscribes == ("setup.order", "setup.shadow", "setup.candles", "feed.connected", "clock.offset")
     assert SetupSkill.slot == "aux1"
 
 
