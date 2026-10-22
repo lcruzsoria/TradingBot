@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QFrame, QGridLa
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..clock import NY
+from ..skills.stats.backtest import PATTERNS
 from ..skills.stats.journal import month_label
 from ..skills.stats.session import (ALIGNMENTS, SESSIONS, Group, Signal, Trade, TradeStats, alignment_of,  # noqa: F401
                                     reason_of, session_of)
@@ -212,6 +213,7 @@ class StatsDialog(QDialog):
         self.window_days: int | None = DEFAULT_WINDOW
         self.month = LIVE                                       # LIVE o el mes guardado que se está viendo (AAAA-MM)
         self.archive: TradeStats | None = None
+        self.pattern = PATTERNS[0]                              # «Ambos» o el patrón que se está viendo
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
@@ -250,6 +252,27 @@ class StatsDialog(QDialog):
             self.window_btns[name] = btn
             head.addWidget(btn)
         outer.addLayout(head)
+
+        # Patrón: los mismos chips que el filtro del backtest
+        pat_row = QHBoxLayout()
+        pat_row.setSpacing(6)
+        plabel = QLabel("Patrón")
+        plabel.setObjectName("Tiny")
+        pat_row.addWidget(plabel)
+        pat_row.addSpacing(8)
+        self.pattern_group = QButtonGroup(self)
+        self.pattern_btns: dict[str, QPushButton] = {}
+        for name in PATTERNS:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setProperty("chip", "true")
+            btn.setChecked(name == self.pattern)
+            btn.clicked.connect(lambda _=False, p=name: self.set_pattern(p))
+            self.pattern_group.addButton(btn)
+            self.pattern_btns[name] = btn
+            pat_row.addWidget(btn)
+        pat_row.addStretch(1)
+        outer.addLayout(pat_row)
 
         # Cifras clave
         tiles = QHBoxLayout()
@@ -376,6 +399,12 @@ class StatsDialog(QDialog):
             self.window_btns[name].setChecked(d == days)
         self.refresh()
 
+    def set_pattern(self, pattern: str) -> None:
+        self.pattern = pattern
+        for name, btn in self.pattern_btns.items():
+            btn.setChecked(name == pattern)
+        self.refresh()
+
     def set_month(self, month: str | None) -> None:
         """LIVE: lo que lleva la skill, con el periodo elegido. Un mes (AAAA-MM): ese mes del diario, completo."""
         month = month or LIVE
@@ -400,8 +429,11 @@ class StatsDialog(QDialog):
     def _ny_of(self, t: Trade) -> datetime | None:
         return self._to_ny(t.order.entry_ts) if t.order.entry_ts else None
 
+    def _is_pattern(self, name: str) -> bool:
+        return self.pattern == PATTERNS[0] or name == self.pattern
+
     def _in_window(self, t: Trade) -> bool:
-        return self._recent(t.order.entry_ts)
+        return self._recent(t.order.entry_ts) and self._is_pattern(t.order.pattern)
 
     def _recent(self, ts: int | None) -> bool:
         if self.window_days is None or self.month != LIVE:
@@ -416,7 +448,7 @@ class StatsDialog(QDialog):
     def refresh(self) -> None:
         self._fill_months()
         source = self.archive if self.month != LIVE and self.archive is not None else self.stats
-        s = source.only(self._in_window, lambda x: self._recent(x.ts))
+        s = source.only(self._in_window, lambda x: self._recent(x.ts) and self._is_pattern(x.pattern))
         done, opened = s.done, s.open
         b = self.blocks
         extra = f"  ·  {len(s.stale)} sin seguimiento" if s.stale else ""
