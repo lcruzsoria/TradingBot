@@ -489,7 +489,7 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 
 | Skill | Hexágono | Qué hace |
 |---|---|---|
-| `cortex` | centro | Coordinador. Guarda activo, temporalidad y Bias; valida con el sesgo cada patrón de Pattern (GO / NO GO) y, con GO, le pasa la orden a Setup (`pattern.detected` + `bias.updated` -> `cortex.decision` + `setup.order`). También responde a `trade.request` con `trade.verdict`. Lee el bloque CORTEX. |
+| `cortex` | centro | Coordinador. Guarda activo, temporalidad y Bias; valida con el sesgo cada patrón de Pattern (GO / NO GO) y, con GO, le pasa la orden a Setup (`pattern.detected` + `bias.updated` -> `cortex.decision` + `setup.order`). También responde a `trade.request` con `trade.verdict`. Un GO cuyo spread (el de la vela de entrada) supera `CORTEX_MAX_SPREAD_R` veces el riesgo se aborta: NO GO por spread, marcado en el gráfico con una S roja. Lee el bloque CORTEX. |
 | `feed` | 0 | Conecta con MT5 y carga las velas (`feed.load` -> `candles.loaded`). Además barre en segundo plano toda la watchlist (`feed.sweep` y `candles.loaded` con `background`), que el gráfico no pinta. Lee el bloque FEED. |
 | `bias` | 1 | Evalúa las reglas del sesgo (`candles.loaded` -> `bias.updated`). |
 | `tbr` | 2 | Zonas horarias TBR y sus niveles (`candles.loaded` + `clock.offset` -> `tbr.updated`). Lee el bloque TBR. |

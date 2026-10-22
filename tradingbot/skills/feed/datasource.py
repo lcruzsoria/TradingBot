@@ -9,7 +9,7 @@ import pandas as pd
 
 ProgressFn = Callable[[int], None]
 
-CANDLE_COLUMNS = ["ts", "time", "open", "high", "low", "close", "tick_volume"]
+CANDLE_COLUMNS = ["ts", "time", "open", "high", "low", "close", "tick_volume", "spread"]   # spread: en precio (0: desconocido)
 
 
 @dataclass(frozen=True)
@@ -63,9 +63,11 @@ def aggregate_candles(df: pd.DataFrame, seconds: int, anchor: int = 0) -> pd.Dat
         start = ts - ts % 86400 + (ts % 86400) // seconds * seconds
     else:
         start = (ts - anchor) // seconds * seconds + anchor
+    if "spread" not in df:
+        df = df.assign(spread=0.0)
     grouped = df.assign(ts=start).groupby("ts", sort=True)
-    out = grouped.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"),
-                      close=("close", "last"), tick_volume=("tick_volume", "sum")).reset_index()
+    out = grouped.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"),
+                      tick_volume=("tick_volume", "sum"), spread=("spread", "max")).reset_index()
     return normalize_candles(out)
 
 
@@ -80,4 +82,6 @@ def normalize_candles(df: pd.DataFrame) -> pd.DataFrame:
     df["time"] = pd.to_datetime(df["ts"], unit="s")
     if "tick_volume" not in df:
         df["tick_volume"] = 0
+    if "spread" not in df:
+        df["spread"] = 0.0
     return df[CANDLE_COLUMNS]

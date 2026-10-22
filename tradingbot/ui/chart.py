@@ -19,6 +19,7 @@ from .fmt import DIAS, fecha_hora
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
+SPREAD_RED = "#FF1744"     # la S de las entradas que Cortex aborta por spread
 LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
 LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
@@ -61,6 +62,8 @@ class PositionPill(pg.TextItem):
         decision = pos.get("decision")
         self._bar = QColor(_verdict_color(pos)) if decision else None
         symbol = {"GO": "✓", "NO GO": "✕"}.get(decision, "")
+        if pos.get("spread_abort"):                     # Cortex lo abortó por spread: ✕ NO GO y una S roja
+            symbol += f'</b><b style="color:{SPREAD_RED}">&thinsp;S'
         self.result = result
         self.setHtml(f'<span style="font-size:9pt">&nbsp;&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
                      f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {_ratio(pos):.1f}R</span>'
@@ -786,7 +789,8 @@ class ChartView(pg.PlotWidget):
                 + row("Objetivo", fmt_price(target), "#26A69A") + row("R:R", f"{_ratio(pos):.2f}"))
         verdict = ""
         if pos.get("decision"):
-            verdict = (f'<div style="margin-top:3px"><span style="color:{_verdict_color(pos)}">Cortex {pos["decision"]}</span>'
+            s_red = f' <b style="color:{SPREAD_RED}">S</b>' if pos.get("spread_abort") else ""
+            verdict = (f'<div style="margin-top:3px"><span style="color:{_verdict_color(pos)}">Cortex {pos["decision"]}</span>{s_red}'
                        f'<span style="color:{muted}">&nbsp; {html.escape(pos.get("reason", ""))}</span></div>')
         card.setHtml(f'<div style="font-size:8pt"><div style="color:{theme.TEXT}"><b>{html.escape(pos["label"])}</b>'
                      f' · {"Largo" if pos["direction"] == "long" else "Corto"} · {html.escape(str(pos["state"]))}</div>'

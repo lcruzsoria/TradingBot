@@ -13,7 +13,7 @@ from .order import build_calendar_order, build_order
 from ..setup import store
 from ..setup.positions import resolve, trackable
 from ..feed.skill import sweep_settings
-from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
+from .validation import DEFAULT_ALLOW_NO_BIAS, DEFAULT_MAX_SPREAD_R, Decision, check_spread, validate
 
 MAX_PENDING = 500
 ROUND_WAIT_SECONDS = 60          # tras terminar de cargar un barrido, lo que se espera como mucho a Pattern y Bias
@@ -50,6 +50,7 @@ class CortexSkill(Skill):
         self._sweeping = every > 0 and bool(app.get("watchlist"))     # con barrido, solo se decide al cerrar cada vuelta
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
+        self.max_spread_r = max(0.0, float(self.settings.get_float("MAX_SPREAD_R", DEFAULT_MAX_SPREAD_R)))   # 0: sin límite de spread
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
@@ -182,6 +183,15 @@ class CortexSkill(Skill):
             return f"la sesión {tbr.zone} del {tbr.day:%d/%m} en {p['symbol']} ya dio un trade: una misma sesión no puede dar dos"
         return None
 
+    def _spread_at(self, symbol: str, ts: int | None) -> float | None:
+        """Spread (en precio) de la vela que contiene `ts`, o None si las velas no lo traen."""
+        df = self._candles.get(symbol)
+        if df is None or not ts or "spread" not in df or not len(df):
+            return None
+        times = df["ts"].to_numpy()
+        i = int(np.searchsorted(times, int(ts), "right")) - 1
+        return float(df["spread"].iloc[i]) if 0 <= i < len(df) else None
+
     def _busy_reason(self, order) -> str:
         return (f"ya hay una posición abierta en {order.symbol} ({order.pattern}): hasta que no cierre (stop, objetivo o tiempo) "
                 f"no se abre otra")
@@ -239,6 +249,10 @@ class CortexSkill(Skill):
                 decision = Decision(False, self._session_reason(p))
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
+                if decision.allowed:                     # un GO que cuesta demasiado spread se aborta (no cuenta como sesión operada)
+                    hit = p["hit"]
+                    decision = check_spread(self._spread_at(p["symbol"], hit.ts), hit.price, hit.levels.get("stop"),
+                                            self.max_spread_r) or decision
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
                                              "hit": p["hit"], "decision": decision, "bias": result.bias,
                                              "bias_result": result})

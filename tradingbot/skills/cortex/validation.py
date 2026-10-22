@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from ..bias.models import Bias
 
 DEFAULT_ALLOW_NO_BIAS = False
+DEFAULT_MAX_SPREAD_R = 0.07      # spread máximo, en R (spread / riesgo de la entrada): 0 lo desactiva. Es el p60 del backtest
+SPREAD_REASON = "spread alto"    # el motivo de un NO GO por spread empieza así: el gráfico lo marca con una S roja
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,23 @@ class Decision:
     @property
     def verdict(self) -> str:
         return "GO" if self.allowed else "NO GO"
+
+    @property
+    def spread_abort(self) -> bool:
+        return not self.allowed and self.reason.startswith(SPREAD_REASON)
+
+
+def check_spread(spread: float | None, entry: float | None, stop: float | None, max_r: float) -> Decision | None:
+    """NO GO por spread si cuesta más de `max_r` veces el riesgo de la entrada; None si pasa (o si no se puede saber)."""
+    if not max_r or not spread or spread <= 0 or entry is None or stop is None:
+        return None
+    risk = abs(float(entry) - float(stop))
+    if risk <= 0:
+        return None
+    cost = float(spread) / risk
+    if cost <= max_r:
+        return None
+    return Decision(False, f"{SPREAD_REASON}: {cost:.2f} R del riesgo (spread {spread:.5g}, máximo {max_r:g} R)")
 
 
 def validate(direction: str, bias_result, allow_no_bias: bool = DEFAULT_ALLOW_NO_BIAS) -> Decision:

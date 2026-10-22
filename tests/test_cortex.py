@@ -255,3 +255,57 @@ def test_el_fin_del_dia_de_trading_es_17h_ny_y_18h_en_indices():
     assert ny(skill._session_close("USTEC", entry, ahead)) == "19 18:00"
     late = entry + 8 * 3600                                                                    # 18:00 NY
     assert ny(skill._session_close("EURUSD", late, ahead)) == "20 17:00"
+
+
+def test_check_spread_aborta_solo_si_el_spread_supera_el_maximo_en_r():
+    from tradingbot.skills.cortex.validation import SPREAD_REASON, check_spread
+    assert check_spread(0.5, 105.0, 95.0, 0.07) is None                                      # 0,05 R: pasa
+    abort = check_spread(1.0, 105.0, 95.0, 0.07)                                             # 0,10 R: aborta
+    assert abort is not None and not abort.allowed and abort.spread_abort and abort.reason.startswith(SPREAD_REASON)
+    assert check_spread(1.0, 105.0, 95.0, 0) is None and check_spread(0.0, 105.0, 95.0, 0.07) is None   # sin límite o spread desconocido
+    assert check_spread(1.0, 105.0, 105.0, 0.07) is None and not validate("long", bias(Bias.BULLISH)).spread_abort
+
+
+def spread_candles(spread):
+    import pandas as pd
+    ts = [1_000_000 + 900 * i for i in range(20)]
+    return pd.DataFrame({"ts": ts, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "tick_volume": 1, "spread": spread})
+
+
+def test_cortex_aborta_por_spread_un_go_y_no_ocupa_la_sesion():
+    manager, bus, decisions, orders, executed = run_skills("CORTEX_MAX_SPREAD_R=0.07\n")
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": spread_candles(1.0)}, source="feed")   # 0,10 R
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, ts=1_000_000 + 900 * 13)
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    wait(decisions)
+    time.sleep(0.2)
+    manager.stop()
+    decision = decisions[0].payload["decision"]
+    assert not decision.allowed and decision.spread_abort and "0.10 R" in decision.reason
+    assert orders == [] and executed == []
+
+
+def test_con_spread_bajo_o_sin_limite_cortex_da_go():
+    for env, spread in (("CORTEX_MAX_SPREAD_R=0.07\n", 0.5), ("CORTEX_MAX_SPREAD_R=0\n", 5.0)):
+        manager, bus, decisions, orders, executed = run_skills(env, with_setup=False)
+        bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": spread_candles(spread)}, source="feed")
+        bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+        hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, ts=1_000_000 + 900 * 13)
+        bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+        wait(orders)
+        manager.stop()
+        assert decisions[0].payload["decision"].allowed and len(orders) == 1
+
+
+def test_la_etiqueta_del_grafico_lleva_una_s_roja_si_cortex_aborto_por_spread():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.ui.chart import SPREAD_RED, PositionPill
+    QApplication.instance() or QApplication([])
+    pos = {"state": "stop", "label": "NY Open ▲", "entry": 100.0, "stop": 96.0, "target": 108.0, "decision": "NO GO",
+           "reason": "spread alto 0.10 R", "spread_abort": True}
+    pill = PositionPill(pos)
+    assert pill.toPlainText().strip().startswith("✕ S") or "✕" in pill.toPlainText() and " S" in pill.toPlainText()
+    assert SPREAD_RED in pill.textItem.document().toHtml().lower() or "ff1744" in pill.textItem.document().toHtml().lower()
+    plain = PositionPill({**pos, "spread_abort": False})
+    assert "S" not in plain.toPlainText().replace("SL", "").replace("NO GO", "")

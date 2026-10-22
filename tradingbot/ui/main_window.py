@@ -35,6 +35,7 @@ from .stats_dialog import StatsDialog, TradeStats, _ny_today
 from ..skills.stats.journal import Journal
 from .theme_dialog import ThemeDialog
 from .watchlist_dialog import WatchlistDialog
+from ..skills.cortex.validation import SPREAD_REASON
 from ..skills.setup.account import outcome
 from .. import envconfig, settings
 from .widgets import STALE_AFTER_SECONDS, BiasCard, MarketsGrid, Panel, RulesList, StatBlock, repolish
@@ -55,6 +56,8 @@ def short_reason(reason: str) -> str:
         return "posición abierta en " + reason.split("ya hay una posición abierta en ", 1)[1].split(" ")[0]
     if reason.startswith("la sesión "):
         return "sesión ya operada"
+    if reason.startswith(SPREAD_REASON):
+        return f"{SPREAD_REASON} {reason.split(':', 1)[1].split(' R', 1)[0].strip()} R"
     if "puntuación" in reason:
         score = reason.split("puntuación", 1)[1].split()[0].rstrip(",;)")
         side = "lateral" if "lateral" in reason else ("a favor" if "a favor" in reason else
@@ -1128,6 +1131,10 @@ class MainWindow(QMainWindow):
         for f in sorted(self._positions, key=lambda f: f.x0_ts):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
             decision, reason = self._entry_decision(x0, f.direction)
+            if decision == "GO":                                # un GO que cuesta demasiado spread lo aborta Cortex (S roja)
+                abort = self._spread_abort(x0, f.levels["entrada"], f.levels["stop"])
+                if abort is not None:
+                    decision, reason = "NO GO", short_reason(abort.reason)
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                               "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
@@ -1151,6 +1158,8 @@ class MainWindow(QMainWindow):
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
                 used.add(pos["session"])
+        for pos in positions:                                   # los NO GO por spread llevan una S roja en su etiqueta
+            pos["spread_abort"] = pos["decision"] == "NO GO" and str(pos["reason"]).startswith(SPREAD_REASON)
         sessions: dict = {}                                     # una sola entrada por TBR en el gráfico: la que opera Cortex (GO)
         for pos in positions:                                   # o, si no opera ninguna, la primera; las demás no se dibujan
             sessions.setdefault(pos["session"], []).append(pos)
@@ -1199,6 +1208,15 @@ class MainWindow(QMainWindow):
                        "entry": o.price, "stop": o.stop, "target": o.target, "direction": o.direction, "state": state,
                        "label": "Calendario", "decision": "GO", "reason": "forwardtest", "session": ("calendario", o.entry_ts)}
         return list(out.values())
+
+    def _spread_abort(self, index: int, entry: float, stop: float):
+        """NO GO por spread que Cortex daría a una entrada en la vela `index` (con el spread de esa vela), o None."""
+        from ..skills.cortex.validation import DEFAULT_MAX_SPREAD_R, check_spread
+        df = self.candles
+        if df is None or "spread" not in df or not 0 <= index < len(df):
+            return None
+        cortex = self.manager.skills.get("cortex")
+        return check_spread(float(df["spread"].iloc[index]), entry, stop, float(getattr(cortex, "max_spread_r", DEFAULT_MAX_SPREAD_R)))
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:
         """GO / NO GO que habría dado Cortex a una entrada en la vela `index`, con el sesgo que tenía el bot en esa vela."""
