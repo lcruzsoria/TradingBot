@@ -322,6 +322,12 @@ def test_la_tarjeta_operaciones_muestra_solo_el_dia_en_curso(tmp_path, monkeypat
     text = win.stat_trades.value.text()
     assert "1 G" in text and "1 P" in text and "1 B" in text                     # la de hace dos días no cuenta
     assert win.stat_trades.sub.text() == "3 cerradas · 1 abierta hoy · +1.00 R"
+    assert "○" in text and "0 NG" in text                                         # bola transparente: las NO GO de hoy
+    from tradingbot.skills.stats.session import Signal
+    s.decision(False, Signal(False, "USTEC", "15m", "Reversión", "long", "contra el sesgo", now - 10, "London"))
+    s.decision(False, Signal(False, "USTEC", "15m", "Reversión", "long", "contra el sesgo", now - 3 * 86400, "London"))
+    win._on_stats_session({"stats": s})
+    assert "1 NG" in win.stat_trades.value.text()                                  # la de hace tres días no cuenta
 
 
 # -- perfil Calendario: la cuenta de PUPrime, solo con su estrategia y 25.000 USD simulados --------------------------
