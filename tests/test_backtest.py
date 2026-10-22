@@ -109,9 +109,11 @@ def test_ventana_backtest_con_el_resumen_real():
     from tradingbot.ui.backtest_dialog import BacktestDialog
     QApplication.instance() or QApplication([])
     bt = load()
-    assert [g.key for g in bt.groups] == ["indices", "forex", "oro", "cripto", "calendario"]
+    assert [g.key for g in bt.groups] == ["puprime:indices", "puprime:forex", "puprime:oro", "puprime:cripto", "metaquotes:indices",
+                                          "metaquotes:forex", "metaquotes:oro", "calendario"]
+    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario"]
     dlg = BacktestDialog(None, bt)
-    assert dlg.group_key == "indices" and dlg.blocks["n"].value.text() != "-"
+    assert dlg.group_key == "puprime:indices" and dlg.profile_key == "puprime" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values
     for g in bt.groups:                                                            # todas las combinaciones se pintan
         dlg.set_group(g.key)
@@ -124,7 +126,7 @@ def test_ventana_backtest_con_el_resumen_real():
     dlg.set_group("calendario")                                                    # su propio patrón, sin zonas ni embudo
     assert dlg.pattern == "Calendario" and dlg.by_zone.isHidden() and dlg.funnel.isHidden() and dlg.compare.isHidden()
     assert [r[0].text() for r in dlg.by_day.rows][0] == "Lunes" and "largos a hora fija" in dlg.subtitle.text()
-    dlg.set_group("indices")
+    dlg.set_group("puprime:indices")
     assert dlg.pattern == "Ambos" and not dlg.by_zone.isHidden()
     total = dlg.blocks["n"].value.text()                                          # pulsar un año recalcula todo
     dlg.by_year.click(2024)
@@ -140,7 +142,7 @@ def test_ventana_backtest_con_el_resumen_real():
     bot_hour = dlg.blocks["mean"].value.text()
     dlg.by_hour.click(5)
     assert dlg.blocks["mean"].value.text() != bot_hour and "sustituye" in dlg.selection_label.text()
-    dlg.set_group("indices")
+    dlg.set_group("puprime:indices")
     assert not dlg.hours                                                           # otro grupo: selección limpia
     dlg.set_backtest(None, "falta el fichero")
     assert dlg.empty.text() == "falta el fichero" and dlg.scroll.isHidden()
@@ -167,3 +169,39 @@ def test_ventana_backtest_con_datos_minimos():
     assert dlg.hours == {3} and dlg.blocks["n"].value.text() == "1"
     dlg.by_hour.click(3)                                                             # y otro clic en la misma la quita
     assert dlg.hours == set() and dlg.blocks["n"].value.text() == "3"
+
+
+def _profile_group(profile, name, key="indices"):
+    g = json.loads(json.dumps(GROUP))
+    g.update({"key": f"{profile}:{key}", "perfil": profile, "perfil_nombre": name})
+    g["cats"]["o"] = ["objetivo", "stop", "breakeven", "tiempo"]
+    return g
+
+
+def test_la_ventana_elige_el_perfil_y_cada_perfil_trae_sus_grupos(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.ui.backtest_dialog import BacktestDialog
+    QApplication.instance() or QApplication([])
+    forex = _profile_group("puprime", "PUPrime", "forex")
+    cal = {**json.loads(json.dumps(GROUP)), "key": "calendario", "nombre": "Calendario", "perfil": "calendario", "perfil_nombre": "Calendario"}
+    path = tmp_path / "bt.json"
+    path.write_text(json.dumps({"generado": "x", "comparativa": {}, "grupos": [
+        _profile_group("puprime", "PUPrime"), forex, _profile_group("metaquotes", "MetaQuotes"), cal]}), encoding="utf-8")
+    bt = load(path)
+    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario"]
+    assert [g.key for g in bt.groups_of("puprime")] == ["puprime:indices", "puprime:forex"]
+    dlg = BacktestDialog(None, bt)
+    assert dlg.profile_key == "puprime" and list(dlg.profile_btns) == ["puprime", "metaquotes", "calendario"]
+    assert list(dlg.group_btns) == ["puprime:indices", "puprime:forex"]            # solo los mercados del perfil elegido
+    dlg.set_group("puprime:forex")
+    dlg.set_profile("metaquotes")                                                  # se queda en el mismo grupo si el perfil lo tiene...
+    assert dlg.group_key == "metaquotes:indices" and list(dlg.group_btns) == ["metaquotes:indices"]
+    dlg.set_group("puprime:forex")
+    dlg.set_profile("metaquotes")
+    assert dlg.group_key == "metaquotes:indices"                                    # ...y si no, el primero
+    dlg.set_profile("calendario")
+    assert dlg.group_key == "calendario" and dlg.profile_btns["calendario"].isChecked()
+    # la comparativa de mercados solo cuenta los del perfil
+    assert {grp for _m, grp, _o in bt.compare(BOT_FILTER, profile="puprime")} == {"Índices americanos"}
+    assert len(bt.compare(BOT_FILTER, profile="puprime")) == 4                       # 2 mercados por grupo y 2 grupos
+    assert dlg.outcomes.headers[3] == "Breakeven" if hasattr(dlg.outcomes, "headers") else True

@@ -203,6 +203,15 @@ class Group:
         return self.raw.get("actualizado", "")
 
     @property
+    def profile(self) -> str:
+        """Perfil de MT5 con el que se hizo el backtest (puprime, metaquotes, calendario); vacío en los ficheros antiguos."""
+        return self.raw.get("perfil", "")
+
+    @property
+    def profile_name(self) -> str:
+        return self.raw.get("perfil_nombre") or self.profile.capitalize()
+
+    @property
     def is_calendar(self) -> bool:
         return self.raw.get("tipo") == "calendario"
 
@@ -293,11 +302,23 @@ class Backtest:
     def group(self, key: str) -> Group | None:
         return next((g for g in self.groups if g.key == key), None)
 
-    def compare(self, filt: str, years=(), hours=()) -> list[tuple[str, str, Ops]]:
-        """(mercado, grupo, operaciones) de todos los mercados de los patrones, con ese filtro y los años y horas elegidos."""
+    @property
+    def profiles(self) -> list[tuple[str, str]]:
+        """(clave, nombre) de los perfiles que tienen backtest, en el orden del fichero."""
+        found: dict[str, str] = {}
+        for g in self.groups:
+            found.setdefault(g.profile, g.profile_name)
+        return list(found.items())
+
+    def groups_of(self, profile: str) -> list[Group]:
+        return [g for g in self.groups if g.profile == profile]
+
+    def compare(self, filt: str, years=(), hours=(), profile: str | None = None) -> list[tuple[str, str, Ops]]:
+        """(mercado, grupo, operaciones) de todos los mercados de los patrones (los del `profile` si se da), con ese filtro y los
+        años y horas elegidos."""
         out = []
         for g in self.groups:
-            if g.is_calendar:
+            if g.is_calendar or (profile is not None and g.profile != profile):
                 continue
             ops = g.ops
             sel = g.filter_mask("Ambos", filt) & g._in(ops.year, years) & g._in(ops.hour, hours)

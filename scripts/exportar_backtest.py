@@ -1,13 +1,15 @@
 """Exporta las operaciones de los backtests al fichero que muestra la ventana Backtest (skill Stats).
 
-Lee lo que generan `scripts/backtest_patrones.py` (un Excel por grupo de mercados: hoja «Operaciones» y las hojas que no se
-pueden recalcular, como las mejoras de stop y RR o el embudo), `scripts/comparativa_mercados.py` (las notas) y
+Lee lo que generan `scripts/backtest_patrones.py` (por cada perfil de MT5, en `analisis/<perfil>/`, un Excel por grupo de
+mercados: hoja «Operaciones» y las hojas que no se pueden recalcular, como las mejoras de stop y RR o el embudo), `scripts/comparativa_mercados.py` (las notas) y
 `scripts/lunes_hora_fija.py` (la estrategia Calendario, `analisis/lunes_hora_fija.pkl`, con la configuración del bloque
 CALENDARIO de tradingbot.env), y escribe `tradingbot/skills/stats/backtest.json.gz`: cada operación en columnas, comprimido, para
 que la ventana funcione sin MT5 ni la carpeta `analisis/` y pueda recalcularlo todo al filtrar por años u horas.
 
 Comprueba que las cifras que calcula la ventana coinciden con la hoja Resumen de cada Excel (el drawdown puede variar unas
 décimas de R por el orden entre operaciones que cierran en la misma vela).
+
+Cada perfil (puprime, metaquotes) y Calendario son un «perfil» en la ventana Backtest: se elige arriba, antes de los mercados.
 
 Uso (desde la raíz del proyecto, después de regenerar los backtests):
     uv run --with openpyxl python scripts/exportar_backtest.py
@@ -33,6 +35,7 @@ from tradingbot.envconfig import load as load_env                               
 from tradingbot.skills.stats.backtest import DAYS, Group                              # noqa: E402
 
 OUT = ROOT / "tradingbot" / "skills" / "stats" / "backtest.json.gz"
+PROFILES = (("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"))      # carpetas analisis/<perfil>/
 GROUPS = (("indices", "Índices americanos", "backtest_indices.xlsx"), ("forex", "Forex", "backtest_forex.xlsx"),
           ("oro", "Oro", "backtest_oro.xlsx"), ("cripto", "Cripto", "backtest_cripto.xlsx"))
 STATIC = {"Metodología": "metodologia", "Datos": "datos", "Mejoras (stop y RR)": "mejoras", "Embudo": "embudo"}
@@ -73,25 +76,26 @@ def sheet(path: Path, name: str) -> list[dict]:
 
 
 # -- patrones ----------------------------------------------------------------------------------------
-def pattern_group(key: str, name: str, path: Path) -> dict:
+def pattern_group(key: str, name: str, path: Path, profile: str, profile_name: str) -> dict:
     ops = pd.read_excel(path, sheet_name="Operaciones",
                         usecols=lambda c: not str(c).startswith(("R bruto k", "R neto k", "cierre k")))
     cats = {"m": sorted(ops["mercado"].unique()), "p": ["Continuación", "Reversión"],
-            "z": sorted(ops["zona"].unique()), "o": ["objetivo", "stop", "tiempo"], "s": ["a favor", "en contra", "sin sesgo"]}
+            "z": sorted(ops["zona"].unique()), "o": ["objetivo", "stop", "breakeven", "tiempo"], "s": ["a favor", "en contra", "sin sesgo"]}
     overlap = ops["solapada (todas)"].astype(bool).astype(int) + 2 * ops["solapada (GO de Cortex)"].astype(bool).astype(int)
     cols = {"m": codes(ops["mercado"], cats["m"]), "p": codes(ops["patrón"], cats["p"]), "z": codes(ops["zona"], cats["z"]),
             "o": codes(ops["resultado"], cats["o"]), "s": codes(ops["sesgo vs operación"], cats["s"]),
             "d": (ops["dirección"] == "short").astype(int).tolist(), "f": overlap.tolist(),
             "e": minutes(ops["entrada (NY)"]), "x": minutes(ops["cierre (NY)"]), "v": ops["velas"].astype(int).tolist()}
     cols.update({short: floats(ops[col], 6 if short in ("r", "k") else 3) for col, short in FLOAT_COLS.items()})
-    out = {"key": key, "nombre": name, "tipo": "patrones", "fichero": path.name, "cats": cats, "ops": cols,
+    out = {"key": f"{profile}:{key}", "nombre": name, "tipo": "patrones", "perfil": profile, "perfil_nombre": profile_name,
+           "fichero": path.name, "cats": cats, "ops": cols,
            "actualizado": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")}
     for sheet_name, short in STATIC.items():
         rows = sheet(path, sheet_name)
         out[short] = [[r["tema"], r["explicación"]] for r in rows] if short == "metodologia" else rows
     for r in out["mejoras"]:
         r["n"], r["wr"] = r.pop("operaciones", None), r.pop("win rate %", None)
-    check(Group(key, name, out), pd.read_excel(path, sheet_name="Resumen"))
+    check(Group(out["key"], f"{profile_name} · {name}", out), pd.read_excel(path, sheet_name="Resumen"))
     return out
 
 
@@ -100,8 +104,8 @@ def check(group: Group, summary: pd.DataFrame) -> None:
     worst = 0.0
     for _, row in summary.iterrows():
         got = group.view(row["patrón"], row["filtro"]).main.stats()
-        if got["n"] != row["operaciones"] or abs(got["total"] - row["R total"]) > 0.02 or abs(got["wr"] - row["win rate %"]) > 100.5 / got["n"]:
-            # (el acierto admite una operación: el Excel cuenta como ganada alguna con +1e-13 R, que aquí es un empate)
+        if got["n"] != row["operaciones"] or abs(got["total"] - row["R total"]) > 0.02 or abs(got["wr"] - row["win rate %"]) > 500.5 / got["n"]:
+            # (el acierto admite unas pocas operaciones: el Excel cuenta como ganadas las que con spread de 2 R dan +1e-13 R, que aquí son empates)
             raise SystemExit(f"{group.name}: {row['patrón']} / {row['filtro']} no cuadra con la hoja Resumen "
                              f"({got['n']} ops, {got['total']:.3f} R frente a {row['operaciones']}, {row['R total']:.3f} R)")
         worst = max(worst, abs(got["dd"] - row["máx. drawdown (R)"]))
@@ -148,7 +152,8 @@ def calendar_group(path: Path) -> dict:
     when = base.groupby("mercado")["día"].agg(["min", "max"])
     print(f"  Calendario: {len(base)} entradas (todas las horas, días y lados), rejilla de {len(combos)} stops / RR")
     return {
-        "key": "calendario", "nombre": "Calendario", "tipo": "calendario", "fichero": path.name, "cats": cats, "ops": cols,
+        "key": "calendario", "nombre": "Calendario", "tipo": "calendario", "perfil": "calendario", "perfil_nombre": "Calendario",
+        "fichero": path.name, "cats": cats, "ops": cols,
         "patrones": ["Calendario"], "filtros": {"config. del bot": f"{', '.join(symbols)} (el bot)", "los 4 índices": "Los 4 índices"},
         "alcance": {"config. del bot": mine, "los 4 índices": markets},
         "dias": days, "hora": hour, "stop": stop, "rr": rr, "rejilla": labels,
@@ -173,17 +178,19 @@ def calendar_group(path: Path) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--analisis", type=Path, default=ROOT / "analisis", help="carpeta con los backtests (por defecto analisis/)")
+    ap.add_argument("--calendario", type=Path, default=None, help="pkl de Calendario (por defecto analisis/lunes_hora_fija.pkl)")
     ap.add_argument("--salida", type=Path, default=OUT)
     args = ap.parse_args()
 
     out = {"generado": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "grupos": [], "comparativa": {}}
-    for key, name, file in GROUPS:
-        path = args.analisis / file
-        if path.exists():
-            out["grupos"].append(pattern_group(key, name, path))
-        else:
-            print(f"  (sin {file}: se omite {name})")
-    cal = args.analisis / "lunes_hora_fija.pkl"
+    for profile, profile_name in PROFILES:
+        for key, name, file in GROUPS:
+            path = args.analisis / profile / file
+            if path.exists():
+                out["grupos"].append(pattern_group(key, name, path, profile, profile_name))
+            else:
+                print(f"  (sin {profile}/{file}: se omite {profile_name} · {name})")
+    cal = args.calendario or args.analisis / "lunes_hora_fija.pkl"
     if cal.exists():
         out["grupos"].append(calendar_group(cal))
     else:

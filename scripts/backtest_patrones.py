@@ -5,6 +5,7 @@ del bot (tradingbot.skills.pattern) con las mismas reglas que en vivo, y simula 
 
 - Entrada: orden límite en el 0,5 del fibonacci (se llena en la vela en que el precio lo toca), stop en el nivel 1 (el swing en
   Continuación, la mecha pivote en Reversión) y objetivo en el -0,5 (2R).
+- Breakeven como el bot: un cierre M15 a +1 R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT) pasa el stop a la entrada; si lo toca, 0 R.
 - Si en una misma vela caben el stop y el objetivo, cuenta el stop. La vela de la entrada ya cuenta para el stop y el objetivo.
 - Costes: el spread real que registra MT5 en la vela de la entrada, una vez por operación (R neto = R bruto - spread / riesgo).
 - Si en 24 h no se alcanza ni el stop ni el objetivo, se cierra al cierre de esa vela (sensibilidad en otra hoja).
@@ -52,6 +53,7 @@ UNTIL = dict(OLD_UNTIL) if os.environ.get("BT_PLAZOS") == "anterior" else dict(N
 # BT_ALCANCE: "global" (por defecto, una sola posición abierta en toda la cuenta, como CORTEX_POSITION_SCOPE) o "mercado".
 GLOBAL_SCOPE = os.environ.get("BT_ALCANCE", "global") != "mercado"
 EXTEND = ()
+BE_R = None                                   # breakeven en R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT); lo fija main()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
 MAX_HOLD = 96                                 # velas M15 (24 h)
@@ -62,22 +64,34 @@ IMPROVE_RRS = (1.0, 1.5, 2.0)                 # ...con el objetivo a RR veces el
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
-def simulate(h, l, c, t, direction, entry, stop, target, max_hold):
-    """(resultado, velas, R bruto, MAE en R, MFE en R) de una posición llena en la vela t."""
+def simulate(h, l, c, t, direction, entry, stop, target, max_hold, be_r=None):
+    """(resultado, velas, R bruto, MAE en R, MFE en R) de una posición llena en la vela t.
+
+    Breakeven (`be_r`, en R del stop dado; None = sin breakeven), como en el bot (tradingbot.skills.setup.positions): si una vela
+    M15 CIERRA con la posición `be_r` R o más a favor, el stop pasa a la entrada desde la vela siguiente; si después lo toca, la
+    operación cierra a 0 R («breakeven»).
+    """
     risk = abs(entry - stop)
     end = min(len(h) - 1, t + max_hold)
     mae = mfe = 0.0
+    be = False
     for i in range(t, end + 1):
+        current = entry if be else stop
         if direction == "long":
-            hit_stop, hit_tp = l[i] <= stop, h[i] >= target
+            hit_stop, hit_tp = l[i] <= current, h[i] >= target
             mae, mfe = max(mae, entry - l[i]), max(mfe, h[i] - entry)
         else:
-            hit_stop, hit_tp = h[i] >= stop, l[i] <= target
+            hit_stop, hit_tp = h[i] >= current, l[i] <= target
             mae, mfe = max(mae, h[i] - entry), max(mfe, entry - l[i])
         if hit_stop:
+            if be:
+                return "breakeven", i - t, 0.0, min(mae, risk) / risk, mfe / risk
             return "stop", i - t, -1.0, min(mae, risk) / risk, mfe / risk
         if hit_tp:
             return "objetivo", i - t, abs(target - entry) / risk, mae / risk, mfe / risk
+        if be_r is not None and not be and i < end:
+            move = (c[i] - entry) if direction == "long" else (entry - c[i])
+            be = move / risk >= be_r                            # vela cerrada (hay otra después): el stop pasa a la entrada
     last = c[end]
     r = (last - entry) / risk if direction == "long" else (entry - last) / risk
     return "tiempo", end - t, r, mae / risk, mfe / risk
@@ -118,8 +132,10 @@ def intraday_start(ts: np.ndarray, window: int = 200) -> int:
 
 def run_symbol(source, sym: str, order, zones):
     from analisis_setups import spread_prices
+    source.connect()                                     # el terminal se comparte con el bot: si cambió de cuenta, vuelve a la del perfil
     df = source.load_candles(sym, "15m").reset_index(drop=True)
     df = df.iloc[intraday_start(df["ts"].to_numpy()):].reset_index(drop=True)      # antes de ese punto el broker solo tiene velas diarias
+    source.connect()
     spread = spread_prices(source, sym, df)
     df = df.iloc[:-1]                                    # la última vela sigue formándose
     spread = spread[:len(df)]
@@ -165,7 +181,7 @@ def run_symbol(source, sym: str, order, zones):
             risk = abs(entry - stop)
             if risk <= 0:
                 continue
-            res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, MAX_HOLD)
+            res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, MAX_HOLD, BE_R)
             cost = float(spread[t]) / risk
             row = {"mercado": sym, "patrón": name, "zona": tbr.zone, "dirección": direction, "entrada (NY)": pd.Timestamp(int(ts[t]) - AHEAD, unit="s"),
                    "día": tbr.day, "entrada": entry, "stop": stop, "objetivo": target, "riesgo (precio)": risk, "riesgo %": 100 * risk / entry,
@@ -177,16 +193,16 @@ def run_symbol(source, sym: str, order, zones):
             row["sesgo vs operación"] = "a favor" if bias[t] == want else "en contra" if bias[t] == -want else "sin sesgo"
             for m in TP_MULTS:                           # sensibilidad al objetivo (en R)
                 tgt = entry + m * risk if direction == "long" else entry - m * risk
-                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, tgt, MAX_HOLD)
+                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, tgt, MAX_HOLD, BE_R)
                 row[f"R neto TP {m:g}R"] = rg - cost
             for hold in HOLDS:                           # sensibilidad al tiempo máximo (objetivo 2R)
-                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, target, hold)
+                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, target, hold, BE_R)
                 row[f"R neto {hold // 4} h"] = rg - cost
             for k in STOP_MULTS:                         # mejoras: stop ampliado y RR reducido (misma entrada en el 0,5)
                 stp = entry - k * risk if direction == "long" else entry + k * risk
                 for rr in IMPROVE_RRS:
                     tgt = entry + rr * k * risk if direction == "long" else entry - rr * k * risk
-                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, MAX_HOLD)
+                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, MAX_HOLD, BE_R)
                     row[f"R bruto k{k:g} RR{rr:g}"] = rg
                     row[f"R neto k{k:g} RR{rr:g}"] = rg - float(spread[t]) / (k * risk)
                     row[f"cierre k{k:g} RR{rr:g}"] = pd.Timestamp(int(ts[min(t + bars_k, n - 1)]) - AHEAD, unit="s")
@@ -340,6 +356,7 @@ NOTES = [
     ("Datos", "Velas M15 de MT5 (bid) con todo el histórico intradía que tiene el broker (antes de 2018 solo hay velas diarias, que se descartan; "
               "US2000 empieza en 2020). Ver la hoja Datos."),
     ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
+    ("Breakeven", "Como el bot (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT, +1 R por defecto): si una vela M15 cierra con la posición a favor en esos R, el stop pasa a la entrada desde la vela siguiente; si lo toca, cierra a 0 R (resultado «breakeven»; solo queda el coste del spread). Con --be-r 0 se desactiva."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
     ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
     ("Mejoras (stop y RR)", "Hoja «Mejoras (stop y RR)»: la misma entrada en el 0,5 con el stop ampliado a k veces el original y el objetivo a RR veces el nuevo riesgo (RR 1, 1,5 y 2), y filtros: solo largos de lunes en Asia y London, solo NAS100 y DJ30, y riesgo mínimo del 0,15 %. Siempre con las reglas del bot (GO de Cortex, una posición abierta y una sesión un trade); win rate sobre el R bruto."),
@@ -401,10 +418,20 @@ def main() -> None:
     ap.add_argument("--simbolos", nargs="+", default=list(SYMBOLS))
     ap.add_argument("--etiqueta", default="los índices americanos", help="cómo se nombran los mercados en la hoja de metodología")
     ap.add_argument("--salida", default="analisis/backtest_patrones.xlsx")
+    ap.add_argument("--perfil", default=None, help="perfil de MT5 (puprime, metaquotes...); por defecto el del .env")
+    ap.add_argument("--be-r", type=float, default=None,
+                    help="breakeven en R (por defecto SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT del bot; 0 = sin breakeven)")
     args = ap.parse_args()
+    global BE_R
+    setup = EnvConfig().section("SETUP")
+    be_pct, risk_pct = setup.get_float("BE_TRIGGER_PCT", 1.0), setup.get_float("RISK_PCT", 1.0)
+    BE_R = args.be_r if args.be_r is not None else (be_pct / risk_pct if be_pct > 0 and risk_pct > 0 else None)
+    if BE_R is not None and BE_R <= 0:
+        BE_R = None
+    print("breakeven:", "sin breakeven" if BE_R is None else f"stop a la entrada tras un cierre M15 con +{BE_R:g} R")
     NOTES[0] = ("Qué es", f"Backtest de los patrones Continuación y Reversión del bot (con sus fibonacci) en M15 sobre {args.etiqueta}.")
     profiles, default = load_profiles()
-    source = Mt5Source(select_profile(profiles, default, None), 2_000_000)
+    source = Mt5Source(select_profile(profiles, default, args.perfil), 2_000_000)
     print("conectado:", source.connect())
     env = EnvConfig().section("TBR")
     order = zones_from_settings(env, ZONE_ORDER)

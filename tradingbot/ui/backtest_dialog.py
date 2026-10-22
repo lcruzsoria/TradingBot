@@ -218,6 +218,7 @@ class BacktestDialog(QDialog):
         self.resize(820, 900)
         self.backtest, self.error = backtest, error
         self.group_key = ""
+        self.profile_key = ""
         self.pattern = PATTERNS[0]
         self.filter = MAIN_FILTERS[0]
         self.years: set[int] = set()                 # años y horas elegidos en los histogramas (vacío: todos)
@@ -241,7 +242,13 @@ class BacktestDialog(QDialog):
         head.addWidget(self.generated)
         outer.addLayout(head)
 
-        # Selectores: mercados, patrón y filtro
+        # Selectores: perfil, mercados, patrón y filtro
+        self.profile_row = QHBoxLayout()
+        self.profile_row.setSpacing(6)
+        self.profile_btns: dict[str, QPushButton] = {}
+        self.profile_btn_group = QButtonGroup(self)
+        self.profile_label_row = self._labelled("Perfil", self.profile_row)
+        outer.addLayout(self.profile_label_row)
         self.group_row = QHBoxLayout()
         self.group_row.setSpacing(6)
         self.group_btns: dict[str, QPushButton] = {}
@@ -343,8 +350,8 @@ class BacktestDialog(QDialog):
                                  ("Mejora", "Stop", "RR", "Ops", "Acierto", "R bruto", "R neto", "t", "1ª mitad", "2ª mitad"))
         self.funnel = Book("Embudo", "de las TBR evaluadas a las entradas", ("Mercado · patrón", "TBR", "Activadas", "Entradas",
                                                                              "Vencidas", "Invalidadas", "% TBR", "% activadas"))
-        self.outcomes = Book("Cómo terminan", "", ("Patrón", "Objetivo", "Stop", "Tiempo", "MAE", "MFE", "Velas", "Riesgo %",
-                                                   "Coste"))
+        self.outcomes = Book("Cómo terminan", "", ("Patrón", "Objetivo", "Stop", "Breakeven", "Tiempo", "MAE", "MFE",
+                                                   "Velas", "Riesgo %", "Coste"))
         self.data_book = Book("Datos", "velas M15 de MT5 usadas", ("Mercado", "Velas", "Desde", "Hasta", "TBR"))
         for book in (self.by_year, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter,
                      self.by_day, self.halves, self.sensitivity, self.outcomes, self.improvements, self.funnel, self.data_book):
@@ -420,6 +427,30 @@ class BacktestDialog(QDialog):
             btns[key] = btn
         return btns
 
+    def _build_profile_chips(self) -> None:
+        while self.profile_row.count():
+            w = self.profile_row.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.profile_btns.clear()
+        self.profile_btn_group = QButtonGroup(self)
+        profiles = self.backtest.profiles if self.backtest else []
+        for key, name in profiles:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setProperty("chip", "true")
+            btn.setToolTip("Perfil de MT5 con el que se hizo este backtest")
+            btn.clicked.connect(lambda _=False, k=key: self.set_profile(k))
+            self.profile_btn_group.addButton(btn)
+            self.profile_row.addWidget(btn)
+            self.profile_btns[key] = btn
+        self.profile_row.addStretch(1)
+        for i in range(self.profile_label_row.count()):          # con un solo perfil (ficheros antiguos) no hace falta elegir
+            w = self.profile_label_row.itemAt(i).widget()
+            if w is not None:
+                w.setVisible(len(profiles) > 1)
+        self.profile_row_visible = len(profiles) > 1
+
     def _build_group_chips(self) -> None:
         while self.group_row.count():
             w = self.group_row.takeAt(0).widget()
@@ -427,7 +458,8 @@ class BacktestDialog(QDialog):
                 w.deleteLater()
         self.group_btns.clear()
         self.group_btn_group = QButtonGroup(self)
-        for g in self.backtest.groups if self.backtest else []:
+        shown = self.backtest.groups_of(self.profile_key) if self.backtest else []
+        for g in shown:
             btn = QPushButton(g.name)
             btn.setCheckable(True)
             btn.setProperty("chip", "true")
@@ -463,18 +495,39 @@ class BacktestDialog(QDialog):
     # -- selección ---------------------------------------------------------------------------
     def set_backtest(self, backtest: Backtest | None, error: str = "") -> None:
         self.backtest, self.error = backtest, error
-        self._build_group_chips()
         self._chips_for = ""
         if backtest and backtest.groups:
-            self.set_group(self.group_key if backtest.group(self.group_key) else backtest.groups[0].key)
+            keep = backtest.group(self.group_key) or backtest.groups[0]
+            self.profile_key = keep.profile
+            self._build_profile_chips()
+            self._build_group_chips()
+            self.set_group(keep.key)
         else:
+            self._build_profile_chips()
+            self._build_group_chips()
             self.refresh()
+
+    def set_profile(self, key: str) -> None:
+        """Otro perfil: se queda el mismo grupo de mercados si el perfil lo tiene (índices con índices) y si no, el primero."""
+        if not self.backtest or key == self.profile_key:
+            return
+        groups = self.backtest.groups_of(key)
+        if not groups:
+            return
+        base = self.group_key.split(":", 1)[-1]
+        chosen = next((g for g in groups if g.key.split(":", 1)[-1] == base), groups[0])
+        self.profile_key = key
+        self._build_group_chips()
+        self.set_group(chosen.key)
 
     def set_group(self, key: str) -> None:
         if key != self.group_key:                       # otro grupo, otros años y horas: la selección no vale
             self.years, self.hours = set(), set()
         self.group_key = key
         g = self.group
+        if g is not None and g.profile != self.profile_key:
+            self.profile_key = g.profile
+            self._build_group_chips()
         if g is not None:                                # cada grupo trae sus patrones y filtros: si no vale, el primero
             if self.pattern not in g.patterns:
                 self.pattern = g.patterns[0]
@@ -526,6 +579,8 @@ class BacktestDialog(QDialog):
                                              "scripts/exportar_backtest.py y pulsa Recargar.")
             self.generated.setText("")
             return
+        for key, btn in self.profile_btns.items():
+            btn.setChecked(key == self.profile_key)
         for key, btn in self.group_btns.items():
             btn.setChecked(key == self.group_key)
         if self._chips_for != g.key:
@@ -685,9 +740,10 @@ class BacktestDialog(QDialog):
     def _fill_compare(self, g: Group) -> None:
         if not self.backtest or g.is_calendar:
             return
-        since = {m.get("mercado"): str(m.get("desde (NY)") or "")[:4] for grp in self.backtest.groups for m in grp.markets}
+        since = {m.get("mercado"): str(m.get("desde (NY)") or "")[:4] for grp in self.backtest.groups_of(g.profile)
+                 for m in grp.markets}
         rows = []
-        for market, group_name, ops in self.backtest.compare(self.filter, self.years, self.hours):
+        for market, group_name, ops in self.backtest.compare(self.filter, self.years, self.hours, g.profile):
             s = ops.stats()
             gross = float((ops["r"] + ops["k"]).mean()) if len(ops) else None
             rows.append((market, group_name, s, gross))
@@ -718,7 +774,7 @@ class BacktestDialog(QDialog):
                 self.compare.set_highlight(i, "-", "", color)
             else:
                 self.compare.set_highlight(i, _short_market(pick[0]), f"{_r(pick[2]['mean'])} · {pick[1]}", color)
-        mine = [o for _m, grp, o in self.backtest.compare(self.filter, self.years, self.hours) if grp == g.name and len(o)]
+        mine = [o for _m, grp, o in self.backtest.compare(self.filter, self.years, self.hours, g.profile) if grp == g.name and len(o)]
         if mine:
             k = np.concatenate([o["k"] for o in mine])
             gross = float(np.concatenate([o["r"] + o["k"] for o in mine]).mean())
@@ -738,7 +794,7 @@ class BacktestDialog(QDialog):
                 return f"{miles(c)} ({100 * c / n:.0f} %)" if n else "-"
 
             rows.append([(pattern, None if n else theme.MUTED), (share("objetivo"), theme.BULL), (share("stop"), theme.BEAR),
-                         (share("tiempo"), theme.WARN), (_unit(_mean(ops, "mae"), 2, " R"), None),
+                         (share("breakeven"), theme.MUTED), (share("tiempo"), theme.WARN), (_unit(_mean(ops, "mae"), 2, " R"), None),
                          (_unit(_mean(ops, "mfe"), 2, " R"), None), (_unit(_mean(ops, "v"), 0), None),
                          (_unit(_mean(ops, "rk"), 2, " %"), None), (_unit(_mean(ops, "k"), 3, " R"), theme.BEAR)])
         self.outcomes.set_rows(rows)
