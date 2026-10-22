@@ -167,3 +167,17 @@ def test_ventana_backtest_con_datos_minimos():
     assert dlg.hours == {3} and dlg.blocks["n"].value.text() == "1"
     dlg.by_hour.click(3)                                                             # y otro clic en la misma la quita
     assert dlg.hours == set() and dlg.blocks["n"].value.text() == "3"
+
+
+def test_la_ventana_se_puede_ampliar_y_tiene_barra_horizontal(qapp=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from tradingbot.ui.backtest_dialog import BacktestDialog
+    dlg = BacktestDialog(None, Backtest([Group("indices", "Índices americanos", GROUP)], {}))
+    assert dlg.scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    before = dlg.geometry()
+    dlg.toggle_expanded()
+    assert dlg.expand_btn.text() == "Reducir" and dlg.geometry() != before
+    dlg.toggle_expanded()
+    assert dlg.expand_btn.text() == "Ampliar" and dlg.geometry() == before

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
@@ -367,7 +367,7 @@ class BacktestDialog(QDialog):
         self.scroll.setObjectName("StatsScroll")
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)    # si algo no cabe: barra debajo
         self.scroll.setWidget(body)
         outer.addWidget(self.scroll, 1)
 
@@ -379,9 +379,14 @@ class BacktestDialog(QDialog):
         self.reload_btn = QPushButton("Recargar")
         self.reload_btn.setToolTip("Vuelve a leer el backtest (tras regenerarlo con scripts/exportar_backtest.py)")
         self.reload_btn.clicked.connect(self.reload_requested.emit)
+        self.expand_btn = QPushButton("Ampliar")
+        self.expand_btn.setToolTip("Ocupa toda la pantalla disponible para ver todos los datos; pulsa de nuevo para volver al tamaño anterior")
+        self.expand_btn.clicked.connect(self.toggle_expanded)
+        self._restore: QRect | None = None
         close_btn = QPushButton("Cerrar")
         close_btn.clicked.connect(self.hide)
         buttons.addWidget(note, 1)
+        buttons.addWidget(self.expand_btn)
         buttons.addWidget(self.reload_btn)
         buttons.addWidget(close_btn)
         outer.addLayout(buttons)
@@ -437,6 +442,20 @@ class BacktestDialog(QDialog):
             self.group_row.addWidget(btn)
             self.group_btns[g.key] = btn
         self.group_row.addStretch(1)
+
+    def toggle_expanded(self) -> None:
+        """Ampliar: la ventana ocupa toda la pantalla disponible; otra pulsación la devuelve a donde estaba."""
+        if self._restore is not None:
+            self.setGeometry(self._restore)
+            self._restore = None
+            self.expand_btn.setText("Ampliar")
+            return
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen is None:
+            return
+        self._restore = self.geometry()
+        self.setGeometry(screen.adjusted(8, 8, -8, -8))
+        self.expand_btn.setText("Reducir")
 
     # -- abrir / cerrar ----------------------------------------------------------------------
     def popup_at(self, anchor: QWidget) -> None:
