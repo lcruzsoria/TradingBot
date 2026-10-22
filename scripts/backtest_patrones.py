@@ -173,6 +173,13 @@ def run_symbol(source, sym: str, order, zones):
             if risk <= 0:
                 continue
             res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, MAX_HOLD)
+            # vela de la rotura con cuerpo (Continuación) o de la toma con mecha (Reversión): la primera que sale de la caja de la TBR
+            j = next((k for k in range(first, t + 1) if c[k] > tbr.high or c[k] < tbr.low or h[k] > tbr.high or l[k] < tbr.low), first)
+            atr_j = float(atr14[j]) if j < n else float("nan")
+            body = abs(c[j] - o[j])
+            wick = (h[j] - tbr.high) if h[j] > tbr.high else (tbr.low - l[j]) if l[j] < tbr.low else 0.0
+            ny_min = ((int(ts[t]) - AHEAD) % 86400) // 60
+            news = 8 * 60 + 30 <= ny_min < 9 * 60 or 10 * 60 <= ny_min < 10 * 60 + 30 or 14 * 60 <= ny_min < 14 * 60 + 30
             cost = float(spread[t]) / risk
             row = {"mercado": sym, "patrón": name, "zona": tbr.zone, "dirección": direction, "entrada (NY)": pd.Timestamp(int(ts[t]) - AHEAD, unit="s"),
                    "día": tbr.day, "entrada": entry, "stop": stop, "objetivo": target, "riesgo (precio)": risk, "riesgo %": 100 * risk / entry,
@@ -182,6 +189,8 @@ def run_symbol(source, sym: str, order, zones):
                    "spread/ATR": float(spread[t]) / float(atr14[t]), "ATR14/ATR100": float(atr14[t] / atr100[t]),
                    "spread relativo": float(spread[t] / spread_slot[t]) if spread_slot[t] > 0 else float("nan"),
                    "caja TBR/ATR": (tbr.high - tbr.low) / float(atr14[t]), "velas hasta entrada": int(t - first),
+                   "cuerpo rotura/ATR": body / atr_j if name == "Continuación" else float("nan"),
+                   "mecha toma/ATR": wick / atr_j if name == "Reversión" else float("nan"), "franja noticias": bool(news),
                    "sesgo": {1: "Bullish", -1: "Bearish", 0: "Sin sesgo"}[int(bias[t])], "lateral": bool(lateral[t]),
                    "cierre (NY)": pd.Timestamp(int(ts[min(t + bars, n - 1)]) - AHEAD, unit="s")}
             want = 1 if direction == "long" else -1
