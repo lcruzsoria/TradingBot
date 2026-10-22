@@ -6,6 +6,7 @@ import time
 import numpy as np
 
 from ..bias import Direction, TradeFilter
+from ..pattern.patterns import EXPIRED
 from ..bias.models import Bias, BiasResult
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
@@ -29,8 +30,8 @@ class CortexSkill(Skill):
                    "responde a las peticiones de operar (Bullish solo Long, Bearish solo Short). Mientras dura una vuelta "
                    "del barrido de la watchlist retiene los patrones y los decide al final, todos los mercados juntos y en "
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
-    subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "calendar.signal", "setup.closed",
-                  "feed.sweep", "pattern.swept")
+    subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "pattern.discarded",
+                  "calendar.signal", "setup.closed", "feed.sweep", "pattern.swept")
     publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
     interval = 5.0                   # para no esperar para siempre a una vuelta del barrido que no se completa
@@ -88,6 +89,10 @@ class CortexSkill(Skill):
         elif event.topic == "pattern.detected":
             self._pending = (self._pending + [p])[-MAX_PENDING:]
             self._decide()
+        elif event.topic == "pattern.discarded":
+            if p["hit"].status == EXPIRED and p["hit"].levels:    # setup con fibo al que se le acabó el plazo sin entrada
+                self._pending = (self._pending + [{**p, "expired": True}])[-MAX_PENDING:]
+                self._decide()
         elif event.topic == "feed.sweep":
             self._sweep(p)
         elif event.topic == "pattern.swept":
@@ -232,6 +237,14 @@ class CortexSkill(Skill):
                 waiting.append(p)
                 continue
             result = self._bias_at(p["symbol"], p["hit"].ts) or bias["result"]
+            if p.get("expired"):                         # el plazo de la TBR se cortó por tiempo antes de la entrada: NO GO «T»
+                decision = Decision(False, f"T: el plazo de la TBR {p['tbr'].zone} terminó sin que el precio llegara a la entrada "
+                                           f"(setup cortado por tiempo)")
+                self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
+                                                 "hit": p["hit"], "decision": decision, "bias": result.bias,
+                                                 "bias_result": result})
+                self.set_caption(f"NO GO T {p['hit'].direction.capitalize()} {p['tbr'].zone}")
+                continue
             busy = self._busy(p["symbol"], p["hit"].ts)
             if busy is not None:                         # una sola posición abierta a la vez
                 decision = Decision(False, self._busy_reason(busy))

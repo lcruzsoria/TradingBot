@@ -102,13 +102,13 @@ def test_una_mecha_sola_no_activa_la_tbr_solo_el_cuerpo():
     assert analyze(ctx_for(wick), 1) == ([], [])
 
 
-def test_una_toma_previa_con_mecha_del_mismo_lado_bloquea_la_continuacion():
+def test_una_toma_previa_con_mecha_de_cualquier_lado_bloquea_la_continuacion():
     pre = ROWS[:8] + [(103.5, 106, 103, 104)]                          # 8: toma el High con la mecha (106) y cierra dentro
     rows = pre + ROWS[9:]                                              # y después llega la rotura con cuerpo
     assert analyze(ctx_for(rows), 1) == ([], [])
     assert analyze(ctx_for(mirror(rows)), 1) == ([], [])               # y el espejo con el Low
-    other = ROWS[:8] + [(103.5, 104.5, 94, 104)] + ROWS[9:]            # una mecha por el Low no bloquea la rotura del High
-    assert analyze(ctx_for(other), 1)[0][0].status == DETECTED
+    other = ROWS[:8] + [(103.5, 104.5, 94, 104)] + ROWS[9:]            # una mecha por el Low antes de romper el High también:
+    assert analyze(ctx_for(other), 1) == ([], [])                      # lo primero que pasa en la TBR (mecha) la hace de Reversión
 
 
 def test_swing_bars_cambia_que_cuenta_como_pivote():
@@ -122,7 +122,8 @@ def test_al_acabar_el_plazo_de_la_tbr_vence_con_el_motivo():
     assert no_break.status == EXPIRED and "no hubo rotura con cuerpo" in no_break.detail and "NY-PM (13:30 NY)" in no_break.detail
     no_entry = analyze(ctx_for(ROWS[:15], closed=True), 1)[0][0]
     assert no_entry.status == EXPIRED and "sin reversión al 0,5" in no_entry.detail
-    assert analyze(ctx_for(ROWS[:15], closed=True), 1)[1] == []                                           # y ya no se dibuja
+    found, figures = analyze(ctx_for(ROWS[:15], closed=True), 1)                                           # setup formado que vence por tiempo:
+    assert found[0].levels["fibo 0,5"] == 107.0 and [f.state for f in figures] == ["vencida"]            # lleva sus niveles (NO GO «T»)
     assert analyze(ctx_for(ROWS, closed=True), 1)[0][0].status == DETECTED                               # si revirtió a tiempo, vale
 
 

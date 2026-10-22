@@ -835,6 +835,12 @@ class ChartView(pg.PlotWidget):
                 text.setPos(x1, price)
                 pi.addItem(text, ignoreBounds=True)
                 self._fib_items += [line, text]
+            if fib.get("tag") and "0,5" in fib["levels"]:             # «T»: el plazo se cortó por tiempo antes de la entrada
+                tag = pg.TextItem(anchor=(0.5, 1.1))
+                tag.setHtml(f'<span style="font-size:9pt; font-weight:bold; color:{theme.MUTED}">{html.escape(str(fib["tag"]))} · tiempo</span>')
+                tag.setPos((x0 + x1) / 2, fib["levels"]["0,5"])
+                pi.addItem(tag, ignoreBounds=True)
+                self._fib_items.append(tag)
             if fib.get("decision") == "NO GO":                       # entrada detectada que Cortex no opera: atenuada
                 for item in self._fib_items[first:]:
                     item.setOpacity(NO_GO_OPACITY)

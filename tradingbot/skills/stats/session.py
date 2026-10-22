@@ -35,7 +35,7 @@ def alignment_of(order) -> str:
     return "Sin sesgo"
 
 
-REASONS = (("ya hay una posición abierta", "Posición abierta en el mercado"), ("ya dio un trade", "Sesión TBR ya usada"),
+REASONS = (("plazo de la TBR", "T · plazo agotado"), ("ya hay una posición abierta", "Posición abierta en el mercado"), ("ya dio un trade", "Sesión TBR ya usada"),
            ("contra el sesgo", "Contra el sesgo"), ("a favor del sesgo", "A favor del sesgo"),
            ("permitido por CORTEX_ALLOW_NO_BIAS", "Sin sesgo (permitido)"), ("mercado lateral", "Mercado lateral"),
            ("sin sesgo claro", "Sin sesgo claro"), ("aún no está calculado", "Sesgo sin calcular"))

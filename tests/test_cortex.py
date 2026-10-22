@@ -255,3 +255,23 @@ def test_el_fin_del_dia_de_trading_es_17h_ny_y_18h_en_indices():
     assert ny(skill._session_close("USTEC", entry, ahead)) == "19 18:00"
     late = entry + 8 * 3600                                                                    # 18:00 NY
     assert ny(skill._session_close("EURUSD", late, ahead)) == "20 17:00"
+
+
+def test_un_setup_que_vence_por_tiempo_es_no_go_con_etiqueta_t():
+    from tradingbot.skills.pattern.patterns import EXPIRED
+    manager, bus, decisions, orders, executed = run_skills("")
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0, "fibo 0,5": 105.0},
+                     1_000_000, EXPIRED)
+    bus.publish("pattern.discarded", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    sin_fibo = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "no hubo rotura", {}, 1_000_900, EXPIRED)
+    bus.publish("pattern.discarded", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": sin_fibo}, source="pattern")
+    wait(decisions)
+    manager.stop()
+    assert len(decisions) == 1 and not orders                         # el que no llegó a formar fibo no cuenta
+    d = decisions[0].payload["decision"]
+    assert not d.allowed and d.reason.startswith("T:")
+    from tradingbot.ui.main_window import short_reason
+    from tradingbot.skills.stats.session import reason_of
+    assert short_reason(d.reason) == "T" and reason_of(d.reason) == "T · plazo agotado"
