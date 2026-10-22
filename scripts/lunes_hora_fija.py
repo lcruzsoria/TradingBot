@@ -24,6 +24,8 @@ EXIT_HOUR = 10
 STOPS = (0.15, 0.25, 0.35, 0.50, 0.75)         # % del precio
 RRS = (1.0, 1.5, 2.0)
 CACHE = Path("analisis/lunes_hora_fija.pkl")
+SYMBOLS = ("USTEC", "US500", "US30", "US2000")      # MetaQuotes-Demo (en el broker de los documentos: NAS100.r, SP500.r, DJ30.r, US2000.r)
+TWO = ("USTEC", "US30")                              # los equivalentes de NAS100 y DJ30
 
 
 def bracket(h, l, c, i0, i1, direction, entry, risk, rr):
@@ -50,7 +52,7 @@ def collect() -> pd.DataFrame:
     source = Mt5Source(select_profile(profiles, default, None), 2_000_000)
     source.connect()
     rows = []
-    for want in bp.SYMBOLS:
+    for want in SYMBOLS:
         sym = source.resolve_symbol(want)
         df = source.load_candles(sym, "15m").reset_index(drop=True)
         df = df.iloc[bp.intraday_start(df["ts"].to_numpy()):].reset_index(drop=True)
@@ -102,17 +104,38 @@ def summ(g: pd.DataFrame, pct: bool = False) -> pd.Series:
     return pd.Series({"operaciones": n, "win %": 100 * (net > 0).mean(), "bruto": g["R bruto"].mean(), "neto": net.mean(), "t": t})
 
 
+def cost_filter(df: pd.DataFrame) -> None:
+    """Largos de lunes con entrada fija y filtro de coste (spread / riesgo), umbral del 60 % antiguo, medido en el 40 % final."""
+    print("\nLUNES LARGO CON FILTRO DE COSTE (spread/riesgo <= p60 del entrenamiento), 4 mercados, entrada a las 00:00 / 02:00 / 05:00")
+    rows = []
+    for hora in (0, 2, 5):
+        for sp in (0.25, 0.35, 0.50):
+            for rr in RRS:
+                g = df[(df["stop %"] == sp) & (df["RR"] == rr) & (df["hora"] == hora) & (df["dow"] == 0) & (df["dir"] == "long")].sort_values("día")
+                if len(g) < 100:
+                    continue
+                cut = int(len(g) * 0.6)
+                thr = np.percentile(g.iloc[:cut]["coste"], 60)
+                for name, sel in (("sin filtro", g), ("coste<=p60", g[g["coste"] <= thr])):
+                    for per, part in (("entren.", sel[sel["día"] <= g.iloc[cut - 1]["día"]]), ("valid.", sel[sel["día"] > g.iloc[cut - 1]["día"]])):
+                        s = summ(part)
+                        rows.append({"hora": hora, "stop %": sp, "RR": rr, "filtro": name, "periodo": per, **s.to_dict()})
+    out = pd.DataFrame(rows)
+    piv = out.pivot_table(index=["hora", "stop %", "RR", "filtro"], columns="periodo", values=["operaciones", "win %", "neto", "t"])
+    print(piv.round(3).to_string())
+
+
 def main() -> None:
     df = pd.read_pickle(CACHE) if "--cache" in sys.argv and CACHE.exists() else collect()
     pd.set_option("display.width", 200)
     pd.set_option("display.max_rows", 200)
     drift = df[df["stop %"] == 0]
     br = df[df["stop %"] > 0]
-    two = ["NAS100.r", "DJ30.r"]
+    two = list(TWO)
     print("\nDERIVA PURA (sin stop; rentabilidad en %, entrada -> 10:00 NY) — largos por día de la semana, entrada 00:00")
     print(drift[(drift["dir"] == "long") & (drift["hora"] == 0)].groupby("dow").apply(summ).round(4))
     print("\nDERIVA PURA, lunes por hora de entrada y dirección (NAS100+DJ30 / los 4)")
-    for name, mk in (("NAS100+DJ30", two), ("4 mercados", list(bp.SYMBOLS))):
+    for name, mk in (("NAS100+DJ30", two), ("4 mercados", list(SYMBOLS))):
         d = drift[(drift["dow"] == 0) & drift["mercado"].isin(mk)]
         print(name, "\n", d.groupby(["dir", "hora"]).apply(summ).round(4))
     print("\nLUNES LARGO CON STOP Y OBJETIVO, entrada 02:00 NY, NAS100+DJ30 (neto en R)")
@@ -129,6 +152,7 @@ def main() -> None:
     print("\nLUNES LARGO 02:00, stop 0,35 %, RR 1,5, NAS100+DJ30: mitades y años")
     print(pd.DataFrame({"antigua": summ(g.iloc[:half]), "reciente": summ(g.iloc[half:])}).round(3))
     print(g.groupby("año").apply(summ).round(3))
+    cost_filter(df)
 
 
 if __name__ == "__main__":
