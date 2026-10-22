@@ -88,7 +88,7 @@ class PatternSkill(Skill):
         if unknown:
             raise ValueError(f"PATTERN_TYPES={', '.join(wanted)}: patrón desconocido {', '.join(unknown)}. "
                              f"Disponibles: {', '.join(PATTERN_REGISTRY) or 'ninguno todavía'}.")
-        self.types = wanted or list(PATTERN_REGISTRY)                                     # vacío: todos los definidos
+        self.types = wanted or [key for key, cls in PATTERN_REGISTRY.items() if cls.default_on]   # vacío: todos los definidos (salvo los aún por validar)
         self.patterns = {key: PATTERN_REGISTRY[key](self.settings) for key in self.types}   # valida sus ajustes propios
 
     def _load_until(self, order: list[str]) -> dict[str, str]:

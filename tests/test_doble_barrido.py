@@ -36,10 +36,10 @@ def peers(asia=(110.0, 100.0), london=(106.0, 98.0), flip=False):
             peer("NY_AM", "NY Open", DAY, (105.0, 95.0), ny(DAY, 10, 0), ny(DAY, 12, 0)))
 
 
-def ctx_for(rows, tbr=TBR, closed=False, peer_list=None, day_end=0):
+def ctx_for(rows, tbr=TBR, closed=False, peer_list=None, day_end=0, first_bar=24):
     o, h, l, c = (np.array(x, dtype=float) for x in zip(*rows))
     ts = ny(DAY, 10, 0) + np.arange(len(rows)) * 300
-    return PatternContext("EURUSD", "5m", 5, ts, o, h, l, c, tbr, 24, len(rows) - 1, closed, "NY-PM", "13:30", AHEAD, 0,
+    return PatternContext("EURUSD", "5m", 5, ts, o, h, l, c, tbr, first_bar, len(rows) - 1, closed, "NY-PM", "13:30", AHEAD, 0,
                           day_end=day_end, peers=peers() if peer_list is None else peer_list)
 
 
@@ -67,8 +67,10 @@ def test_alcista_es_el_espejo_exacto():
 
 def test_el_orden_de_los_dos_high_es_indiferente():
     swapped = peers(asia=(106.0, 98.0), london=(110.0, 100.0))          # ahora el más alto es el de London
-    h = analyze(ctx_for(ROWS, peer_list=swapped))[0][0]
+    h = analyze(ctx_for(ROWS, peer_list=swapped), entry="extremo")[0][0]
     assert (h.status, h.price, h.levels["target"]) == (DETECTED, 110.0, 98.0)
+    assert analyze(ctx_for(ROWS, peer_list=swapped))[0][0].price == 106.0   # por defecto se entra en el nivel de Asia, sea o no el más alto
+    assert analyze(ctx_for(ROWS, peer_list=swapped), entry="primero")[0][0].price == 106.0
 
 
 def test_solo_con_mecha_sobre_los_high_no_hay_toma():
@@ -127,7 +129,7 @@ def test_solo_se_busca_en_ny_open_y_necesita_las_tbr_de_asia_y_london():
 def test_ajustes_por_defecto():
     d = DobleBarrido()
     assert d.tf == "5m" and PATTERN_REGISTRY["doble_barrido"] is DobleBarrido
-    assert d.stop_fib == 0.618 and DobleBarrido.title == "Doble barrido TBR"
+    assert d.stop_fib == 0.618 and d.entry == "asia" and DobleBarrido.title == "Doble barrido TBR" and not DobleBarrido.default_on
     from tradingbot.envconfig import EnvConfig, parse
     for bad in ("0", "1.5"):
         with pytest.raises(ValueError, match="STOP_FIB"):
@@ -197,3 +199,42 @@ def test_el_breakeven_de_este_patron_salta_en_cuanto_el_precio_toca_1r():
     assert (done.result, done.r, done.exit_ts, done.be_ts) == ("breakeven", 0.0, int(ts[3]), int(ts[1]))
     other = SimpleNamespace(**{**order.__dict__, "pattern_key": "continuacion"})
     assert resolve(other, ts, high, low, close, 1.0, 300) is None      # los demás patrones siguen esperando al cierre de la vela de 15 min
+
+
+def test_la_toma_debe_cruzar_los_niveles_no_estar_ya_mas_alla():
+    rows = [(111, 112, 110.5, 111.5)] + ROWS[3:]                          # empieza ya por encima de los dos High: no los barre, ya estaba allí
+    assert analyze(ctx_for(rows, closed=True)) == ([], [])
+
+
+def test_la_toma_solo_vale_hasta_el_cierre_de_la_tbr_de_ny_open():
+    assert analyze(ctx_for(ROWS, closed=True, first_bar=2)) == ([], [])    # NY Open cierra en la vela 2: el cierre sobre los High (vela 2) es tarde
+
+
+def test_si_el_precio_sigue_barriendo_antes_de_entrar_el_barrido_se_reinicia():
+    rows = [(100, 101, 99, 100), (100, 107, 100, 106.5), (106.5, 111.5, 106, 111),    # 2: cierra sobre los dos High
+            (111, 112, 105, 105.5),                                                   # 3: primera vuelta bajo los dos High (swing 112)
+            (105.5, 110.5, 105, 109),                                                 # 4: toca el nivel antes de NY Open (no es entrada)
+            (111, 115, 110.5, 114),                                                   # 5: supera el swing: el barrido sigue (nuevo swing 115)
+            (114, 114.5, 105, 106),                                                   # 6: vuelve bajo los dos High
+            (106, 110.5, 105.5, 108)]                                                 # 7: retesteo: entrada, con el swing en 115
+    ctx = ctx_for(rows)
+    object.__setattr__(ctx, "start_bar", 5)
+    h = analyze(ctx)[0][0]
+    assert (h.status, h.x, h.levels["stop"]) == (DETECTED, 7, pytest.approx(110 + 0.618 * 5))
+
+
+def test_si_supera_el_swing_sin_entrar_despues_de_ny_open_se_invalida():
+    from tradingbot.skills.pattern.patterns import INVALIDATED
+    rows = ROWS[:6] + [(113, 113.5, 112, 113)]                                # 6: supera el swing (113) sin retesteo
+    hits, figs = analyze(ctx_for(rows, first_bar=4))
+    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 6)] and figs == []
+
+
+def test_el_patron_esta_apagado_por_defecto_en_la_skill():
+    manager, _bus, _found, _dropped, _s, _updated = run_skill()
+    manager.stop()
+    types = manager.skills["pattern"].types
+    assert "doble_barrido" not in types and {"continuacion", "reversion"} <= set(types)
+    manager, *_ = run_skill("PATTERN_TYPES=doble_barrido\n")
+    manager.stop()
+    assert manager.skills["pattern"].types == ["doble_barrido"]

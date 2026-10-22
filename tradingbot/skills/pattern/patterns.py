@@ -152,6 +152,7 @@ class Figure:
 class Pattern(ABC):
     key: ClassVar[str] = ""
     title: ClassVar[str] = ""
+    default_on: ClassVar[bool] = True        # False: solo se busca si se pide en PATTERN_TYPES (patrón aún por validar)
 
     def __init__(self, settings=None) -> None:
         self.settings = settings         # bloque PATTERN de tradingbot.env (ya sin prefijo), o None

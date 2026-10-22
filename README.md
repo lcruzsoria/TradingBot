@@ -202,12 +202,12 @@ Filtro de operativa: con **Bullish** solo se permiten operaciones alcistas (Long
 
 #### Patrón «Doble barrido TBR» (`doble_barrido`)
 
-Solo en NY Open, con velas de M5 (`PATTERN_DOBLE_BARRIDO_TF`). Ejemplo bajista; el alcista es el espejo exacto, con los Low.
+Solo en NY Open, con velas de M5 (`PATTERN_DOBLE_BARRIDO_TF`). **Apagado por defecto**: con `PATTERN_TYPES` vacío el bot no lo busca ni Cortex lo ve; se activa escribiendo `doble_barrido` en `PATTERN_TYPES`. Se valida en backtest con `scripts/backtest_doble_barrido.py`. Ejemplo bajista; el alcista es el espejo exacto, con los Low.
 
-1. **Toma con cuerpo:** una vela cierra por encima de los High de Asia y London (basta cerrar sobre el más alto; el orden da igual), a partir del cierre de la última de las dos TBR. Puede ocurrir antes de que empiece NY Open.
-2. **Swing high:** el máximo absoluto del barrido; se va actualizando hasta que el precio baja de los dos High (paso 3) y entonces queda fijo.
+1. **Toma con cuerpo:** una vela cierra por encima de los High de Asia y London (basta cerrar sobre el más alto; el orden da igual), cruzándolos, desde el cierre de la última de las dos TBR hasta el cierre de la TBR de NY Open. Puede ocurrir antes de que empiece NY Open.
+2. **Swing high:** el máximo absoluto del barrido hasta el paso 3.
 3. **Confirmación:** una vela pasa por debajo de los dos High (basta la mecha).
-4. **Entrada:** retesteo del más alto de los dos High (basta la mecha), desde el inicio de NY Open y viniendo de abajo. Stop en el 0,618 del fibonacci que va del nivel (0) al swing (1) (`PATTERN_DOBLE_BARRIDO_STOP_FIB`; 1 = el propio swing); objetivo en el Low más bajo entre Asia y London. Con la posición a +1 R (`SETUP_BE_TRIGGER_PCT` / `SETUP_RISK_PCT`) el stop pasa a la entrada en cuanto el precio toca ese nivel.
+4. **Entrada:** retesteo del High de Asia (`PATTERN_DOBLE_BARRIDO_ENTRY`: `asia`, `extremo` o `primero`; basta la mecha), desde el inicio de NY Open. Si antes de entrar el precio supera el swing, el barrido sigue en marcha y se reinicia desde ahí; pasado el cierre de NY Open, el setup se invalida. Stop en el 0,618 del fibonacci del nivel (0) al swing (1) (`PATTERN_DOBLE_BARRIDO_STOP_FIB`; 1 = el propio swing); objetivo en el Low más bajo entre Asia y London. Con la posición a +1 R (`SETUP_BE_TRIGGER_PCT` / `SETUP_RISK_PCT`) el stop pasa a la entrada en cuanto el precio toca ese nivel.
 
 Un solo trade al día: si los dos lados dan entrada, cuenta la primera. Se busca hasta el cierre del día de trading.
 
