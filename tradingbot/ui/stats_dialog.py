@@ -430,7 +430,7 @@ class StatsDialog(QDialog):
         return self._to_ny(t.order.entry_ts) if t.order.entry_ts else None
 
     def _is_pattern(self, name: str) -> bool:
-        return self.pattern == PATTERNS[0] or name == self.pattern
+        return name in PATTERNS[1:] if self.pattern == PATTERNS[0] else name == self.pattern
 
     def _in_window(self, t: Trade) -> bool:
         return self._recent(t.order.entry_ts) and self._is_pattern(t.order.pattern)
