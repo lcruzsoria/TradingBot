@@ -205,3 +205,16 @@ def test_la_ventana_elige_el_perfil_y_cada_perfil_trae_sus_grupos(tmp_path):
     assert {grp for _m, grp, _o in bt.compare(BOT_FILTER, profile="puprime")} == {"Índices americanos"}
     assert len(bt.compare(BOT_FILTER, profile="puprime")) == 4                       # 2 mercados por grupo y 2 grupos
     assert dlg.outcomes.headers[3] == "Breakeven" if hasattr(dlg.outcomes, "headers") else True
+
+def test_la_ventana_se_puede_ampliar_y_tiene_barra_horizontal(qapp=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from tradingbot.ui.backtest_dialog import BacktestDialog
+    dlg = BacktestDialog(None, Backtest([Group("indices", "Índices americanos", GROUP)], {}))
+    assert dlg.scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    before = dlg.geometry()
+    dlg.toggle_expanded()
+    assert dlg.expand_btn.text() == "Reducir" and dlg.geometry() != before
+    dlg.toggle_expanded()
+    assert dlg.expand_btn.text() == "Ampliar" and dlg.geometry() == before
