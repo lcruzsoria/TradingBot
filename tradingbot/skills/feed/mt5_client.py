@@ -201,7 +201,12 @@ class Mt5Source:
         if not frames:
             raise Mt5Error(f"Sin velas para {symbol} {timeframe}: {mt5.last_error()}")
 
-        df = normalize_candles(pd.concat(frames[::-1], ignore_index=True).rename(columns={"time": "ts"}))
+        raw = pd.concat(frames[::-1], ignore_index=True).rename(columns={"time": "ts"})
+        if "spread" in raw:                                  # MT5 lo da en puntos: se pasa a precio
+            info = mt5.symbol_info(symbol)
+            point = float(getattr(info, "point", 0) or 0)
+            raw = raw.assign(spread=raw["spread"].astype(float) * point) if point > 0 else raw.drop(columns="spread")
+        df = normalize_candles(raw)
         if timeframe in DERIVED:          # p. ej. 7h: MT5 no lo tiene, se agrupa desde 1h
             df = aggregate_candles(df, minutes(timeframe) * 60)
         return df

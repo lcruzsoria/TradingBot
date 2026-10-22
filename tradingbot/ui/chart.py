@@ -61,6 +61,8 @@ class PositionPill(pg.TextItem):
         decision = pos.get("decision")
         self._bar = QColor(_verdict_color(pos)) if decision else None
         symbol = {"GO": "✓", "NO GO": "✕"}.get(decision, "")
+        if pos.get("code") == "spread":                 # NO GO por spread: una S roja y «NO GO» en vez de la ✕
+            symbol = f'S</b>&nbsp;<span style="color:{theme.MUTED}">NO GO</span><b>'
         self.result = result
         self.setHtml(f'<span style="font-size:9pt">&nbsp;&nbsp;<b style="color:{_verdict_color(pos)}">{symbol}</b>&nbsp;'
                      f'<span style="color:{theme.TEXT}">{html.escape(pos["label"])} {_ratio(pos):.1f}R</span>'
@@ -787,7 +789,8 @@ class ChartView(pg.PlotWidget):
         verdict = ""
         if pos.get("decision"):
             verdict = (f'<div style="margin-top:3px"><span style="color:{_verdict_color(pos)}">Cortex {pos["decision"]}</span>'
-                       f'<span style="color:{muted}">&nbsp; {html.escape(pos.get("reason", ""))}</span></div>')
+                       f'<span style="color:{muted}">{"<br>" if pos.get("detail") else "&nbsp; "}'
+                       f'{html.escape(pos.get("detail") or pos.get("reason", ""))}</span></div>')
         card.setHtml(f'<div style="font-size:8pt"><div style="color:{theme.TEXT}"><b>{html.escape(pos["label"])}</b>'
                      f' · {"Largo" if pos["direction"] == "long" else "Corto"} · {html.escape(str(pos["state"]))}</div>'
                      f'<table cellspacing="0" cellpadding="0">{rows}</table>{verdict}</div>')

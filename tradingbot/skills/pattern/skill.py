@@ -32,6 +32,18 @@ def candles_for(chart: dict, tf: str):
     return None
 
 
+def spread_at(df, ts: int | None) -> float | None:
+    """Spread (en precio) de la vela de `df` que empieza en `ts`, o None si las velas no lo traen (datos sintéticos) o no está la vela."""
+    if df is None or not ts or "spread" not in df:
+        return None
+    times = df["ts"].to_numpy()
+    i = int(np.searchsorted(times, int(ts), "left"))
+    if i >= len(times) or int(times[i]) != int(ts):
+        return None
+    value = float(df["spread"].iat[i])
+    return value if value == value else None
+
+
 @register_skill("pattern")
 class PatternSkill(Skill):
     title = "Pattern"
@@ -225,7 +237,8 @@ class PatternSkill(Skill):
                 continue
             self._seen.add(key)
             payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit,
-                       "session_close": self._session_close(symbol, hit.ts, ahead), **mark}
+                       "session_close": self._session_close(symbol, hit.ts, ahead),
+                       "spread": spread_at(candles_for(c, tfs.get(hit.key, tf)), hit.ts) if hit.status == DETECTED else None, **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
         if ended:
             key = (symbol, "session", tbr.key, tbr.day)

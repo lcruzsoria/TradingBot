@@ -280,6 +280,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |
+| `CORTEX_MAX_SPREAD_R` | `0.07` | NO GO (S roja en el gráfico) si el spread de la vela de entrada supera este múltiplo del riesgo (entrada - stop); `0` desactiva la regla. |
 | **SETUP** — ejecutor | | |
 | `SETUP_SEND_ORDERS` | `false` | Enviar las órdenes de Cortex a MT5. Aún no implementado: `true` da error; ahora solo se simulan. |
 | `SETUP_RISK_PCT` | `1` | Riesgo de cada operación simulada, en % del saldo virtual del perfil (resultado en dinero = R x riesgo). |

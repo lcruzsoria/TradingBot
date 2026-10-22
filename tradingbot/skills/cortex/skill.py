@@ -13,7 +13,7 @@ from .order import build_calendar_order, build_order
 from ..setup import store
 from ..setup.positions import resolve, trackable
 from ..feed.skill import sweep_settings
-from .validation import DEFAULT_ALLOW_NO_BIAS, Decision, validate
+from .validation import DEFAULT_ALLOW_NO_BIAS, DEFAULT_MAX_SPREAD_R, Decision, check_spread, validate
 
 MAX_PENDING = 500
 ROUND_WAIT_SECONDS = 60          # tras terminar de cargar un barrido, lo que se espera como mucho a Pattern y Bias
@@ -49,6 +49,7 @@ class CortexSkill(Skill):
         every = sweep_settings(env.section("feed") if env is not None else EnvConfig(), app)[0]
         self._sweeping = every > 0 and bool(app.get("watchlist"))     # con barrido, solo se decide al cerrar cada vuelta
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
+        self.max_spread_r = self.settings.get_float("MAX_SPREAD_R", DEFAULT_MAX_SPREAD_R) or 0.0   # spread / riesgo máximo (0: sin regla)
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
@@ -239,6 +240,8 @@ class CortexSkill(Skill):
                 decision = Decision(False, self._session_reason(p))
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
+                if decision.allowed:                     # y un patrón que sería GO se aborta si el spread se come demasiado riesgo
+                    decision = check_spread(p.get("spread"), p["hit"].price, p["hit"].levels.get("stop"), self.max_spread_r) or decision
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
                                              "hit": p["hit"], "decision": decision, "bias": result.bias,
                                              "bias_result": result})

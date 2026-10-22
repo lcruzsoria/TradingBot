@@ -1128,16 +1128,21 @@ class MainWindow(QMainWindow):
         for f in sorted(self._positions, key=lambda f: f.x0_ts):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
             decision, reason = self._entry_decision(x0, f.direction)
+            code = detail = ""
+            if decision == "GO":                                # y el spread de esa vela puede abortarla (regla de spread de Cortex)
+                no_go = self._spread_verdict(x0, f.levels["entrada"], f.levels["stop"])
+                if no_go is not None:
+                    decision, reason, code, detail = "NO GO", no_go.short, no_go.code, no_go.reason
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                               "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
-                              "reason": reason, "session": (f.zone, f.day)})
+                              "reason": reason, "code": code, "detail": detail, "session": (f.zone, f.day)})
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran
         used = set()                                            # y una misma sesión no puede dar dos trades
         for pos in positions:
             real = self._decisions.get((self.charted_symbol, *pos["session"], pos["direction"]))
             if real is not None:                                # lo que decidió Cortex (con todos los mercados): manda
-                pos["decision"], pos["reason"] = real
+                pos["decision"], pos["reason"], pos["code"], pos["detail"] = real
                 if real[0] == "GO":
                     busy_until = max(busy_until, pos["x1"])
                     used.add(pos["session"])
@@ -1145,9 +1150,9 @@ class MainWindow(QMainWindow):
             if not pos["decision"]:
                 continue
             if pos["x0"] < busy_until:
-                pos["decision"], pos["reason"] = "NO GO", "posición abierta"
+                pos["decision"], pos["reason"], pos["code"], pos["detail"] = "NO GO", "posición abierta", "", ""
             elif pos["session"] in used:
-                pos["decision"], pos["reason"] = "NO GO", "sesión ya operada"
+                pos["decision"], pos["reason"], pos["code"], pos["detail"] = "NO GO", "sesión ya operada", "", ""
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
                 used.add(pos["session"])
@@ -1165,7 +1170,7 @@ class MainWindow(QMainWindow):
                 if pos is not None and not any(pos is p for p in shown):
                     continue                                    # otra entrada de esa TBR ya ocupa su sitio
                 if pos is not None and pos["decision"]:
-                    fib["decision"], fib["reason"] = pos["decision"], pos["reason"]
+                    fib["decision"], fib["reason"], fib["code"] = pos["decision"], pos["reason"], pos["code"]
             elif any(p["session"] == (f.zone, f.day) for p in shown):
                 continue                                        # fibo en curso de una TBR que ya dio su entrada
             fibs.append(fib)
@@ -1199,6 +1204,14 @@ class MainWindow(QMainWindow):
                        "entry": o.price, "stop": o.stop, "target": o.target, "direction": o.direction, "state": state,
                        "label": "Calendario", "decision": "GO", "reason": "forwardtest", "session": ("calendario", o.entry_ts)}
         return list(out.values())
+
+    def _spread_verdict(self, index: int, entry: float, stop: float):
+        """NO GO (un Decision) que daría la regla de spread de Cortex a una entrada en la vela `index`, o None."""
+        from ..skills.cortex.validation import check_spread
+        cortex = self.manager.skills.get("cortex")
+        if self.candles is None or "spread" not in self.candles or index >= len(self.candles):
+            return None
+        return check_spread(float(self.candles["spread"].iat[index]), entry, stop, float(getattr(cortex, "max_spread_r", 0.0)))
 
     def _entry_decision(self, index: int, direction: str) -> tuple[str, str]:
         """GO / NO GO que habría dado Cortex a una entrada en la vela `index`, con el sesgo que tenía el bot en esa vela."""
@@ -1283,7 +1296,8 @@ class MainWindow(QMainWindow):
         hit, tbr, decision = p["hit"], p["tbr"], p["decision"]
         key = (p["symbol"], tbr.zone, tbr.day.isoformat(), hit.direction)
         if key not in self._decisions or decision.allowed:     # de una sesión, el GO si lo hubo (solo puede haber uno)
-            self._decisions[key] = (decision.verdict, short_reason(decision.reason))
+            self._decisions[key] = (decision.verdict, decision.short or short_reason(decision.reason), decision.code,
+                                    decision.reason if decision.code else "")
             if p["symbol"] == self.charted_symbol:
                 self._apply_fibs()
         lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]

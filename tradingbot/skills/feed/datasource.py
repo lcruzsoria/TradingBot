@@ -64,9 +64,11 @@ def aggregate_candles(df: pd.DataFrame, seconds: int, anchor: int = 0) -> pd.Dat
     else:
         start = (ts - anchor) // seconds * seconds + anchor
     grouped = df.assign(ts=start).groupby("ts", sort=True)
-    out = grouped.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"),
-                      close=("close", "last"), tick_volume=("tick_volume", "sum")).reset_index()
-    return normalize_candles(out)
+    spec = dict(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"),
+                tick_volume=("tick_volume", "sum"))
+    if "spread" in df:
+        spec["spread"] = ("spread", "max")              # el peor spread de las velas que se agrupan
+    return normalize_candles(grouped.agg(**spec).reset_index())
 
 
 def normalize_candles(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,10 +76,11 @@ def normalize_candles(df: pd.DataFrame) -> pd.DataFrame:
 
     - ts:   epoch en segundos (hora del servidor del broker, tratada como UTC)
     - time: datetime naive equivalente a ts
+    - spread (opcional): spread de la vela en precio (lo da MT5), para la regla de spread de Cortex
     """
     df = df.drop_duplicates(subset="ts").sort_values("ts").reset_index(drop=True)
     df["ts"] = df["ts"].astype(np.int64)
     df["time"] = pd.to_datetime(df["ts"], unit="s")
     if "tick_volume" not in df:
         df["tick_volume"] = 0
-    return df[CANDLE_COLUMNS]
+    return df[CANDLE_COLUMNS + (["spread"] if "spread" in df else [])]

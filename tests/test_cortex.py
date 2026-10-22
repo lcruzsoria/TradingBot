@@ -255,3 +255,76 @@ def test_el_fin_del_dia_de_trading_es_17h_ny_y_18h_en_indices():
     assert ny(skill._session_close("USTEC", entry, ahead)) == "19 18:00"
     late = entry + 8 * 3600                                                                    # 18:00 NY
     assert ny(skill._session_close("EURUSD", late, ahead)) == "20 17:00"
+
+
+# -- regla de spread ----------------------------------------------------------------------------------------------------
+def test_check_spread_aborta_si_el_spread_supera_el_umbral_en_r():
+    from tradingbot.skills.cortex.validation import check_spread
+    assert check_spread(0.5, 105.0, 95.0, 0.07) is None                          # 0,05 R: pasa
+    no_go = check_spread(1.0, 105.0, 95.0, 0.07)                                  # 0,10 R: aborta
+    assert no_go is not None and not no_go.allowed and no_go.code == "spread"
+    assert "spread alto" in no_go.reason and "0.100 R" in no_go.reason and "0.07 R" in no_go.reason and "1" in no_go.reason
+    assert no_go.short == "spread 0.10 R > 0.07 R"
+    assert check_spread(1.0, 105.0, 95.0, 0.0) is None                            # 0: regla desactivada
+    assert check_spread(None, 105.0, 95.0, 0.07) is None and check_spread(1.0, 105.0, None, 0.07) is None   # sin datos: no se juzga
+
+
+def test_cortex_da_no_go_por_spread_y_no_gasta_la_sesion():
+    manager, bus, decisions, orders, executed = run_skills("CORTEX_MAX_SPREAD_R=0.07\n", with_setup=False)
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", {**pattern_event(direction="long"), "spread": 1.0}, source="pattern")     # riesgo 10: 0,10 R
+    wait(decisions)
+    bus.publish("pattern.detected", {**pattern_event(direction="long"), "spread": 0.3}, source="pattern")     # 0,03 R
+    wait(decisions, 2)
+    manager.stop()
+    first, second = (d.payload["decision"] for d in decisions)
+    assert not first.allowed and first.code == "spread" and "spread alto" in first.reason
+    assert second.allowed and len(orders) == 1                                      # el NO GO por spread no consumió la sesión
+
+
+def test_el_spread_solo_aborta_lo_que_seria_go():
+    manager, bus, decisions, orders, executed = run_skills("", with_setup=False)
+    bus.publish("bias.updated", {"result": bias(Bias.BEARISH, -3.0), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", {**pattern_event(direction="long"), "spread": 1.0}, source="pattern")
+    wait(decisions)
+    manager.stop()
+    d = decisions[0].payload["decision"]
+    assert not d.allowed and d.code == "" and "contra el sesgo" in d.reason          # manda el motivo del sesgo
+
+
+def test_la_etiqueta_del_gráfico_lleva_la_s_roja_y_el_detalle_del_spread(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.cortex.validation import check_spread
+    from tradingbot.ui.chart import PositionPill
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    decision = check_spread(1.0, 105.0, 95.0, 0.07)
+    win._on_cortex_decision({**pattern_event(), "decision": decision, "bias": Bias.BULLISH})
+    key = ("EURUSD", "NY Open", TBR.day.isoformat(), "long")
+    verdict, short, code, detail = win._decisions[key]
+    assert (verdict, code, short) == ("NO GO", "spread", "spread 0.10 R > 0.07 R") and "0.100 R del riesgo" in detail
+    pos = {"state": "stop", "label": "Continuación", "entry": 105.0, "stop": 95.0, "target": 125.0, "decision": verdict,
+           "reason": short, "code": code, "detail": detail}
+    html_text = PositionPill(pos).toHtml()
+    assert ">S<" in html_text.replace("\n", "") or "S</span>" in html_text or ">S" in html_text
+    assert "NO GO" in html_text and "#ef5350" in html_text.lower()
+    assert "NO GO" in PositionPill({**pos, "code": ""}).toHtml() or "✕" in PositionPill({**pos, "code": ""}).toHtml()
+
+
+def test_las_velas_conservan_y_agrupan_el_spread():
+    import pandas as pd
+    from tradingbot.skills.feed.datasource import aggregate_candles, normalize_candles
+    from tradingbot.skills.pattern.skill import spread_at
+    ts = [0, 900, 1800, 2700]
+    df = normalize_candles(pd.DataFrame({"ts": ts, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "tick_volume": 1,
+                                         "spread": [0.1, 0.4, 0.2, 0.3]}))
+    assert list(df["spread"]) == [0.1, 0.4, 0.2, 0.3]
+    assert list(aggregate_candles(df, 3600)["spread"]) == [0.4]                    # el peor de las 4 velas
+    assert spread_at(df, 900) == 0.4 and spread_at(df, 901) is None and spread_at(None, 900) is None
+    assert spread_at(df.drop(columns="spread"), 900) is None                       # datos sin spread: la regla no juzga
