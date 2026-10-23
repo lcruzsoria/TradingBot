@@ -6,7 +6,7 @@ import time
 import numpy as np
 
 from ..bias import Direction, TradeFilter
-from ..pattern.patterns import EXPIRED
+from ..pattern.patterns import EXPIRED, INVALIDATED
 from ..bias.models import Bias, BiasResult
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
@@ -90,7 +90,7 @@ class CortexSkill(Skill):
             self._pending = (self._pending + [p])[-MAX_PENDING:]
             self._decide()
         elif event.topic == "pattern.discarded":
-            if p["hit"].status == EXPIRED and p["hit"].levels:    # setup con fibo al que se le acabó el plazo sin entrada
+            if p["hit"].status in (EXPIRED, INVALIDATED) and p["hit"].levels:   # setup con fibo que no llegó a entrada: T (plazo) o I (invalidado)
                 self._pending = (self._pending + [{**p, "expired": True}])[-MAX_PENDING:]
                 self._decide()
         elif event.topic == "feed.sweep":
@@ -237,13 +237,16 @@ class CortexSkill(Skill):
                 waiting.append(p)
                 continue
             result = self._bias_at(p["symbol"], p["hit"].ts, p["timeframe"]) or bias["result"]
-            if p.get("expired"):                         # el plazo de la TBR se cortó por tiempo antes de la entrada: NO GO «T»
-                decision = Decision(False, f"T: el plazo de la TBR {p['tbr'].zone} terminó sin que el precio llegara a la entrada "
-                                           f"(setup cortado por tiempo)")
+            if p.get("expired"):                         # no llegó a la entrada: por tiempo (NO GO «T») o por invalidación (NO GO «I»)
+                if p["hit"].status == INVALIDATED:
+                    decision = Decision(False, f"I: setup invalidado antes de la entrada en la TBR {p['tbr'].zone} ({p['hit'].detail})")
+                else:
+                    decision = Decision(False, f"T: el plazo de la TBR {p['tbr'].zone} terminó sin que el precio llegara a la entrada "
+                                               f"(setup cortado por tiempo)")
                 self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],
                                                  "hit": p["hit"], "decision": decision, "bias": result.bias,
                                                  "bias_result": result})
-                self.set_caption(f"NO GO T {p['hit'].direction.capitalize()} {p['tbr'].zone}")
+                self.set_caption(f"NO GO {decision.reason[0]} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
                 continue
             busy = self._busy(p["symbol"], p["hit"].ts)
             if busy is not None:                         # una sola posición abierta a la vez

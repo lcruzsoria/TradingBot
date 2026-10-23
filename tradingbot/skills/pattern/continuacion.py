@@ -136,13 +136,16 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
     half = (zero + swing) / 2
     target = zero + (zero - swing) / 2                        # nivel -0,5: media vuelta del tramo más allá del 0
     levels = {"-0,5": sign * target, "0": sign * zero, "0,5": sign * half, "1": sign * swing}
-    if leg.breach is not None:
-        return [hit(INVALIDATED, direction, leg.breach, sign * swing,
-                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing low ({sign * swing:.5g}) antes de llegar "
-                    f"al 0,5: patrón invalidado")], []
     arrow = "▲" if up else "▼"
     label = f"{tbr.zone} {arrow}"
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
+    if leg.breach is not None:                                # el fibo ya estaba formado: se anota (NO GO «I») y se dibuja hasta ahí
+        marks = {"stop": sign * swing, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half}
+        return [hit(INVALIDATED, direction, leg.breach, sign * swing,
+                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing low ({sign * swing:.5g}) antes de llegar "
+                    f"al 0,5: patrón invalidado", marks)], \
+            [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), int(ts[leg.breach]) + tf_sec, levels, "invalidada", label,
+                    tbr.day.isoformat())]
     if entry is not None:
         t, half = entry
         detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing high (0) en {_when(ctx, leg.zero_idx)} y swing low (1) en "

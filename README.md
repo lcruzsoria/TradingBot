@@ -17,7 +17,7 @@ Con las tres TBR de trabajo (Asia, London, NY Open), la **TBR activa** es la úl
 Low y su 50 %. Cada skill tiene un papel:
 
 - **Pattern** se conecta a TBR, toma la TBR activa y busca en ella los **patrones de entrada** (`@register_pattern`), hasta
-  que acaba el plazo de cada TBR (`PATTERN_UNTIL`): Asia hasta el final de London (05:00 NY, 5 h tras cerrar), London hasta el final de NY Open (12:00, 7 h) y NY Open hasta las 18:00 (6 h). Si el plazo se corta por tiempo con el setup ya formado (fibo trazado y sin entrada), Cortex lo anota como NO GO con etiqueta **T** (tiempo).
+  que acaba el plazo de cada TBR (`PATTERN_UNTIL`): Asia hasta el final de London (05:00 NY, 5 h tras cerrar), London hasta el final de NY Open (12:00, 7 h) y NY Open hasta las 18:00 (6 h). Si el plazo se corta por tiempo con el setup ya formado (fibo trazado y sin entrada), Cortex lo anota como NO GO con etiqueta **T** (tiempo). Si el setup se invalida con el fibo ya formado (el precio supera la mecha pivote, pierde el swing low o una vela cierra fuera antes de la entrada), Cortex lo anota NO GO con etiqueta **I** (invalidado) y el gráfico dibuja ese fibo atenuado hasta la vela que lo invalida, con «I · invalidado»; la T se dibuja igual con «T · tiempo».
   Cada patrón identificado se anota en el Registro, igual que los que se invalidan, se anulan o vencen, con su motivo. Tras
   NY PM (16:30 NY) no se evalúan más setups y también se anota. Solo usa velas cerradas. Hoy hay dos patrones (ver abajo).
 - **Cortex** (el coordinador) reúne el activo, la temporalidad, el sesgo, la TBR y el patrón. Contrasta el patrón con las reglas

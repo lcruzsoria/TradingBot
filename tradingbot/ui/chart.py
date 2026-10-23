@@ -837,7 +837,7 @@ class ChartView(pg.PlotWidget):
                 self._fib_items += [line, text]
             if fib.get("tag") and "0,5" in fib["levels"]:             # «T»: el plazo se cortó por tiempo antes de la entrada
                 tag = pg.TextItem(anchor=(0.5, 1.1))
-                tag.setHtml(f'<span style="font-size:9pt; font-weight:bold; color:{theme.MUTED}">{html.escape(str(fib["tag"]))} · tiempo</span>')
+                tag.setHtml(f'<span style="font-size:9pt; font-weight:bold; color:{theme.MUTED}">{html.escape(str(fib["tag"]))} · {"invalidado" if fib["tag"] == "I" else "tiempo"}</span>')
                 tag.setPos((x0 + x1) / 2, fib["levels"]["0,5"])
                 pi.addItem(tag, ignoreBounds=True)
                 self._fib_items.append(tag)

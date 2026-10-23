@@ -51,8 +51,8 @@ CHART_TOPICS = frozenset({"candles.loaded", "tbr.updated", "levels.updated", "bi
 
 def short_reason(reason: str) -> str:
     """Motivo corto de una decisión de Cortex para la etiqueta de la entrada en el gráfico."""
-    if reason.startswith("T:"):
-        return "T"                                                   # el plazo de la TBR se cortó por tiempo antes de la entrada
+    if reason.startswith(("T:", "I:")):
+        return reason[0]                                             # T: el plazo se cortó por tiempo; I: se invalidó, antes de la entrada
     if reason.startswith("ya hay una posición abierta en "):
         return "posición abierta en " + reason.split("ya hay una posición abierta en ", 1)[1].split(" ")[0]
     if reason.startswith("la sesión "):
@@ -1176,8 +1176,9 @@ class MainWindow(QMainWindow):
                     fib["decision"], fib["reason"] = pos["decision"], pos["reason"]
             elif any(p["session"] == (f.zone, f.day) for p in shown):
                 continue                                        # fibo en curso de una TBR que ya dio su entrada
-            elif f.state == "vencida":                          # plazo cortado por tiempo sin entrada: NO GO «T», atenuado
-                fib["decision"], fib["reason"], fib["tag"] = "NO GO", "T", "T"
+            elif f.state in ("vencida", "invalidada"):          # sin entrada: NO GO «T» (plazo) o «I» (invalidado), atenuado
+                tag = "T" if f.state == "vencida" else "I"
+                fib["decision"], fib["reason"], fib["tag"] = "NO GO", tag, tag
 
             fibs.append(fib)
         self.chart.set_fibs(fibs)

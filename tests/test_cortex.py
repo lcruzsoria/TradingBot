@@ -275,3 +275,23 @@ def test_un_setup_que_vence_por_tiempo_es_no_go_con_etiqueta_t():
     from tradingbot.ui.main_window import short_reason
     from tradingbot.skills.stats.session import reason_of
     assert short_reason(d.reason) == "T" and reason_of(d.reason) == "T · plazo agotado"
+
+
+def test_un_setup_invalidado_con_fibo_es_no_go_con_etiqueta_i():
+    from tradingbot.skills.pattern.patterns import INVALIDATED
+    from tradingbot.ui.main_window import short_reason
+    from tradingbot.skills.stats.session import reason_of
+    manager, bus, decisions, orders, executed = run_skills("")
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "el precio superó la mecha pivote", {"stop": 95.0, "target": 115.0, "fibo 0,5": 105.0},
+                     1_000_000, INVALIDATED)
+    bus.publish("pattern.discarded", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    sin_fibo = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "cerró fuera antes de confirmar", {}, 1_000_900, INVALIDATED)
+    bus.publish("pattern.discarded", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": sin_fibo}, source="pattern")
+    wait(decisions)
+    manager.stop()
+    assert len(decisions) == 1 and not orders                              # la que no llegó a formar fibo no cuenta
+    d = decisions[0].payload["decision"]
+    assert not d.allowed and d.reason.startswith("I:")
+    assert short_reason(d.reason) == "I" and reason_of(d.reason) == "I · invalidado"
