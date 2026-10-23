@@ -183,6 +183,7 @@ ACTIVE_BG = ACTIVE_BORDER = BULL = BEAR = NEUTRAL = WARN = ""
 EDGE = RING_DOT = FREE_LINE = FREE_TEXT = ""
 CANDLE_UP_FILL = CANDLE_UP_LINE = CANDLE_DOWN_FILL = CANDLE_DOWN_LINE = ""
 CHART_TEXT = CHART_GRID = LEVEL_HIGH = LEVEL_LOW = LEVEL_OPEN = LEVEL_LABEL = ""
+TRADE = "#FFD60A"       # mercado con una operación abierta (tarjeta de Quotes)
 _current: Palette = PRESETS[DEFAULT_PRESET]
 
 # -- tipo de letra (UI_FONT de tradingbot.env) ------------------------------------------------
@@ -333,6 +334,9 @@ QLabel#MkSub {{ color: {MUTED}; font-size: 10px; background: transparent; }}
 QLabel#MkBadge {{ background: {PANEL_ALT}; color: {MUTED}; border: 1px solid {BORDER}; border-radius: 3px; padding: 0px 5px; font-size: 10px; }}
 QFrame#MarketCard[stale="true"] QLabel#MkPrice {{ color: {MUTED}; }}
 QFrame#MarketCard[stale="true"] QLabel#MkSymbol {{ color: {MUTED}; }}
+QFrame#MarketCard[trade="true"] {{ border-left: 4px solid {TRADE}; }}
+QFrame#MarketCard[trade="true"] QLabel#MkSymbol {{ color: {TRADE}; }}
+QLabel#MkTrade {{ background: {TRADE}; color: #2A2200; border-radius: 3px; padding: 0px 5px; font-size: 10px; font-weight: 700; }}
 
 /* Tarjeta del Bias: se tiñe según el estado */
 QFrame#BiasCard {{ border-radius: 6px; border: 1px solid {BORDER}; background: {PANEL}; }}

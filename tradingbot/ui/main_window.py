@@ -931,6 +931,11 @@ class MainWindow(QMainWindow):
         today = _ny_today().date()
         self._trades_day = today
         stats = self.stats if getattr(self, "stats", None) is not None else TradeStats()   # aún sin la skill Stats
+        open_trades: dict[str, list[str]] = {}                  # mercados con operación abierta: se marcan en Quotes
+        for t in stats.open:
+            open_trades.setdefault(t.order.symbol.lower(), []).append(t.order.direction)
+        if hasattr(self, "markets"):
+            self.markets.set_trades(open_trades)
         s = stats.only(lambda t: bool(t.order.entry_ts) and self._ny(t.order.entry_ts).date() == today,
                             lambda x: bool(x.ts) and self._ny(x.ts).date() == today)
         wins, losses, be, opened = s.wins, s.losses, s.flat, len(s.open)

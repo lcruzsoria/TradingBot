@@ -118,8 +118,13 @@ class MarketCard(QFrame):
         self.badge.hide()
         self.age = QLabel("")
         self.age.setObjectName("MkSub")
+        self.trade = QLabel("")             # operación abierta del Forwardtest en este mercado: ▲ LARGO / ▼ CORTO
+        self.trade.setObjectName("MkTrade")
+        self.trade.hide()
+        self.setProperty("trade", "false")
         top.addWidget(self.name)
         top.addStretch(1)
+        top.addWidget(self.trade)
         top.addWidget(self.badge)
         top.addWidget(self.age)
         self.price = QLabel("-")
@@ -137,6 +142,22 @@ class MarketCard(QFrame):
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", "true" if selected else "false")
         repolish(self)
+
+    def set_trade(self, directions: list[str]) -> None:
+        """Marca la tarjeta en amarillo si hay operaciones abiertas en el mercado (direcciones «long» / «short»)."""
+        if directions:
+            n = len(directions)
+            if len(set(directions)) > 1:
+                text = f"▲▼ {n}"
+            else:
+                text = ("▲ LARGO" if directions[0] == "long" else "▼ CORTO") + (f" ×{n}" if n > 1 else "")
+            self.trade.setText(text)
+            self.trade.setToolTip(f"{self.symbol}: {len(directions)} operación{'es' if len(directions) != 1 else ''} abierta"
+                                  f"{'s' if len(directions) != 1 else ''} en el Forwardtest")
+        self.trade.setVisible(bool(directions))
+        self.setProperty("trade", "true" if directions else "false")
+        repolish(self)
+        repolish(self.name)
 
     def set_quote(self, quote: Quote | None, age: int = 0) -> None:
         if quote is None:
@@ -180,6 +201,7 @@ class MarketsGrid(QWidget):
         self.cards: dict[str, MarketCard] = {}
         self._columns = columns
         self._selected = ""
+        self._trades: dict[str, list[str]] = {}
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setSpacing(8)
@@ -199,11 +221,18 @@ class MarketsGrid(QWidget):
             self.cards[sym] = card
             self._grid.addWidget(card, i // self._columns, i % self._columns)
         self.set_selected(self._selected)
+        self.set_trades(self._trades)
 
     def set_selected(self, symbol: str) -> None:
         self._selected = symbol
         for sym, card in self.cards.items():
             card.set_selected(sym.lower() == symbol.strip().lower())
+
+    def set_trades(self, open_trades: dict[str, list[str]]) -> None:
+        """Operaciones abiertas por símbolo (en minúsculas) -> sus direcciones."""
+        self._trades = open_trades
+        for sym, card in self.cards.items():
+            card.set_trade(open_trades.get(sym.lower(), []))
 
     def set_quotes(self, quotes: dict[str, Quote | None]) -> None:
         # Edad relativa al tick más reciente de la lista: no depende de la zona horaria del servidor.
