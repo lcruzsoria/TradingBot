@@ -209,6 +209,11 @@ class TradeStats:
     def flat(self) -> int:
         return sum(1 for t in self.done if t.r == 0)
 
+    def avg_max_r(self, result: str) -> float | None:
+        """Máximo a favor medio (en R) de las operaciones cerradas con ese resultado («stop», «breakeven»...); None si no hay datos."""
+        vals = [t.closed.max_r for t in self.done if t.closed.result == result and getattr(t.closed, "max_r", None) is not None]
+        return sum(vals) / len(vals) if vals else None
+
     @property
     def by_time(self) -> int:
         return sum(1 for t in self.done if t.closed.result == "tiempo")

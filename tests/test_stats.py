@@ -129,3 +129,18 @@ def test_el_boton_backtest_abre_y_cierra_la_ventana(tmp_path, monkeypatch):
     assert dlg.isVisible() and win.backtest_btn.isChecked() and dlg.group_key == "oro"
     win.backtest_btn.click()
     assert not dlg.isVisible() and not win.backtest_btn.isChecked()
+
+
+def test_maximo_medio_de_los_stops_y_breakeven():
+    from dataclasses import replace
+    from datetime import date
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.setup.positions import Closed
+    from tradingbot.skills.stats.session import TradeStats
+    s = TradeStats()
+    for i, (res, r, mx) in enumerate((("stop", -1.0, 1.0), ("stop", -1.0, 0.4), ("breakeven", 0.0, 1.6), ("objetivo", 2.0, 2.3))):
+        o = Order("EURUSD", "15m", "long", "Reversión", "reversion", "London", date(2026, 10, 22), 1, 1, 1, 100.0, 99.0, 102.0,
+                  "Bearish", -4.0, "x", "fin del día", 1_000 + i * 900, 90_000)
+        s.executed(o)
+        s.closed(o, Closed(res, 100.0, 1_500 + i * 900, r, r, None, mx))
+    assert s.avg_max_r("stop") == 0.7 and s.avg_max_r("breakeven") == 1.6 and s.avg_max_r("tiempo") is None

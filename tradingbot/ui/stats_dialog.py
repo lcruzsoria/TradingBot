@@ -323,7 +323,7 @@ class StatsDialog(QDialog):
             lay.addWidget(book)
 
         journal = Book("Diario", "las más recientes arriba", ())
-        self.history = self._table(("Entrada (NY)", "Mercado", "Lado", "Patrón", "Sesión", "Salida", "Duración", "Resultado"))
+        self.history = self._table(("Entrada (NY)", "Mercado", "Lado", "Patrón", "Sesión", "Salida", "Duración", "Resultado", "Máx. R"))
         self.history.setMinimumHeight(220)
         self.history.cellClicked.connect(self._on_history_click)
         journal.layout().addWidget(self.history)
@@ -518,6 +518,10 @@ class StatsDialog(QDialog):
                      f"peor {_colored(_r(worst.r), _tone(worst.r))} {worst.order.symbol}",
                      f"racha {streak}",
                      f"duración media {_span(s.avg_duration)}"]
+            for result, name in (("stop", "stops"), ("breakeven", "breakeven")):
+                avg = s.avg_max_r(result)
+                if avg is not None:
+                    parts.append(f"máx medio en {name} {avg:.2f} R")
         evaluated = s.go + s.nogo
         cortex = (f"Cortex {_colored(f'{s.go} GO', theme.BULL)} / {_colored(f'{s.nogo} NO GO', theme.BEAR)}"
                   f" ({100 * s.go / evaluated:.0f} % aprobadas)" if evaluated else "Cortex: ninguna señal evaluada")
@@ -588,21 +592,22 @@ class StatsDialog(QDialog):
             self._cell(self.history, i, 3, o.pattern)
             self._cell(self.history, i, 4, self._session(t))
             if t.closed:
-                name = RESULT_NAMES.get(t.closed.result, t.closed.result)
                 max_r = getattr(t.closed, "max_r", None)
-                if t.closed.result == "breakeven" and max_r is not None:
-                    name += f" · máx {max_r:.2f} R"                  # hasta dónde llegó antes de volver a la entrada
-                self._cell(self.history, i, 5, name)
-                if max_r is not None:
-                    self.history.item(i, 5).setToolTip(f"Máximo a favor que llegó a alcanzar el precio: {max_r:.2f} R")
+                self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result))
+                self._cell(self.history, i, 8, "-" if max_r is None else f"{max_r:.2f} R",
+                           theme.WARN if t.closed.result in ("stop", "breakeven") and (max_r or 0) >= 1 else None)
+                self.history.item(i, 8).setToolTip("Máximo a favor que llegó a alcanzar el precio entre la entrada y el cierre, en R"
+                                                   " (antes del stop o del breakeven, hasta dónde habría llegado)")
                 self._cell(self.history, i, 6, _span(t.duration))
                 self._cell(self.history, i, 7, _r(t.r), _tone(t.r))
             elif t.stale:
                 self._cell(self.history, i, 5, "Sin seguimiento", theme.MUTED)
                 self._cell(self.history, i, 6, "-")
                 self._cell(self.history, i, 7, "-")
+                self._cell(self.history, i, 8, "-")
             else:
                 self._cell(self.history, i, 5, "Abierta", theme.WARN)
                 self._cell(self.history, i, 6, "-")
                 self._cell(self.history, i, 7, "-")
+                self._cell(self.history, i, 8, "-")
         self.history.resizeColumnsToContents()

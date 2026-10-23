@@ -949,6 +949,10 @@ class MainWindow(QMainWindow):
         tip = (f"Operaciones del Forwardtest con entrada hoy ({today:%d/%m/%Y}, fecha de Nueva York): ganadas (G), "
                "perdidas (P) y en breakeven (B: 0 R), más las que siguen abiertas.\nPulsa para abrir o cerrar el "
                "Forwardtest con el día en curso; el botón Forwardtest lo abre con todo el diario.")
+        reached = [f"{name}: {avg:.2f} R" for result, name in (("stop", "stops"), ("breakeven", "breakeven"))
+                   if (avg := s.avg_max_r(result)) is not None]
+        if reached:                                             # hasta dónde llegaron antes de cerrar sin ganar
+            tip += "\nMáximo a favor medio de hoy antes de cerrar (" + ", ".join(reached) + ")."
         v = self.virtual or {}
         if v.get("pending"):
             at = f" a las {self._ny(v['next_at']):%H:%M}" if v.get("next_at") else ""
