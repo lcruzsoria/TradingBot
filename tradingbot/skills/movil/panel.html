@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>TradingBot</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<style>
+:root {
+  --bg: #0b0e14; --panel: #121722; --line: #222a3a; --text: #d6dbe6; --muted: #8b93a7;
+  --accent: #4a90e2; --tp: #2ecc71; --sl: #ef5350; --be: #9e9e9e; --open: #f2c94c;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Inter, sans-serif; padding: env(safe-area-inset-top) 16px 32px; }
+header { position: sticky; top: 0; background: var(--bg); padding: 14px 0 10px; z-index: 2; border-bottom: 1px solid var(--line); }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+h1 { font-size: 18px; margin: 0; font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; }
+.status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--be); }
+.dot.ok { background: var(--tp); } .dot.ko { background: var(--sl); }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.kpi { background: var(--panel); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.kpi .l { color: var(--muted); font-size: 11px; }
+.kpi .v { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; font-weight: 600; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+.card.open { border-left: 3px solid var(--open); }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.title { font-weight: 600; }
+.meta { color: var(--muted); font-size: 12px; }
+.levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; font-size: 12px; }
+.levels b { display: block; font-size: 13px; color: var(--text); font-weight: 500; }
+.levels span { color: var(--muted); }
+.chip { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; border: 1px solid currentColor; white-space: nowrap; }
+.TP { color: var(--tp); } .SL { color: var(--sl); } .BE { color: var(--be); } .T { color: var(--muted); }
+.pos { color: var(--tp); } .neg { color: var(--sl); }
+.nowrap { white-space: nowrap; }
+.list .item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.list .item:last-child { border-bottom: 0; }
+.bias { display: flex; flex-wrap: wrap; gap: 6px; }
+.bias .b { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 13px; }
+.Bullish { color: var(--tp); } .Bearish { color: var(--sl); } .NoBias { color: var(--muted); }
+.go { color: var(--tp); font-weight: 700; } .nogo { color: var(--sl); font-weight: 700; }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+.reason { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+form { display: grid; gap: 10px; margin-top: 30vh; }
+input, button { font: inherit; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+button { background: var(--accent); border: 0; color: #fff; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>TradingBot <span class="sub" id="profile"></span></h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="updated">conectando…</span></div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Hoy</div><div class="v" id="k-today">–</div></div>
+    <div class="kpi"><div class="l">Abiertas</div><div class="v" id="k-open">–</div></div>
+    <div class="kpi"><div class="l" id="k-bal-l">Saldo</div><div class="v" id="k-bal">–</div></div>
+  </div>
+</header>
+
+<main id="main">
+  <h2>Abiertas</h2><div id="open"></div>
+  <h2>Hoy</h2><div class="sub" id="today-sum"></div>
+  <h2>Últimos cierres</h2><div class="card list" id="closed"></div>
+  <h2>Sesgo</h2><div class="bias" id="bias"></div>
+  <h2>Decisiones de Cortex</h2><div class="card list" id="decisions"></div>
+</main>
+
+<form id="login" hidden>
+  <div class="title">Clave del panel</div>
+  <div class="sub">La de PANEL_TOKEN en el fichero de cuentas del bot. Se guarda en este móvil.</div>
+  <input id="token" type="password" autocomplete="current-password" required>
+  <button type="submit">Entrar</button>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const num = (v) => v == null ? "–" : Math.abs(v) >= 1000                       // como en el gráfico: 4,025.43 · 158.515 · 1.33698
+  ? v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : v.toFixed(Math.abs(v) >= 10 ? 3 : 5);
+const day = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : esc(s);
+const r = (v) => v == null ? "–" : `${v > 0 ? "+" : ""}${v.toFixed(2)} R`;
+const cls = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
+const money = (v, cur) => v == null ? "–" : `${v.toLocaleString("es-ES", {maximumFractionDigits: 0})} ${esc(cur || "")}`;
+let token = null;
+try { token = localStorage.getItem("panel-token"); } catch (e) {}
+
+function render(s) {
+  $("profile").textContent = s.profile ? `· ${s.profile}` : "";
+  $("updated").textContent = s.updated;
+  $("dot").className = "dot ok";
+  const t = s.today;
+  $("k-today").innerHTML = `<span class="${cls(t.r)}">${r(t.r)}</span>`;
+  $("k-open").textContent = s.open.length;
+  if (s.virtual) { $("k-bal-l").textContent = "Saldo virtual"; $("k-bal").textContent = money(s.virtual.balance, s.virtual.currency); }
+  else if (s.broker) { $("k-bal-l").textContent = "Equity"; $("k-bal").textContent = money(s.broker.equity, s.broker.currency); }
+
+  $("open").innerHTML = s.open.length ? s.open.map((o) => `
+    <div class="card open">
+      <div class="row"><span class="title">${esc(o.side)} ${esc(o.symbol)} <span class="meta">${esc(o.timeframe)}</span></span>
+        <span class="${cls(o.r_now)} nowrap">${r(o.r_now)}</span></div>
+      <div class="meta">${esc(o.pattern)}${o.zone ? " · " + esc(o.zone) : ""} · ${day(o.day)} · sesgo ${esc(o.bias)}</div>
+      <div class="levels"><div><span>Entrada</span><b>${num(o.entry)}</b></div><div><span class="SL">Stop</span><b>${num(o.stop)}</b></div>
+        <div><span class="TP">Objetivo</span><b>${num(o.target)}</b></div></div>
+      ${o.price != null ? `<div class="meta" style="margin-top:6px">Precio ahora ${num(o.price)}</div>` : ""}
+    </div>`).join("") : `<div class="empty">Ninguna operación abierta.</div>`;
+
+  $("today-sum").innerHTML = t.count
+    ? `${t.count} cerrada(s): <span class="TP">${t.TP} TP</span> · <span class="SL">${t.SL} SL</span> · <span class="BE">${t.BE} BE</span>${t.T ? ` · ${t.T} T` : ""} · <b class="${cls(t.r)}">${r(t.r)}</b>`
+    : "Aún no ha cerrado ninguna.";
+
+  $("closed").innerHTML = s.closed.length ? s.closed.map((c) => `
+    <div class="item"><div><div class="title">${esc(c.side)} ${esc(c.symbol)}</div>
+      <div class="meta">${esc(c.pattern)}${c.zone ? " · " + esc(c.zone) : ""} · ${day(c.day)}${c.max_r != null ? ` · máx. ${r(c.max_r)}` : ""}</div></div>
+      <div style="text-align:right"><span class="chip ${esc(c.result)}">${esc(c.result)}</span><div class="${cls(c.r)} nowrap" style="font-size:13px;margin-top:3px">${r(c.r)}</div></div>
+    </div>`).join("") : `<div class="empty">Sin cierres este mes.</div>`;
+
+  $("bias").innerHTML = s.bias.length ? s.bias.map((b) => `
+    <div class="b"><b>${esc(b.symbol)}</b> <span class="${esc(b.bias.replace(" ", ""))}">${esc(b.bias)}${b.lateral ? " · lateral" : ""}</span>
+      <span class="meta">${b.score > 0 ? "+" : ""}${b.score}</span></div>`).join("") : `<div class="empty">Esperando al sesgo…</div>`;
+
+  $("decisions").innerHTML = s.decisions.length ? s.decisions.map((d) => `
+    <div class="item"><div style="min-width:0"><div><span class="${d.go ? "go" : "nogo"}">${d.go ? "GO" : "NO GO"}</span>
+      ${esc(d.side)} ${esc(d.symbol)} <span class="meta">${esc(d.timeframe)} · ${esc(d.pattern)}${d.zone ? " · " + esc(d.zone) : ""}</span></div>
+      <div class="reason">${esc(d.reason)}</div></div><span class="meta">${esc(d.at)}</span></div>`).join("")
+    : `<div class="empty">Ninguna desde que arrancó el bot.</div>`;
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/estado", {headers: token ? {"X-Panel-Token": token} : {}, cache: "no-store"});
+    if (res.status === 401) { $("main").hidden = true; $("login").hidden = false; $("dot").className = "dot ko"; return; }
+    $("main").hidden = false; $("login").hidden = true;
+    render(await res.json());
+  } catch (e) {
+    $("dot").className = "dot ko";
+    $("updated").textContent = "sin conexión con el bot";
+  }
+}
+
+$("login").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  token = $("token").value.trim();
+  try { localStorage.setItem("panel-token", token); } catch (e) {}
+  refresh();
+});
+refresh();
+setInterval(refresh, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>

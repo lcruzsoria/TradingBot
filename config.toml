@@ -69,5 +69,5 @@ type = "stats"
 slot = "aux3"
 
 [[skills]]
-type = "telegram"
+type = "movil"
 slot = "aux4"

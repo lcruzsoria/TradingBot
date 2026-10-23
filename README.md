@@ -509,8 +509,9 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo, stop a breakeven y cierre por tiempo -> `setup.closed`, que se anota en el Registro; al terminar su vela de 3 h (índices) o 4 h (resto) se consolida en el saldo virtual del perfil, `setup.consolidated`, publicado como `setup.account` para la cabecera); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/perfiles/<perfil>/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 | `stats` | aux3 | Forwardtest y backtest: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) en un diario mensual por perfil (`data/perfiles/<perfil>/forwardtest`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` (nueva etapa) y `stats.reload`. Alimenta los botones Forwardtest y Backtest del área Stats. Lee el bloque STATS. |
+| `movil` | aux4 | El bot en el móvil: avisos por **Telegram** cuando Setup abre una operación y cuando cierra (TP, SL, BE o tiempo, con su R) y, con `TELEGRAM_NOTIFY`, cada GO / NO GO de Cortex; y un **panel web** de solo lectura (abiertas con su R en vivo, cierres, resultado del día, sesgo de cada mercado y decisiones de Cortex) que se abre en el navegador del móvil. Solo avisa de lo que pasa en directo. Escucha `candles.loaded`, `quotes.updated`, `bias.updated`, `cortex.decision`, `setup.executed` y `setup.closed`; no publica nada. Lee los bloques TELEGRAM y PANEL; sus secretos van en el fichero de cuentas (ver «El bot en el móvil»). |
 
-El anillo está completo; los satélites los ocupan Setup (`aux1`), Calendario (`aux2`) y Stats (`aux3`).
+El anillo está completo; los satélites los ocupan Setup (`aux1`), Calendario (`aux2`), Stats (`aux3`) y Móvil (`aux4`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + pattern + cortex -> bias.updated -> cortex`;
@@ -523,6 +524,32 @@ verde o rojo. Las trazas largas llevan un enlace **+ detalle** que abre la infor
 controles del GO / NO GO, niveles y zonas TBR...). Una traza que no cambia no se repite.
 
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
+
+### El bot en el móvil (skill Móvil)
+
+Avisos por Telegram y un panel web, sin instalar nada más: el bot sigue en el PC y el móvil solo mira. Los secretos (token,
+chat y clave del panel) **no** van en `tradingbot.env`, que está en el repositorio, sino en el fichero de cuentas, fuera del
+repo (`C:\Users\claude\mt5\.env`), o en variables de entorno.
+
+**Telegram**
+
+1. En Telegram, habla con **@BotFather**, `/newbot`, y copia el token que te da a `TELEGRAM_TOKEN=...` en el fichero de cuentas.
+2. Abre el chat con tu bot nuevo y mándale cualquier mensaje.
+3. `uv run python scripts/telegram_chat_id.py` te da la línea `TELEGRAM_CHAT_ID=...`: cópiala al mismo fichero. Ejecútalo otra
+   vez y manda un mensaje de prueba.
+4. Pon `TELEGRAM_ENABLED=true` en `tradingbot.env` y reinicia el bot. Por defecto avisa al abrir y al cerrar
+   (`TELEGRAM_NOTIFY=abre, cierra`); añade `go` y `nogo` para recibir también cada decisión de Cortex.
+
+**Panel**
+
+1. Pon `PANEL_ENABLED=true` en `tradingbot.env`. Con `PANEL_HOST=127.0.0.1` solo se ve en el propio PC: `http://127.0.0.1:8765`.
+2. Para verlo en el móvil: `PANEL_HOST=0.0.0.0` (la red de casa) y una clave larga `PANEL_TOKEN=...` en el fichero de cuentas
+   (sin ella el bot no abre el panel a otros equipos). En el móvil, abre `http://<IP del PC>:8765`, escribe la clave una vez y
+   añádelo a la pantalla de inicio. Windows puede preguntar si deja pasar a Python por el cortafuegos: permítelo en redes privadas.
+3. Fuera de casa, lo más seguro es [Tailscale](https://tailscale.com) en el PC y en el móvil: abre `http://<IP de Tailscale>:8765`
+   sin abrir puertos en el router.
+
+El panel se actualiza cada 10 s y no permite operar ni cambiar nada.
 
 ### Añadir una skill nueva
 

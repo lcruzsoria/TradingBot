@@ -9,13 +9,11 @@ del repo (el mismo de MT5, C:\\Users\\claude\\mt5\\.env), o en variables de ento
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ...config import DEFAULT_ENV_FILE
-from ...envconfig import parse
+from .secrets import secret
 
 API = "https://api.telegram.org/bot{token}/{method}"
 TIMEOUT = 10
@@ -27,15 +25,7 @@ class TelegramError(RuntimeError):
 
 def credentials(env_file: Path | str | None = None) -> tuple[str | None, str | None]:
     """(token, chat): primero las variables de entorno y, si faltan, el fichero de cuentas."""
-    token, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-    if token and chat:
-        return token, chat
-    path = Path(env_file or DEFAULT_ENV_FILE)
-    try:
-        values = parse(path.read_text(encoding="utf-8"))
-    except OSError:
-        values = {}
-    return token or values.get("TELEGRAM_TOKEN") or None, chat or values.get("TELEGRAM_CHAT_ID") or None
+    return secret("TELEGRAM_TOKEN", env_file), secret("TELEGRAM_CHAT_ID", env_file)
 
 
 def call(token: str, method: str, params: dict | None = None) -> dict:

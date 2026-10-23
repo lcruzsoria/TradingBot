@@ -1,4 +1,4 @@
-"""Skill Telegram: avisos al móvil de las operaciones de Setup (sin conectar con Telegram: el envío se intercepta)."""
+"""Skill Móvil: avisos por Telegram (sin conectar con Telegram: el envío se intercepta) y panel web de solo lectura."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -22,7 +22,7 @@ TP = Closed("objetivo", 1.093, 1900, 2.0, 0.18, None, 2.4, -0.3)
 
 @pytest.fixture
 def sent(monkeypatch):
-    from tradingbot.skills.telegram import client
+    from tradingbot.skills.movil import telegram as client
     out = []
     monkeypatch.setattr(client, "send_message", lambda token, chat, text: out.append((token, chat, text)))
     monkeypatch.setenv("TELEGRAM_TOKEN", "t0k3n")
@@ -34,7 +34,7 @@ def run_skill(env_text, app=None):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus = EventBus()
-    manager = SkillManager(bus, Services(None, None, {"app": dict(app or {})}, EnvConfig(parse(env_text))), [{"type": "telegram"}])
+    manager = SkillManager(bus, Services(None, None, {"app": dict(app or {})}, EnvConfig(parse(env_text))), [{"type": "movil"}])
     manager.start()
     time.sleep(0.2)
     return manager, bus
@@ -45,7 +45,7 @@ def settle(manager, bus, *events):
         bus.publish(topic, payload, source=source)
     time.sleep(0.4)
     manager.stop()
-    return manager.skills["telegram"]
+    return manager.skills["movil"]
 
 
 def candles(symbol="EURUSD", last=1000):
@@ -55,7 +55,7 @@ def candles(symbol="EURUSD", last=1000):
 def test_apagada_por_defecto_no_manda_nada(sent):
     manager, bus = run_skill("")
     skill = settle(manager, bus, candles(), ("setup.executed", {"order": ORDER}, "setup"))
-    assert sent == [] and skill.caption == "apagado" and skill.state.value == "ok"
+    assert sent == [] and skill.caption == "apagado" and skill.state.value == "ok" and skill.server is None
 
 
 def test_avisa_de_lo_que_abre_y_cierra_setup_en_directo_y_no_del_repaso(sent):
@@ -108,10 +108,67 @@ def test_sin_token_o_con_un_aviso_desconocido_la_skill_avisa_del_error(monkeypat
 
 
 def test_el_token_se_lee_del_fichero_de_cuentas(monkeypatch, tmp_path):
-    from tradingbot.skills.telegram import client
+    from tradingbot.skills.movil import telegram as client
     monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     env = tmp_path / ".env"
     env.write_text("MT5_DEFAULT=demo\nTELEGRAM_TOKEN=abc:123\nTELEGRAM_CHAT_ID=777\n", encoding="utf-8")
     assert client.credentials(env) == ("abc:123", "777")
     assert client.credentials(tmp_path / "otro.env") == (None, None)
+
+
+def get(port, path, token=None):
+    import json
+    import urllib.error
+    import urllib.request
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"X-Panel-Token": token} if token else {})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = response.read().decode("utf-8")
+            return response.status, json.loads(body) if path.startswith("/api") else body
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+
+
+def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path):
+    import json
+    from tradingbot.skills.setup import store
+    monkeypatch.setenv("PANEL_TOKEN", "clave-larga")
+    data = tmp_path / "perfil"
+    store.save([ORDER], data / "abiertas.json")
+    (data / "forwardtest").mkdir(parents=True)
+    from tradingbot.skills.movil import panel
+    month = panel.journal.month_of(panel.datetime.now(panel.NY))
+    today = panel.datetime.now(panel.NY).date().isoformat()
+    close = {"t": "close", "order": {**store.order_to_json(ORDER), "tbr_day": today}, "closed": TP.__dict__}
+    (data / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\nbasura\n", encoding="utf-8")
+    manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_PORT=0\n", {"data_dir": str(data), "profile_name": "puprime"})
+    skill = manager.skills["movil"]
+    port = skill.server.port
+    bus.publish("quotes.updated", {"quotes": {"EURUSD": SimpleNamespace(bid=1.0945)}, "account": None}, source="quotes")
+    bus.publish(*candles()[:2], source="feed")
+    hit = SimpleNamespace(direction="long", title="Reversión", ts=1000)
+    bus.publish("cortex.decision", {"symbol": "EURUSD", "timeframe": "15m", "tbr": SimpleNamespace(zone="London"), "hit": hit,
+                                    "decision": SimpleNamespace(allowed=False, reason="contra el sesgo")}, source="cortex")
+    time.sleep(0.4)
+    try:
+        code, page = get(port, "/")
+        assert code == 200 and "<title>TradingBot</title>" in page                    # la página no lleva datos: sin clave
+        assert get(port, "/api/estado")[0] == 401 and get(port, "/api/estado", "otra")[0] == 401
+        code, state = get(port, "/api/estado", "clave-larga")
+        assert code == 200 and state["profile"] == "puprime" and skill.caption == "panel :%d" % port
+        [o] = state["open"]
+        assert (o["symbol"], o["side"], o["entry"], o["price"], o["r_now"]) == ("EURUSD", "Corto", 1.095, 1.0945, 0.5)
+        [c] = state["closed"]
+        assert (c["result"], c["r"], c["max_r"]) == ("TP", 2.0, 2.4) and state["today"]["TP"] == 1 and state["today"]["r"] == 2.0
+        assert [(d["go"], d["side"], d["reason"]) for d in state["decisions"]] == [(False, "Largo", "contra el sesgo")]
+    finally:
+        manager.stop()
+    assert skill.server is None
+
+
+def test_el_panel_no_se_abre_a_otros_equipos_sin_clave(monkeypatch, tmp_path):
+    monkeypatch.delenv("PANEL_TOKEN", raising=False)
+    manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_HOST=0.0.0.0\nPANEL_PORT=0\n", {"env_file": str(tmp_path / "x.env")})
+    skill = settle(manager, bus)
+    assert skill.state.value == "error" and "PANEL_TOKEN" in skill.note and skill.server is None
