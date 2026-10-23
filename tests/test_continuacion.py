@@ -94,7 +94,8 @@ def test_un_swing_high_mas_alto_antes_del_swing_low_sustituye_al_0():
 def test_perder_el_1_con_el_tramo_activo_invalida_el_patron():
     rows = ROWS[:15] + [(112, 112.5, 102, 103)]                            # activado en la 14; la 15 pierde el 103 (y toca el 0,5)
     hits, figs = analyze(ctx_for(rows), 1)
-    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 15)] and figs == []
+    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 15)]
+    assert hits[0].levels["fibo 0,5"] == 107.0 and [f.state for f in figs] == ["invalidada"]       # con el fibo formado: se dibuja y Cortex lo anota «I»
 
 
 def test_una_mecha_sola_no_activa_la_tbr_solo_el_cuerpo():

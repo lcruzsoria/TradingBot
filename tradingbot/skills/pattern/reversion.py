@@ -111,17 +111,27 @@ def analyze(ctx: PatternContext, k: int) -> tuple[list[PatternHit], list[Figure]
     half = (extreme + origin_price) / 2
     target = extreme + (extreme - origin_price) / 2
     levels = {"-0,5": sign * target, "0": sign * extreme, "0,5": sign * half, "1": sign * origin_price}
-    broke = next((t for t in range(confirmed + 1, end + 1) if (c[t] > tbr.high if up else c[t] < tbr.low)), None)
-    if broke is not None and (entry is None or broke < entry[0]) and (state.breach is None or broke < state.breach):
-        return [hit(INVALIDATED, direction, broke, tbr.mid,
-                    f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}; una vela cerró fuera del "
-                    f"{side} en {_when(ctx, broke)} antes del retroceso al 0,5: rotura con cuerpo, ya no es reversión")], []
-    if state.breach is not None:
-        return [hit(INVALIDATED, direction, state.breach, sign * origin_price,
-                    f"toma con mecha del {side} en {_when(ctx, j)}; el precio superó la mecha pivote ({sign * origin_price:.5g}) antes de "
-                    f"llegar al 0,5: patrón invalidado")], []
     label = f"{tbr.zone} {'▼' if up else '▲'} Rev"
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
+
+    def invalid(t, price, detail):
+        """Invalidación. Si el 0 ya estaba fijado (hay fibo), lleva sus niveles y se dibuja el fibo hasta la vela que lo invalida:
+        Cortex lo anota NO GO «I»."""
+        if state.zero is None:
+            return [hit(INVALIDATED, direction, t, price, detail)], []
+        marks = {"stop": sign * origin_price, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half}
+        return [hit(INVALIDATED, direction, t, price, detail, marks)], \
+            [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), int(ts[t]) + tf_sec, levels, "invalidada", label, tbr.day.isoformat())]
+
+    broke = next((t for t in range(confirmed + 1, end + 1) if (c[t] > tbr.high if up else c[t] < tbr.low)), None)
+    if broke is not None and (entry is None or broke < entry[0]) and (state.breach is None or broke < state.breach):
+        return invalid(broke, tbr.mid,
+                       f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}; una vela cerró fuera del "
+                       f"{side} en {_when(ctx, broke)} antes del retroceso al 0,5: rotura con cuerpo, ya no es reversión")
+    if state.breach is not None:
+        return invalid(state.breach, sign * origin_price,
+                       f"toma con mecha del {side} en {_when(ctx, j)}; el precio superó la mecha pivote ({sign * origin_price:.5g}) antes de "
+                       f"llegar al 0,5: patrón invalidado")
     if entry is not None:
         t, half = entry
         detail = (f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}, 0 en {_when(ctx, zero_idx)}; "

@@ -91,7 +91,8 @@ def test_si_el_precio_supera_la_mecha_pivote_antes_de_la_entrada_se_invalida():
     rows = ROWS[:9] + [(98.5, 106.5, 98, 104)]
     h = run(rows)[0][0]
     assert (h.status, h.x) == (INVALIDATED, 9) and "superó la mecha pivote" in h.detail
-    assert run(rows)[1] == []
+    hit, figs = run(rows)
+    assert hit[0].levels["fibo 0,5"] == 101.0 and [f.state for f in figs] == ["invalidada"]       # el 0 ya estaba fijado: se dibuja y Cortex lo anota «I»
 
 
 def test_sin_toma_con_mecha_nada_y_al_acabar_el_plazo_vence():
