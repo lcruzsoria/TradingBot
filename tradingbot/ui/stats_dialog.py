@@ -25,6 +25,8 @@ from ..timeframes import display_label
 from . import theme
 from .fmt import fecha_hora
 
+SESSION_COLORS = {"Asia": "#FFD60A", "Londres": "#FF3B30", "Nueva York": "#00C853"}   # los de las zonas TBR
+BE_GREY = "#9E9E9E"
 RESULT_NAMES = {"objetivo": "Objetivo", "stop": "Stop", "tiempo": "Tiempo", "breakeven": "Breakeven"}
 WINDOWS = (("Hoy", 0), ("7 días", 7), ("30 días", 30), ("Todo", None))   # días hacia atrás (fecha de NY) o None: todo
 DEFAULT_WINDOW = 30
@@ -582,18 +584,19 @@ class StatsDialog(QDialog):
         for i, t in enumerate(rows):
             o = t.order
             when = fecha_hora(self._to_ny(o.entry_ts)) if o.entry_ts else "-"
-            side_color = theme.BULL if o.direction == "long" else theme.BEAR
             self._cell(self.history, i, 0, when)
             self._cell(self.history, i, 1, f"{o.symbol} {display_label(o.timeframe)}")
             market = self.history.item(i, 1)
             market.setData(Qt.ItemDataRole.UserRole, o.symbol)
             market.setToolTip(f"Ver {o.symbol} en el gráfico")
-            self._cell(self.history, i, 2, "Largo" if o.direction == "long" else "Corto", side_color)
+            self._cell(self.history, i, 2, "Largo" if o.direction == "long" else "Corto")
             self._cell(self.history, i, 3, o.pattern)
-            self._cell(self.history, i, 4, self._session(t))
+            session = self._session(t)
+            self._cell(self.history, i, 4, session, SESSION_COLORS.get(session))
             if t.closed:
                 max_r = getattr(t.closed, "max_r", None)
-                self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result))
+                self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result),
+                           {"stop": theme.BEAR, "objetivo": theme.BULL, "breakeven": BE_GREY}.get(t.closed.result))
                 min_r = getattr(t.closed, "min_r", None)
                 self._cell(self.history, i, 8, "-" if max_r is None else f"{max_r:.2f} R",
                            theme.WARN if t.closed.result in ("stop", "breakeven") and (max_r or 0) >= 1 else None)
