@@ -1326,6 +1326,8 @@ class MainWindow(QMainWindow):
         closed = f"{self._ny(c.exit_ts):%d/%m %H:%M}"
         lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)} ({opened} NY)   Salida: {fmt_price(c.exit_price)} ({closed} NY)",
                  f"Motivo:   {why}", f"Resultado: {c.r:+.2f} R ({c.pct:+.2f} % del precio, sin spread)"]
+        if getattr(c, "max_r", None) is not None:
+            lines.append(f"Máximo:   {c.max_r:.2f} R a favor antes de cerrar")
         if getattr(c, "be_ts", None):
             lines.append(f"Stop a breakeven al cierre de la vela de 15 min de las {self._ny(c.be_ts):%d/%m %H:%M} NY")
         if p.get("consolidate_at"):

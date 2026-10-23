@@ -18,6 +18,7 @@ class Closed:
     r: float                 # resultado en R (sin spread)
     pct: float               # resultado en % del precio de entrada
     be_ts: int | None = None  # hora de servidor de la vela de 15 min a cuyo cierre el stop pasó a la entrada (None: no pasó)
+    max_r: float | None = None  # máximo a favor que llegó a alcanzar el precio entre la entrada y el cierre, en R (None: diarios antiguos)
 
 
 def trackable(order) -> bool:
@@ -60,7 +61,9 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
 
     def done(result: str, price: float, i: int) -> Closed:
         move = sign * (price - entry)
-        return Closed(result, price, int(ts[i]), move / risk, 100 * move / entry, be_ts)
+        first = int(np.searchsorted(ts, order.entry_ts, "left"))
+        best = (np.max(np.asarray(high)[first:i + 1]) - entry) if long else (entry - np.min(np.asarray(low)[first:i + 1]))     # extremo a favor de la operación
+        return Closed(result, price, int(ts[i]), move / risk, 100 * move / entry, be_ts, round(max(float(best), 0.0) / risk, 4))
 
     start = int(np.searchsorted(ts, order.entry_ts, "left"))
     last = None

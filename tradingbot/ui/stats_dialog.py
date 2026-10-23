@@ -588,7 +588,13 @@ class StatsDialog(QDialog):
             self._cell(self.history, i, 3, o.pattern)
             self._cell(self.history, i, 4, self._session(t))
             if t.closed:
-                self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result))
+                name = RESULT_NAMES.get(t.closed.result, t.closed.result)
+                max_r = getattr(t.closed, "max_r", None)
+                if t.closed.result == "breakeven" and max_r is not None:
+                    name += f" · máx {max_r:.2f} R"                  # hasta dónde llegó antes de volver a la entrada
+                self._cell(self.history, i, 5, name)
+                if max_r is not None:
+                    self.history.item(i, 5).setToolTip(f"Máximo a favor que llegó a alcanzar el precio: {max_r:.2f} R")
                 self._cell(self.history, i, 6, _span(t.duration))
                 self._cell(self.history, i, 7, _r(t.r), _tone(t.r))
             elif t.stale:

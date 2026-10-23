@@ -99,3 +99,30 @@ def test_si_el_mercado_esta_cerrado_ahora_cierra_con_la_ultima_vela():
     assert resolve(o, ts, h, l, c, bar_seconds=STEP, now=T0 + 2 * STEP + 600) is None             # velas al día
     cerrada = resolve(o, ts, h, l, c, bar_seconds=STEP, now=T0 + 2 * STEP + 3 * 3600)
     assert cerrada.result == "tiempo" and cerrada.exit_price == 100.6
+
+
+def test_el_cierre_guarda_el_maximo_a_favor_en_r():
+    o = order(close_after=500)
+    # entra en 100 con stop 99 (1 R): llega a 101.6 (1,6 R), el stop pasa a la entrada y vuelve a 100 -> breakeven con máx 1,6 R
+    rows = [(101.6, 99.8, 101.2), (100.5, 99.9, 100.2), (100.2, 99.9, 100.0)]
+    c = resolve(o, *bars(rows), be_r=1.0, bar_seconds=STEP)
+    assert c.result == "breakeven" and c.max_r == pytest.approx(1.6)
+    stop = resolve(order(), *bars([(100.4, 98.5, 99.0)]))
+    assert stop.result == "stop" and stop.max_r == pytest.approx(0.4)               # llegó a +0,4 R y acabó en stop
+    short = resolve(order("short", stop=101.0, target=98.0), *bars([(100.5, 99.2, 99.4), (100.0, 97.9, 98.0)]))
+    assert short.result == "objetivo" and short.max_r == pytest.approx(2.1)           # corto: el mínimo manda
+
+
+def test_el_maximo_se_guarda_en_el_diario_y_los_diarios_antiguos_se_leen(tmp_path):
+    from datetime import date
+    from tradingbot.skills.stats.journal import Journal
+    from tradingbot.skills.setup.positions import Closed
+    o = order()
+    j = Journal(tmp_path)
+    j.opened(o)
+    j.closed(o, Closed("breakeven", 100.0, T0 + STEP, 0.0, 0.0, T0, 1.57))
+    s = j.load_recent()
+    assert s.trades[0].closed.max_r == 1.57
+    old = tmp_path / "2026-10.jsonl"
+    old.write_text(old.read_text(encoding="utf-8").replace(', "max_r": 1.57', ""), encoding="utf-8")   # diario de antes de este campo
+    assert Journal(tmp_path).load_recent().trades[0].closed.max_r is None
