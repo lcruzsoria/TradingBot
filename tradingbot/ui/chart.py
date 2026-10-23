@@ -52,11 +52,14 @@ BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la
 
 class PositionPill(pg.TextItem):
     """Etiqueta de una posición: barra y símbolo del veredicto de Cortex (✓ GO, ✕ NO GO), patrón y R, y al final el
-    resultado (TP, SL, BE, T o … si sigue abierta). El borde va del color del resultado: verde TP, rojo SL, gris BE."""
+    resultado (TP, SL, BE, T o … si sigue abierta). El borde va del color del resultado: verde TP, rojo SL, gris BE.
+
+    Va en el stop (el nivel 1 del fibo), por fuera de la caja y algo separada: debajo en los largos, encima en los cortos."""
 
     def __init__(self, pos: dict) -> None:
         result, color = RESULTS.get(str(pos["state"]), (str(pos["state"]), None))
-        super().__init__(anchor=(0, 0.5), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
+        outside = -PILL_GAP if pos["direction"] == "long" else 1 + PILL_GAP
+        super().__init__(anchor=(0, outside), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
                          border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
         decision = pos.get("decision")
         self._bar = QColor(_verdict_color(pos)) if decision else None
@@ -75,6 +78,9 @@ class PositionPill(pg.TextItem):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(self._bar)
             p.drawRect(QRectF(rect.left(), rect.top(), 3, rect.height()))
+
+
+PILL_GAP = 0.35            # separación de la píldora respecto al stop, en fracción de su alto
 
 
 def _fib_color(name: str) -> str:
@@ -716,7 +722,7 @@ class ChartView(pg.PlotWidget):
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
             pill = PositionPill(pos)
-            pill.setPos(x0, entry)
+            pill.setPos(x0, stop)
             pi.addItem(pill, ignoreBounds=True)
             self._pos_items.append(pill)
             if pos.get("decision") == "NO GO":                       # la que Cortex no opera se ve atenuada, como su fibo
@@ -732,11 +738,11 @@ class ChartView(pg.PlotWidget):
         vb = self.getPlotItem().getViewBox()
         right = vb.sceneBoundingRect().right() - 2
         for pos, pill in zip(self._positions, self._pos_pills):
-            x0, entry = float(pos["x0"]), float(pos["entry"])
+            x0, stop = float(pos["x0"]), float(pos["stop"])
             width = pill.boundingRect().width()                 # en píxeles: la píldora no se escala con el gráfico
-            start = vb.mapViewToScene(QPointF(x0, entry)).x()
+            start = vb.mapViewToScene(QPointF(x0, stop)).x()
             x = vb.mapSceneToView(QPointF(right - width, 0)).x() if start + width > right else x0
-            pill.setPos(x, entry)
+            pill.setPos(x, stop)
 
     @property
     def position_count(self) -> int:
@@ -835,10 +841,10 @@ class ChartView(pg.PlotWidget):
                 text.setPos(x1, price)
                 pi.addItem(text, ignoreBounds=True)
                 self._fib_items += [line, text]
-            if fib.get("tag") and "0,5" in fib["levels"]:             # «T»: el plazo se cortó por tiempo antes de la entrada
-                tag = pg.TextItem(anchor=(0.5, 1.1))
+            if fib.get("tag") and "1" in fib["levels"]:               # «T» (tiempo) o «I» (invalidado): en el nivel 1, por fuera
+                tag = pg.TextItem(anchor=(0.5, -0.1 if fib["direction"] == "long" else 1.1))
                 tag.setHtml(f'<span style="font-size:9pt; font-weight:bold; color:{theme.MUTED}">{html.escape(str(fib["tag"]))} · {"invalidado" if fib["tag"] == "I" else "tiempo"}</span>')
-                tag.setPos((x0 + x1) / 2, fib["levels"]["0,5"])
+                tag.setPos((x0 + x1) / 2, fib["levels"]["1"])
                 pi.addItem(tag, ignoreBounds=True)
                 self._fib_items.append(tag)
             if fib.get("decision") == "NO GO":                       # entrada detectada que Cortex no opera: atenuada
