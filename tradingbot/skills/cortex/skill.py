@@ -42,7 +42,7 @@ class CortexSkill(Skill):
         self.timeframe = ""
         self._bias: dict | None = None                  # último sesgo del gráfico
         self._biases: dict[str, dict] = {}              # mercado -> su último sesgo (gráfico o barrido)
-        self._history: dict[str, dict] = {}             # mercado -> el sesgo de cada vela (bias.history)
+        self._history: dict[tuple, dict] = {}           # (mercado, temporalidad) -> el sesgo de cada vela (bias.history)
         self._pending: list[dict] = []                 # patrones (y señales de calendario) que esperan a su sesgo o al barrido
         self._round: dict | None = None                 # vuelta del barrido de la watchlist en curso
         env = self.services.env
@@ -85,7 +85,7 @@ class CortexSkill(Skill):
             self._decide()
         elif event.topic == "bias.history":
             if p.get("ts") is not None and len(p["ts"]) == len(p["scores"]):
-                self._history[p["symbol"]] = p
+                self._history[(p["symbol"], p.get("timeframe"))] = p       # cada temporalidad la suya: la del gráfico no pisa la del patrón
         elif event.topic == "pattern.detected":
             self._pending = (self._pending + [p])[-MAX_PENDING:]
             self._decide()
@@ -145,11 +145,11 @@ class CortexSkill(Skill):
     def tick(self) -> None:
         self._check_round()
 
-    def _bias_at(self, symbol: str, ts: int | None) -> BiasResult | None:
+    def _bias_at(self, symbol: str, ts: int | None, timeframe: str | None = None) -> BiasResult | None:
         """El sesgo que tenía el bot en la vela `ts` de ese mercado (el mismo con el que el gráfico marca GO / NO GO en cada
         entrada). Así un patrón pasado que se repasa al arrancar se juzga como en directo, no con el sesgo de ahora."""
-        h = self._history.get(symbol)
-        if h is None or not ts:
+        h = self._history.get((symbol, timeframe))         # solo el de la temporalidad del patrón: en otra (el gráfico en 5 min)
+        if h is None or not ts:                           # la vela sale lateral o no y la misma señal daría otro veredicto
             return None
         times = np.asarray(h["ts"])
         i = int(np.searchsorted(times, int(ts), "right")) - 1
@@ -236,7 +236,7 @@ class CortexSkill(Skill):
             if bias is None:                                    # aún sin el sesgo de su mercado
                 waiting.append(p)
                 continue
-            result = self._bias_at(p["symbol"], p["hit"].ts) or bias["result"]
+            result = self._bias_at(p["symbol"], p["hit"].ts, p["timeframe"]) or bias["result"]
             if p.get("expired"):                         # el plazo de la TBR se cortó por tiempo antes de la entrada: NO GO «T»
                 decision = Decision(False, f"T: el plazo de la TBR {p['tbr'].zone} terminó sin que el precio llegara a la entrada "
                                            f"(setup cortado por tiempo)")

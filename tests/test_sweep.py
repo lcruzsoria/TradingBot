@@ -229,3 +229,24 @@ def test_cortex_juzga_cada_patron_con_el_sesgo_de_su_vela():
     assert "a favor del sesgo Bullish" in d["decision"].reason
     assert short_reason("ya hay una posición abierta en GBPUSD (Continuación): hasta...") == "posición abierta en GBPUSD"
     assert short_reason(d["decision"].reason) == "a favor +3"
+
+
+def test_cortex_valida_con_el_sesgo_de_la_temporalidad_del_patron_no_con_el_del_grafico():
+    """El gráfico en 5 min marca la vela como lateral (GO sin sesgo); en 15 min, la del patrón, es Bearish: manda la del patrón."""
+    bus, decisions = EventBus(), []
+    bus.subscribe("t", "cortex.decision", decisions.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig()), [{"type": "cortex"}])
+    manager.start()
+    ts = np.array([1_000, 1_900, 2_800])
+    base = {"symbol": "EURUSD", "ts": ts, "scores": np.array([-4.0, -4.0, -4.0]), "min_score": 3.0}
+    bus.publish("bias.history", {**base, "timeframe": "15m", "lateral": None}, source="bias")
+    bus.publish("bias.history", {**base, "timeframe": "5m", "lateral": np.array([True, True, True])}, source="bias")   # llega después
+    bus.publish("bias.updated", {"result": bias(Bias.BEARISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    hit = PatternHit("p", "Patrón", "long", 1, 100.0, "", {"stop": 95.0, "target": 115.0}, 1_900)
+    bus.publish("pattern.detected", {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": hit}, source="pattern")
+    deadline = time.time() + 3
+    while not decisions and time.time() < deadline:
+        time.sleep(0.02)
+    manager.stop()
+    d = decisions[0].payload["decision"]
+    assert not d.allowed and "contra el sesgo Bearish" in d.reason          # no «sin sesgo (mercado lateral)» del gráfico en 5 min
