@@ -207,7 +207,7 @@ class StatsDialog(QDialog):
         self.setWindowTitle("Forwardtest")
         self.setWindowFlag(Qt.WindowType.Tool, True)      # flota sobre la ventana principal sin bloquearla
         self.setModal(False)
-        self.resize(720, 880)
+        self.resize(1000, 880)                                  # ancho para ver todas las columnas del diario (hasta Máx. R y Máx. pérdida)
         self.stats, self._to_ny, self._symbols, self._today = stats, to_ny, symbols, today
         self._months, self._load_month = months, load_month
         self.window_days: int | None = DEFAULT_WINDOW
@@ -323,7 +323,7 @@ class StatsDialog(QDialog):
             lay.addWidget(book)
 
         journal = Book("Diario", "las más recientes arriba", ())
-        self.history = self._table(("Entrada (NY)", "Mercado", "Lado", "Patrón", "Sesión", "Salida", "Duración", "Resultado", "Máx. R"))
+        self.history = self._table(("Entrada (NY)", "Mercado", "Lado", "Patrón", "Sesión", "Salida", "Duración", "Resultado", "Máx. R", "Máx. pérdida"))
         self.history.setMinimumHeight(220)
         self.history.cellClicked.connect(self._on_history_click)
         journal.layout().addWidget(self.history)
@@ -594,8 +594,11 @@ class StatsDialog(QDialog):
             if t.closed:
                 max_r = getattr(t.closed, "max_r", None)
                 self._cell(self.history, i, 5, RESULT_NAMES.get(t.closed.result, t.closed.result))
+                min_r = getattr(t.closed, "min_r", None)
                 self._cell(self.history, i, 8, "-" if max_r is None else f"{max_r:.2f} R",
                            theme.WARN if t.closed.result in ("stop", "breakeven") and (max_r or 0) >= 1 else None)
+                self._cell(self.history, i, 9, "-" if min_r is None else f"{min_r:.2f} R", theme.BEAR if (min_r or 0) <= -0.99 else None)
+                self.history.item(i, 9).setToolTip("Lo más en contra que llegó a ir el precio desde la entrada, en R (un stop es -1 R)")
                 self.history.item(i, 8).setToolTip("Máximo a favor que llegó a alcanzar el precio entre la entrada y el cierre, en R"
                                                    " (antes del stop o del breakeven, hasta dónde habría llegado)")
                 self._cell(self.history, i, 6, _span(t.duration))
@@ -605,9 +608,11 @@ class StatsDialog(QDialog):
                 self._cell(self.history, i, 6, "-")
                 self._cell(self.history, i, 7, "-")
                 self._cell(self.history, i, 8, "-")
+                self._cell(self.history, i, 9, "-")
             else:
                 self._cell(self.history, i, 5, "Abierta", theme.WARN)
                 self._cell(self.history, i, 6, "-")
                 self._cell(self.history, i, 7, "-")
                 self._cell(self.history, i, 8, "-")
+                self._cell(self.history, i, 9, "-")
         self.history.resizeColumnsToContents()

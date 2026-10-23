@@ -126,3 +126,15 @@ def test_el_maximo_se_guarda_en_el_diario_y_los_diarios_antiguos_se_leen(tmp_pat
     old = tmp_path / "2026-10.jsonl"
     old.write_text(old.read_text(encoding="utf-8").replace(', "max_r": 1.57', ""), encoding="utf-8")   # diario de antes de este campo
     assert Journal(tmp_path).load_recent().trades[0].closed.max_r is None
+
+
+def test_el_cierre_guarda_la_maxima_perdida_latente_en_r():
+    o = order(close_after=500)
+    # entra en 100 con stop 99: baja a 99.6 (-0,4 R), sube a 101.6, el stop pasa a la entrada y vuelve a 100 -> breakeven
+    c = resolve(o, *bars([(101.6, 99.6, 101.2), (100.5, 99.9, 100.2), (100.2, 98.0, 100.0)]), be_r=1.0, bar_seconds=STEP)
+    assert c.result == "breakeven" and c.min_r == pytest.approx(-0.4)                # la vela de salida (98.0) no cuenta
+    assert resolve(order(), *bars([(100.4, 98.5, 99.0)])).min_r == -1.0                 # un stop es -1 R
+    win = resolve(order(), *bars([(101.0, 99.5, 100.8), (102.5, 100.5, 102.0)]))
+    assert win.result == "objetivo" and win.min_r == pytest.approx(-0.5)
+    short = resolve(order("short", stop=101.0, target=98.0), *bars([(100.6, 99.2, 99.4), (100.0, 97.9, 98.0)]))
+    assert short.min_r == pytest.approx(-0.6)                                           # corto: el máximo manda
