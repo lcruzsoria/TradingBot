@@ -85,6 +85,7 @@ def main(argv=None) -> int:
     try:
         env = envconfig.load()
         cfg = load_app_config(args.config, env)
+        cfg["app"]["env_file"] = str(args.env)                   # el fichero de cuentas (secretos fuera del repo)
         theme_name, palette = theme.resolve(cfg["theme"], startup=args.theme or env.get("UI_THEME"))
         theme.apply(palette)
         theme.set_font(env.get("UI_FONT"))

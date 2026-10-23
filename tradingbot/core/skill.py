@@ -11,7 +11,7 @@ temas que le interesan y publica los suyos en el bus. Para crear una nueva:
         description = "Valida el tamaño de cada operación"
         subscribes = ("trade.request",)
         publishes = ("risk.verdict",)
-        slot = 2                       # posición en el anillo (0-5), "center" o "aux1".."aux3"
+        slot = 2                       # posición en el anillo (0-5), "center" o "aux1".."aux4"
 
         def handle(self, event):
             self.publish("risk.verdict", {"ok": True})
@@ -29,7 +29,7 @@ from .bus import Event, EventBus
 
 SKILL_REGISTRY: dict[str, type["Skill"]] = {}
 RING_SLOTS = (0, 1, 2, 3, 4, 5)          # sentido horario empezando arriba
-AUX_SLOTS = ("aux1", "aux2", "aux3")
+AUX_SLOTS = ("aux1", "aux2", "aux3", "aux4")
 
 
 class SkillState(str, Enum):

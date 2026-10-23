@@ -10,7 +10,7 @@ Cada skill vive en su propia carpeta dentro de tradingbot/skills/ (p. ej. tradin
 
        [[skills]]
        type = "risk"
-       slot = 2            # 0-5 (anillo, horario desde arriba), "center" o "aux1".."aux3"
+       slot = 2            # 0-5 (anillo, horario desde arriba), "center" o "aux1".."aux4"
 
 Cómo se comunica una skill:
   - subscribes: temas que quiere recibir. Cada mensaje llega a handle(event).

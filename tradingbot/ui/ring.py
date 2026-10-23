@@ -167,6 +167,7 @@ class RingView(QWidget):
         pos["aux1"] = (margin, margin, a_size)
         pos["aux2"] = (w - margin, h - margin, a_size)
         pos["aux3"] = (margin, h - margin, a_size)
+        pos["aux4"] = (w - margin, margin, a_size)
         return s, pos
 
     def _slot_of(self, key: str):
