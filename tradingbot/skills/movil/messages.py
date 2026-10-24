@@ -63,7 +63,8 @@ def started(profile: str | None = None) -> str:
 
 
 # -- respuestas a los comandos (lo mismo que enseña el panel) -------------------------------------------------------
-COMMANDS = (("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
+COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana del bot"),
+            ("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
             ("hoy", "Cierres y resultado de hoy"), ("sesgo", "Sesgo de cada mercado"),
             ("decisiones", "Últimos GO / NO GO de Cortex"), ("ayuda", "Lista de comandos"))
 

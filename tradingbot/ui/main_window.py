@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
             "pattern.session": self._on_pattern_session,
             "bias.schedule": self._on_bias_schedule, "bias.history": self._on_bias_history,
             "feed.refresh": self._on_refresh_request, "clock.offset": self._on_clock_offset,
-            "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
+            "movil.capture.request": self._on_capture_request, "trade.verdict": self._on_verdict, "skill.state": self._on_skill_state,
             "skill.error": self._on_skill_error,
         }
         self._set_status("Sin conectar", "busy")
@@ -768,6 +768,15 @@ class MainWindow(QMainWindow):
             self.backtest_dialog.refresh()
 
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
+    def _on_capture_request(self, p: dict) -> None:
+        """La skill Móvil pide una captura de la ventana (/captura por Telegram): se dibuja aquí, en el hilo de la interfaz."""
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        ok = self.grab().save(buffer, "PNG")
+        self.bus.publish("movil.capture", {"request_id": p.get("request_id"), "png": bytes(data) if ok else b""}, source="ui")
+
     def _on_event(self, event: Event) -> None:
         if event.payload.get("background") and event.topic in CHART_TOPICS:
             return                                  # barrido de la watchlist en segundo plano: no mueve el gráfico

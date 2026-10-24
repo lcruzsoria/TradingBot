@@ -3,17 +3,19 @@ un panel web de solo lectura (abiertas, cierres, sesgo y decisiones) que se abre
 from __future__ import annotations
 
 import ipaddress
+import time
 
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
 from ..setup import store
-from . import messages, telegram
+from . import card, messages, telegram
 from .panel import PanelServer, PanelState
 from .secrets import secret
 
 NOTIFY_ALL = ("abre", "cierra", "go", "nogo")
 DEFAULT_NOTIFY = ("abre", "cierra")
 DEFAULT_PORT = 8765
+CAPTURE_TIMEOUT = 15.0                                       # segundos que se espera a la ventana
 
 
 def _key(order) -> tuple:
@@ -36,8 +38,9 @@ class MovilSkill(Skill):
                    "con su R) y, si se activa, de cada GO / NO GO de Cortex; solo lo que pasa en directo, no el repaso al "
                    "arrancar. Panel: una página web de solo lectura con las abiertas, los cierres, el sesgo y las decisiones, "
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
-    subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed")
-    publishes = ()
+    subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
+                  "movil.capture")
+    publishes = ("movil.capture.request",)
     slot = "aux4"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
 
@@ -74,6 +77,7 @@ class MovilSkill(Skill):
         self.notify = set(notify)
         self.commands = settings.get_bool("COMMANDS", True)
         self._offset: int | None = None                      # siguiente mensaje de Telegram por leer
+        self._capture_asked: float | None = None             # cuándo se pidió a la ventana una captura (/captura)
         self.token, self.chat = telegram.credentials(self.env_file)
         if not self.token or not self.chat:
             self.error = ("Faltan TELEGRAM_TOKEN y TELEGRAM_CHAT_ID en el fichero de cuentas (fuera del repo) "
@@ -103,6 +107,9 @@ class MovilSkill(Skill):
     def tick(self) -> None:
         if not self.telegram or not self.commands or self.error:
             return
+        if self._capture_asked is not None and time.monotonic() - self._capture_asked > CAPTURE_TIMEOUT:
+            self._capture_asked = None
+            self._send("La ventana del bot no ha contestado: ¿está abierta la interfaz?")
         try:
             if self._offset is None:
                 self._skip_backlog()
@@ -120,8 +127,21 @@ class MovilSkill(Skill):
         if not text.startswith("/"):
             return
         command = text[1:].split()[0].split("@")[0].lower() if len(text) > 1 else ""
+        if command == "panel":
+            self._photo(card.render(self.board.snapshot()))
+            return
+        if command == "captura":                             # la ventana la dibuja la interfaz (hilo de Qt): se le pide
+            self._capture_asked = time.monotonic()
+            self.publish("movil.capture.request", {"request_id": "tg"})
+            return
         reply = messages.answer(command, self.board.snapshot())
         self._send(reply if reply is not None else messages.help_text())
+
+    def _photo(self, png: bytes) -> None:
+        stamp = self.board.snapshot()["updated"]
+        telegram.send_photo(self.token, self.chat, png, f"<i>{stamp}{' · ' + self.profile if self.profile else ''}</i>")
+        self.sent += 1
+        self._caption()
 
     # -- panel ------------------------------------------------------------------------------------
     def _start_panel(self, settings: EnvConfig) -> None:
@@ -155,6 +175,14 @@ class MovilSkill(Skill):
             raise ValueError(self.error)
         p = event.payload
         topic = event.topic
+        if topic == "movil.capture":                         # la captura que pidió /captura, ya dibujada por la interfaz
+            if self.telegram and self._capture_asked is not None:
+                self._capture_asked = None
+                if p.get("png"):
+                    self._photo(p["png"])
+                else:
+                    self._send("No se pudo capturar la ventana.")
+            return
         if topic == "quotes.updated":
             self.board.quotes(p)
         elif topic == "bias.updated":

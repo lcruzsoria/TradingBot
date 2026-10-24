@@ -9,6 +9,7 @@ del repo (el mismo de MT5, C:\\Users\\claude\\mt5\\.env), o en variables de ento
 from __future__ import annotations
 
 import json
+import secrets
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -30,9 +31,12 @@ def credentials(env_file: Path | str | None = None) -> tuple[str | None, str | N
 
 def call(token: str, method: str, params: dict | None = None) -> dict:
     """Llama a un método de la API de bots y devuelve su `result`. Los fallos, como TelegramError (sin el token)."""
-    data = json.dumps(params or {}).encode("utf-8")
+    return _post(token, method, json.dumps(params or {}).encode("utf-8"), "application/json")
+
+
+def _post(token: str, method: str, data: bytes, content_type: str) -> dict:
     request = urllib.request.Request(API.format(token=token, method=method), data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": content_type})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             body = json.loads(response.read().decode("utf-8"))
@@ -66,3 +70,23 @@ def get_updates(token: str, offset: int | None = None) -> list:
 def set_commands(token: str, commands: list[tuple[str, str]]) -> None:
     """El menú de comandos que Telegram enseña al escribir «/»."""
     call(token, "setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
+
+
+def multipart(fields: dict, file_field: str, filename: str, content: bytes, mime: str) -> tuple[bytes, str]:
+    """El cuerpo «multipart/form-data» de una subida (campos de texto y un fichero) y su cabecera Content-Type."""
+    boundary = "tb" + secrets.token_hex(12)
+    crlf = "\r\n"
+    body = b"".join(f'--{boundary}{crlf}Content-Disposition: form-data; name="{k}"{crlf}{crlf}{v}{crlf}'.encode("utf-8")
+                    for k, v in fields.items())
+    head = (f'--{boundary}{crlf}Content-Disposition: form-data; name="{file_field}"; filename="{filename}"{crlf}'
+            f"Content-Type: {mime}{crlf}{crlf}")
+    body += head.encode("utf-8") + content + f"{crlf}--{boundary}--{crlf}".encode("utf-8")
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+def send_photo(token: str, chat: str, png: bytes, caption: str = "") -> dict:
+    fields = {"chat_id": chat, "parse_mode": "HTML"}
+    if caption:
+        fields["caption"] = caption
+    body, content_type = multipart(fields, "photo", "tradingbot.png", png, "image/png")
+    return _post(token, "sendPhoto", body, content_type)

@@ -20,6 +20,7 @@ REPLAY = Order(*[*ORDER.__dict__.values()][:-2], 400, 400 + 24 * 3600)          
 TP = Closed("objetivo", 1.093, 1900, 2.0, 0.18, None, 2.4, -0.3)
 
 
+PHOTOS: list = []                                                                      # las imágenes que se «mandan»
 INBOX: list = []                                                                       # lo que «llega» al bot por Telegram
 
 
@@ -36,6 +37,8 @@ def sent(monkeypatch):
     INBOX.clear()
     monkeypatch.setattr(client, "send_message", lambda token, chat, text: out.append((token, chat, text)))
     monkeypatch.setattr(client, "get_updates", fake_updates)
+    PHOTOS.clear()
+    monkeypatch.setattr(client, "send_photo", lambda token, chat, png, caption="": PHOTOS.append((chat, png, caption)))
     monkeypatch.setattr(client, "set_commands", lambda token, commands: None)
     monkeypatch.setenv("TELEGRAM_TOKEN", "t0k3n")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
@@ -222,3 +225,74 @@ def test_sin_comandos_no_se_pregunta_a_telegram(sent, monkeypatch):
     manager.skills["movil"].tick()
     manager.stop()
     assert sent == []
+
+
+def test_panel_manda_la_imagen_del_panel_con_los_datos(sent, tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.setup import store
+    QApplication.instance() or QApplication([])
+    store.save([ORDER], tmp_path / "perfil" / "abiertas.json")
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", {"data_dir": str(tmp_path / "perfil"),
+                                                                                       "profile_name": "puprime"})
+    skill = manager.skills["movil"]
+    INBOX.append(message(1, "/panel"))
+    skill.tick()
+    manager.stop()
+    [(chat, png, caption)] = PHOTOS
+    assert chat == "42" and png[:4] == b"\x89PNG" and len(png) > 5000 and "puprime" in caption and sent == []
+
+
+def test_captura_pide_la_ventana_a_la_interfaz_y_manda_lo_que_devuelve(sent):
+    pedidas = []
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n")
+    bus.subscribe("ui", "movil.capture.request", pedidas.append)
+    skill = manager.skills["movil"]
+    INBOX.append(message(1, "/captura"))
+    skill.tick()
+    assert len(pedidas) == 1 and PHOTOS == []                                          # espera a que la ventana conteste
+    bus.publish("movil.capture", {"request_id": "tg", "png": b"\x89PNG-ventana"}, source="ui")
+    time.sleep(0.4)
+    bus.publish("movil.capture", {"request_id": "otra", "png": b"\x89PNG-no-pedida"}, source="ui")      # sin pedirla: se ignora
+    time.sleep(0.3)
+    manager.stop()
+    assert [p[1] for p in PHOTOS] == [b"\x89PNG-ventana"]
+
+
+def test_captura_sin_respuesta_de_la_ventana_avisa(sent, monkeypatch):
+    from tradingbot.skills.movil import skill as movil
+    monkeypatch.setattr(movil, "CAPTURE_TIMEOUT", 0.0)
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n")
+    skill = manager.skills["movil"]
+    INBOX.append(message(1, "/captura"))
+    skill.tick()
+    time.sleep(0.05)
+    skill.tick()
+    manager.stop()
+    assert PHOTOS == [] and "no ha contestado" in sent[-1][2]
+
+
+def test_la_ventana_contesta_a_la_peticion_de_captura(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
+    got = []
+    win.bus.subscribe("t", "movil.capture", got.append)
+    win._on_capture_request({"request_id": "tg"})
+    assert got[0].payload["request_id"] == "tg" and got[0].payload["png"][:4] == b"\x89PNG" and len(got[0].payload["png"]) > 5000
+
+
+def test_la_subida_de_la_imagen_es_un_multipart_valido():
+    from tradingbot.skills.movil import telegram as client
+    body, kind = client.multipart({"chat_id": "42", "caption": "hola"}, "photo", "x.png", b"\x89PNG-datos", "image/png")
+    boundary = kind.split("boundary=")[1]
+    end = ("--" + boundary + "--" + chr(13) + chr(10)).encode()
+    crlf = chr(13) + chr(10)
+    assert kind.startswith("multipart/form-data") and body.endswith(end)
+    assert ("name=\"chat_id\"" + crlf + crlf + "42" + crlf).encode() in body
+    assert b"filename=\"x.png\"" in body and b"\x89PNG-datos" in body
