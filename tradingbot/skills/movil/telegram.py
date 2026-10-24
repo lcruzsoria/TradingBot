@@ -52,3 +52,17 @@ def call(token: str, method: str, params: dict | None = None) -> dict:
 def send_message(token: str, chat: str, text: str) -> dict:
     return call(token, "sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML",
                                        "disable_web_page_preview": True})
+
+
+def get_updates(token: str, offset: int | None = None) -> list:
+    """Los mensajes que han llegado al bot desde `offset` (sin esperar: se pregunta cada pocos segundos)."""
+    params: dict = {"timeout": 0, "allowed_updates": ["message"]}
+    if offset is not None:
+        params["offset"] = offset
+    result = call(token, "getUpdates", params)
+    return result if isinstance(result, list) else []
+
+
+def set_commands(token: str, commands: list[tuple[str, str]]) -> None:
+    """El menú de comandos que Telegram enseña al escribir «/»."""
+    call(token, "setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})

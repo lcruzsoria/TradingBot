@@ -60,3 +60,78 @@ def decision(payload: dict, profile: str | None = None) -> str:
 
 def started(profile: str | None = None) -> str:
     return f"🤖 <b>TradingBot en marcha</b>{_footer(profile)}"
+
+
+# -- respuestas a los comandos (lo mismo que enseña el panel) -------------------------------------------------------
+COMMANDS = (("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
+            ("hoy", "Cierres y resultado de hoy"), ("sesgo", "Sesgo de cada mercado"),
+            ("decisiones", "Últimos GO / NO GO de Cortex"), ("ayuda", "Lista de comandos"))
+
+
+def _r(value) -> str:
+    return "–" if value is None else f"{value:+.2f} R"
+
+
+def _header(s: dict) -> str:
+    profile = f" · {_e(s['profile'])}" if s.get("profile") else ""
+    return f"<b>TradingBot{profile}</b> <i>{_e(s['updated'])}</i>"
+
+
+def open_positions(s: dict) -> str:
+    if not s["open"]:
+        return "<b>Abiertas</b>\nNinguna operación abierta."
+    lines = ["<b>Abiertas</b>"]
+    for o in s["open"]:
+        now = f" · precio {fmt_price(o['price'])}" if o.get("price") is not None else ""
+        lines.append(f"🟡 <b>{_e(o['side'])} {_e(o['symbol'])}</b> {_e(o['timeframe'])} · {_r(o['r_now'])}\n"
+                     f"{_e(o['pattern'])} · {_e(o['zone'])}\n"
+                     f"Entrada {fmt_price(o['entry'])} · Stop {fmt_price(o['stop'])} · Obj. {fmt_price(o['target'])}{now}")
+    return "\n".join(lines)
+
+
+def today(s: dict) -> str:
+    t = s["today"]
+    if not t["count"]:
+        return "<b>Hoy</b>\nAún no ha cerrado ninguna."
+    head = (f"<b>Hoy</b> {_r(t['r'])}\n{t['count']} cerrada(s): {t['TP']} TP · {t['SL']} SL · {t['BE']} BE"
+            + (f" · {t['T']} T" if t["T"] else ""))
+    rows = [c for c in s["closed"] if c["day"] == t["day"]]
+    icon = {short: ico for ico, short in RESULT.values()}
+    lines = [f"{icon.get(c['result'], '•')} {_e(c['result'])} {_r(c['r'])} · {_e(c['side'])} {_e(c['symbol'])} · {_e(c['pattern'])}"
+             for c in rows]
+    return "\n".join([head, *lines])
+
+
+def bias(s: dict) -> str:
+    if not s["bias"]:
+        return "<b>Sesgo</b>\nTodavía no hay sesgo calculado."
+    icon = {"Bullish": "🟢", "Bearish": "🔴"}
+    return "<b>Sesgo</b>\n" + "\n".join(
+        f"{icon.get(b['bias'], '⚪')} <b>{_e(b['symbol'])}</b> {_e(b['bias'])}{' · lateral' if b['lateral'] else ''} {b['score']:+g}"
+        for b in s["bias"])
+
+
+def decisions(s: dict) -> str:
+    if not s["decisions"]:
+        return "<b>Decisiones de Cortex</b>\nNinguna desde que arrancó el bot."
+    return "<b>Decisiones de Cortex</b>\n" + "\n".join(
+        f"{'✓ GO' if d['go'] else '✕ NO GO'} {_e(d['side'])} {_e(d['symbol'])} {_e(d['timeframe'])} · {_e(d['pattern'])} · "
+        f"{_e(d['at'])}\n<i>{_e(d['reason'])}</i>" for d in s["decisions"][:8])
+
+
+def status(s: dict) -> str:
+    return "\n\n".join([_header(s), today(s), open_positions(s), bias(s)])
+
+
+def help_text() -> str:
+    return "<b>Comandos</b>\n" + "\n".join(f"/{c} · {_e(d)}" for c, d in COMMANDS)
+
+
+def answer(command: str, s: dict) -> str | None:
+    """La respuesta al comando (sin la barra ni el @bot), o None si no es uno de los nuestros."""
+    table = {"estado": status, "abiertas": open_positions, "hoy": today, "sesgo": bias, "decisiones": decisions}
+    if command in table:
+        return table[command](s)
+    if command in ("ayuda", "start", "help"):
+        return help_text()
+    return None

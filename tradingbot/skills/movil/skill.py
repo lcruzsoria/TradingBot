@@ -39,6 +39,7 @@ class MovilSkill(Skill):
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed")
     publishes = ()
     slot = "aux4"
+    interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
 
     def on_start(self) -> None:
         self.error = ""
@@ -71,12 +72,16 @@ class MovilSkill(Skill):
             self.error = f"TELEGRAM_NOTIFY: {', '.join(unknown)} no existe (usa {', '.join(NOTIFY_ALL)})"
             raise ValueError(self.error)
         self.notify = set(notify)
+        self.commands = settings.get_bool("COMMANDS", True)
+        self._offset: int | None = None                      # siguiente mensaje de Telegram por leer
         self.token, self.chat = telegram.credentials(self.env_file)
         if not self.token or not self.chat:
             self.error = ("Faltan TELEGRAM_TOKEN y TELEGRAM_CHAT_ID en el fichero de cuentas (fuera del repo) "
                           "o en variables de entorno")
             raise ValueError(self.error)
         self._known = {_key(o) for o in store.load(store.file_for(self.services.app_cfg))}   # abiertas de antes: su cierre sí
+        if self.commands:
+            self._skip_backlog()
         if settings.get_bool("NOTIFY_START", True):
             self._send(messages.started(self.profile))
 
@@ -84,6 +89,39 @@ class MovilSkill(Skill):
         telegram.send_message(self.token, self.chat, text)
         self.sent += 1
         self._caption()
+
+    # -- comandos por Telegram: /estado, /abiertas... (solo desde tu chat, solo lectura) ----------------
+    def _skip_backlog(self) -> None:
+        """Lo que se escribió con el bot parado no se contesta: se sigue desde el último mensaje."""
+        try:
+            old = telegram.get_updates(self.token, -1)
+            self._offset = old[-1]["update_id"] + 1 if old else 0
+            telegram.set_commands(self.token, list(messages.COMMANDS))
+        except telegram.TelegramError:
+            self._offset = None                              # sin red al arrancar: se reintenta en el primer tick
+
+    def tick(self) -> None:
+        if not self.telegram or not self.commands or self.error:
+            return
+        try:
+            if self._offset is None:
+                self._skip_backlog()
+                return
+            for update in telegram.get_updates(self.token, self._offset):
+                self._offset = update["update_id"] + 1
+                self._command(update.get("message") or {})
+        except telegram.TelegramError:
+            return                                           # un fallo de red no es un error de la skill: se reintenta
+
+    def _command(self, message: dict) -> None:
+        if str((message.get("chat") or {}).get("id")) != str(self.chat):
+            return                                           # solo contesta a tu chat
+        text = (message.get("text") or "").strip()
+        if not text.startswith("/"):
+            return
+        command = text[1:].split()[0].split("@")[0].lower() if len(text) > 1 else ""
+        reply = messages.answer(command, self.board.snapshot())
+        self._send(reply if reply is not None else messages.help_text())
 
     # -- panel ------------------------------------------------------------------------------------
     def _start_panel(self, settings: EnvConfig) -> None:

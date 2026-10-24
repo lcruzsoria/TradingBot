@@ -539,6 +539,10 @@ repo (`C:\Users\claude\mt5\.env`), o en variables de entorno.
    vez y manda un mensaje de prueba.
 4. Pon `TELEGRAM_ENABLED=true` en `tradingbot.env` y reinicia el bot. Por defecto avisa al abrir y al cerrar
    (`TELEGRAM_NOTIFY=abre, cierra`); añade `go` y `nogo` para recibir también cada decisión de Cortex.
+5. **Comandos:** escríbele al bot `/estado` (abiertas con su R, resultado de hoy y sesgo), `/abiertas`, `/hoy`, `/sesgo`,
+   `/decisiones` o `/ayuda`, y contesta con lo mismo que enseña el panel, sin abrir ninguna web (`TELEGRAM_COMMANDS=false` lo
+   apaga). Solo contesta a tu chat (`TELEGRAM_CHAT_ID`), no deja operar ni cambiar nada, y lo que le escribas con el bot parado
+   no se contesta al arrancar.
 
 **Panel**
 

@@ -20,11 +20,23 @@ REPLAY = Order(*[*ORDER.__dict__.values()][:-2], 400, 400 + 24 * 3600)          
 TP = Closed("objetivo", 1.093, 1900, 2.0, 0.18, None, 2.4, -0.3)
 
 
+INBOX: list = []                                                                       # lo que «llega» al bot por Telegram
+
+
+def fake_updates(token, offset=None):
+    if offset == -1:
+        return INBOX[-1:]
+    return [u for u in INBOX if offset is None or u["update_id"] >= offset]
+
+
 @pytest.fixture
 def sent(monkeypatch):
     from tradingbot.skills.movil import telegram as client
     out = []
+    INBOX.clear()
     monkeypatch.setattr(client, "send_message", lambda token, chat, text: out.append((token, chat, text)))
+    monkeypatch.setattr(client, "get_updates", fake_updates)
+    monkeypatch.setattr(client, "set_commands", lambda token, commands: None)
     monkeypatch.setenv("TELEGRAM_TOKEN", "t0k3n")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
     return out
@@ -172,3 +184,41 @@ def test_el_panel_no_se_abre_a_otros_equipos_sin_clave(monkeypatch, tmp_path):
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_HOST=0.0.0.0\nPANEL_PORT=0\n", {"env_file": str(tmp_path / "x.env")})
     skill = settle(manager, bus)
     assert skill.state.value == "error" and "PANEL_TOKEN" in skill.note and skill.server is None
+
+
+def message(update_id, text, chat=42):
+    return {"update_id": update_id, "message": {"chat": {"id": chat}, "text": text}}
+
+
+def test_los_comandos_de_telegram_contestan_con_lo_del_panel_solo_a_tu_chat(sent, monkeypatch, tmp_path):
+    from tradingbot.skills.setup import store
+    store.save([ORDER], tmp_path / "perfil" / "abiertas.json")
+    INBOX.append(message(1, "/estado"))                                                # con el bot parado: no se contesta
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", {"data_dir": str(tmp_path / "perfil"),
+                                                                                       "profile_name": "puprime"})
+    skill = manager.skills["movil"]
+    bus.publish("quotes.updated", {"quotes": {"EURUSD": SimpleNamespace(bid=1.0945)}, "account": None}, source="quotes")
+    bus.publish("bias.updated", {"symbol": "EURUSD", "timeframe": "15m", "result": SimpleNamespace(
+        bias=SimpleNamespace(value="Bearish"), score=-3.0, lateral=False)}, source="bias")
+    time.sleep(0.3)
+    INBOX.extend([message(2, "/estado"), message(3, "/abiertas@mi_bot"), message(4, "/hoy", chat=999),   # otro chat: se ignora
+                  message(5, "hola"), message(6, "/ayuda"), message(7, "/loquesea")])
+    skill.tick()
+    manager.stop()
+    texts = [t for _, chat, t in sent]
+    assert all(chat == "42" for _, chat, _ in sent) and len(texts) == 4                  # estado, abiertas, ayuda y un comando desconocido (da la ayuda)
+    assert "TradingBot · puprime" in texts[0] and "Corto EURUSD" in texts[0] and "+0.50 R" in texts[0] and "Bearish" in texts[0]
+    assert texts[1].startswith("<b>Abiertas</b>") and "Entrada 1.09500" in texts[1] and "precio 1.09450" in texts[1]
+    assert texts[2].startswith("<b>Comandos</b>") and "/estado" in texts[2] and texts[3] == texts[2]
+    assert skill._offset == 8
+    skill.tick()                                                                         # lo ya contestado no se repite
+    assert len(sent) == 4
+
+
+def test_sin_comandos_no_se_pregunta_a_telegram(sent, monkeypatch):
+    from tradingbot.skills.movil import telegram as client
+    monkeypatch.setattr(client, "get_updates", lambda *a: pytest.fail("no debería preguntar"))
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\nTELEGRAM_COMMANDS=false\n")
+    manager.skills["movil"].tick()
+    manager.stop()
+    assert sent == []
