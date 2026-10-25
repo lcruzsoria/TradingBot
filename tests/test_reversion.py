@@ -36,7 +36,7 @@ def test_bajista_mecha_pivote_pivote_siguiente_y_entrada_en_el_05():
     f = figs[0]
     assert (f.kind, f.key, f.direction, f.state) == ("fib", "reversion", "short", "entrada")
     assert f.levels == {"-0,5": 91.0, "0": 96.0, "0,5": 101.0, "1": 106.0} and f.x0_ts == int(ctx_for(ROWS).ts[4])
-    assert "mecha pivote" in h.detail and "2R" in h.detail
+    assert "mecha pivote" in h.detail and "RR 2" in h.detail
 
 
 def test_alcista_es_el_espejo_exacto():
@@ -125,3 +125,20 @@ def test_la_skill_detecta_la_reversion_con_el_grafico_en_m5():
     assert p["timeframe"] == "15m" and p["hit"].key == "reversion" and p["hit"].direction == "short" and p["hit"].price == 101.0
     fig = updated[-1].payload["figures"][0]
     assert fig.key == "reversion" and fig.levels["1"] == 106.0 and fig.levels["0"] == 96.0
+
+
+def test_stop_y_objetivo_en_los_niveles_configurados():
+    from tradingbot.envconfig import EnvConfig, parse
+    from tradingbot.skills.pattern.fibo import level_settings
+    from tradingbot.skills.pattern.reversion import Reversion
+    pat = Reversion(EnvConfig(parse("PATTERN_STOP_LEVEL=0.9\nPATTERN_TARGET_LEVEL=-0.2\n")).section("PATTERN"))
+    hits, figs = pat.detect(ctx_for(ROWS, first_bar=3)), pat.figures(ctx_for(ROWS, first_bar=3))
+    h, f = hits[0], figs[0]
+    # el 0 en 96 y el 1 (mecha) en 106: stop en el 0,9 = 105, objetivo en el -0,2 = 94; entrada en el 0,5 = 101
+    assert h.levels["stop"] == pytest.approx(105.0) and h.levels["target"] == pytest.approx(94.0)
+    assert set(f.levels) == {"-0,2", "0", "0,5", "0,9", "1"} and f.target == "-0,2"
+    assert "stop en el 0,9 y objetivo en el -0,2" in h.detail
+    assert level_settings(lambda k, d: d) == (1.0, -0.2)                                  # por defecto: stop en el 1, objetivo en el -0,2
+    for bad in ({"STOP_LEVEL": "0.4"}, {"TARGET_LEVEL": "0.6"}, {"STOP_LEVEL": "x"}):
+        with pytest.raises(ValueError):
+            level_settings(lambda k, d, b=bad: b.get(k, d))

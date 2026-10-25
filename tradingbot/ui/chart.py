@@ -83,9 +83,9 @@ class PositionPill(pg.TextItem):
 PILL_GAP = 0.35            # separación de la píldora respecto al stop, en fracción de su alto
 
 
-def _fib_color(name: str) -> str:
-    """Color de cada nivel del fibo: el 0,5 (la entrada) en ámbar, el -0,5 (el objetivo) en rojo, el resto apagado."""
-    return "#BA7517" if name == "0,5" else "#E24B4A" if name == "-0,5" else theme.MUTED
+def _fib_color(name: str, target: str = "-0,5") -> str:
+    """Color de cada nivel del fibo: el 0,5 (la entrada) en ámbar, el objetivo (PATTERN_TARGET_LEVEL) en rojo, el resto apagado."""
+    return "#BA7517" if name == "0,5" else "#E24B4A" if name == (target or "-0,5") else theme.MUTED
 
 
 class DaySeparators(pg.GraphicsObject):
@@ -831,7 +831,7 @@ class ChartView(pg.PlotWidget):
             x0, x1 = float(fib["x0"]), float(fib["x1"])
             for name, price in fib["levels"].items():
                 half = name == "0,5"
-                color = _fib_color(name)
+                color = _fib_color(name, fib.get("target", ""))
                 pen = pg.mkPen(color, width=2 if half else 1.2, style=Qt.PenStyle.DashLine if half else Qt.PenStyle.SolidLine)
                 line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([price, price]), pen=pen)
                 line.setZValue(-2)

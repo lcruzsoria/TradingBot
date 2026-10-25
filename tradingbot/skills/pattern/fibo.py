@@ -9,13 +9,54 @@ Todo se calcula «en largo» (el origen es un mínimo y el tramo sube); el corto
   después de la vela que confirma el pivote del 0: no se puede entrar en la propia vela que confirma el swing, porque hasta
   que cierra no se sabe que el 0 existe.
 - Si el precio pierde el origen antes de la entrada (mínimo por debajo del nivel 1), el tramo se anula.
-- Stop en el nivel 1 y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5 son 2R.
+- Stop y objetivo en los niveles de PATTERN_STOP_LEVEL (1 al inicio: la mecha pivote o el swing) y PATTERN_TARGET_LEVEL (-0,2 al
+  inicio; el -0,5 sería media vuelta del tramo más allá del 0). Con entrada en el 0,5: RR = (0,5 - objetivo) / (stop - 0,5).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
+
+
+DEFAULT_STOP_LEVEL = 1.0           # PATTERN_STOP_LEVEL: el stop en el nivel 1 (la mecha pivote o el swing)
+DEFAULT_TARGET_LEVEL = -0.2        # PATTERN_TARGET_LEVEL: el objetivo (backtest 2018-2026: mejor que el -0,5 de antes)
+
+
+def level_settings(get) -> tuple[float, float]:
+    """(stop, objetivo) del bloque PATTERN (PATTERN_STOP_LEVEL, PATTERN_TARGET_LEVEL), como niveles del fibo."""
+    try:
+        sl = float(str(get("STOP_LEVEL", DEFAULT_STOP_LEVEL)).replace(",", "."))
+        tp = float(str(get("TARGET_LEVEL", DEFAULT_TARGET_LEVEL)).replace(",", "."))
+    except ValueError:
+        raise ValueError("PATTERN_STOP_LEVEL y PATTERN_TARGET_LEVEL deben ser números (por ejemplo 1 y -0.2).") from None
+    if not 0.5 < sl <= 2:
+        raise ValueError(f"PATTERN_STOP_LEVEL={sl:g}: el stop debe estar más allá de la entrada (0,5) y no más lejos que el 2.")
+    if not -2 <= tp < 0.5:
+        raise ValueError(f"PATTERN_TARGET_LEVEL={tp:g}: el objetivo debe estar por debajo de la entrada (0,5) y no más allá del -2.")
+    return sl, tp
+
+
+def level_name(x: float) -> str:
+    """Nombre del nivel como se dibuja en el gráfico: -0.2 -> «-0,2», 1.0 -> «1»."""
+    return f"{x:g}".replace(".", ",")
+
+
+def at_level(zero: float, origin: float, x: float) -> float:
+    """Precio del nivel `x` de un fibo con el 0 en `zero` y el 1 en `origin` (0,5 = la entrada; negativos, más allá del 0)."""
+    return zero + x * (origin - zero)
+
+
+def fibo_levels(zero: float, origin: float, sl: float, tp: float, sign: float) -> dict[str, float]:
+    """Los niveles que se dibujan: el objetivo y el stop configurados, el 0, el 0,5 (la entrada) y el 1 (la estructura)."""
+    out = {level_name(tp): sign * at_level(zero, origin, tp), "0": sign * zero, "0,5": sign * (zero + origin) / 2, "1": sign * origin}
+    if sl != 1.0:
+        out[level_name(sl)] = sign * at_level(zero, origin, sl)
+    return out
+
+
+def rr_of(sl: float, tp: float) -> float:
+    return (0.5 - tp) / (sl - 0.5)
 
 
 @dataclass(frozen=True)

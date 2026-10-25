@@ -147,6 +147,7 @@ class Figure:
     state: str = ""          # "en curso", "entrada"
     label: str = ""
     day: str = ""            # día de la TBR (AAAA-MM-DD): con la zona identifica la sesión
+    target: str = ""         # nombre del nivel objetivo («-0,2»): el gráfico lo pinta en rojo
 
 
 class Pattern(ABC):

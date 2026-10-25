@@ -288,6 +288,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `PATTERN_CONTINUACION_TF` | `15m` | Timeframe del patrón Continuación (el gráfico, en ese timeframe o uno menor que lo divida). |
 | `PATTERN_CONTINUACION_SWING_BARS` | `1` | Velas a cada lado que definen un swing (pivote): 1 = patrón de tres velas. |
 | `PATTERN_REVERSION_TF` / `PATTERN_REVERSION_SWING_BARS` | `15m` / `1` | Timeframe y velas por lado del pivote del patrón Reversión. |
+| `PATTERN_STOP_LEVEL` / `PATTERN_TARGET_LEVEL` | `1` / `-0.2` | Niveles del fibo donde van el stop y el objetivo de Continuación y Reversión (entrada en el 0,5). El fibo del gráfico dibuja esos niveles (el objetivo en rojo). Con 1 y -0,2 el RR es 1:1,4: en el backtest 2018-2026 (8 mercados, con spread) da +0,16 R por operación frente a +0,08 R del -0,5 (RR 1:2); acortar el stop a 0,9 o 0,8 empeora el resultado. |
 | `PATTERN_ZONE_ORDER` | `ASIA, LONDON, NY_AM, NY_PM` | Ciclo de TBR en orden: cada patrón se busca hasta que empieza la TBR siguiente. NY PM solo marca el límite de NY Open. |
 | **CORTEX** — coordinador | | |
 | `CORTEX_ALLOW_NO_BIAS` | `false` | `true`: con No Bias también se da GO al patrón identificado. |

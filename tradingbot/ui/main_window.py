@@ -1187,7 +1187,7 @@ class MainWindow(QMainWindow):
         fibs = []
         for f in self._fibs:
             fib = {"x0": int(np.searchsorted(ts, f.x0_ts, "left")), "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
-                   "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction}
+                   "levels": f.levels, "label": f.label, "state": f.state, "direction": f.direction, "target": getattr(f, "target", "")}
             if f.state == "entrada":                            # el fibo lleva el GO / NO GO de su entrada: así se ve cuál se opera
                 pos = next((p for p in positions if p["label"] == f.label and p["direction"] == f.direction
                             and fib["x0"] <= p["x0"] <= fib["x1"]), None)

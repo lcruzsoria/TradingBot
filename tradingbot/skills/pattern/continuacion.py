@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ...timeframes import parse_timeframe
+from .fibo import at_level, fibo_levels, level_name, level_settings, rr_of
 from .trade import position_figure
 from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
@@ -44,15 +45,16 @@ class Continuacion(Pattern):
         self.swing_bars = int(get("CONTINUACION_SWING_BARS", DEFAULT_SWING_BARS))
         if self.swing_bars < 1:
             raise ValueError(f"PATTERN_CONTINUACION_SWING_BARS={self.swing_bars} debe ser 1 o más.")
+        self.sl, self.tp = level_settings(get)                  # PATTERN_STOP_LEVEL / PATTERN_TARGET_LEVEL
 
     def timeframe(self) -> str:
         return self.tf
 
     def detect(self, ctx: PatternContext) -> list[PatternHit]:
-        return analyze(ctx, self.swing_bars)[0]
+        return analyze(ctx, self.swing_bars, self.sl, self.tp)[0]
 
     def figures(self, ctx: PatternContext) -> list[Figure]:
-        return analyze(ctx, self.swing_bars)[1]
+        return analyze(ctx, self.swing_bars, self.sl, self.tp)[1]
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,7 @@ def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int) -> Leg:
     return Leg(zero, zero_idx, origin, origin_idx, act is not None, None, None)
 
 
-def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], list[Figure]]:
+def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -0.5) -> tuple[list[PatternHit], list[Figure]]:
     tbr = ctx.tbr
     start, end = ctx.first_bar, ctx.last_bar
     o, h, l, c, ts = ctx.open, ctx.high, ctx.low, ctx.close, ctx.ts
@@ -134,34 +136,35 @@ def analyze(ctx: PatternContext, swing_bars: int) -> tuple[list[PatternHit], lis
         return [], []
     zero, swing, entry = leg.zero, leg.origin, leg.entry
     half = (zero + swing) / 2
-    target = zero + (zero - swing) / 2                        # nivel -0,5: media vuelta del tramo más allá del 0
-    levels = {"-0,5": sign * target, "0": sign * zero, "0,5": sign * half, "1": sign * swing}
+    target = at_level(zero, swing, tp)                        # objetivo y stop en los niveles configurados
+    stop = at_level(zero, swing, sl)
+    levels = fibo_levels(zero, swing, sl, tp, sign)
     arrow = "▲" if up else "▼"
     label = f"{tbr.zone} {arrow}"
     x_end = int(ts[min(end, len(ts) - 1)]) + tf_sec
     if leg.breach is not None:                                # el fibo ya estaba formado: se anota (NO GO «I») y se dibuja hasta ahí
-        marks = {"stop": sign * swing, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half}
+        marks = {"stop": sign * stop, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half}
         return [hit(INVALIDATED, direction, leg.breach, sign * swing,
                     f"rotura con cuerpo del {side} en {_when(ctx, j)}; el retroceso perdió el swing low ({sign * swing:.5g}) antes de llegar "
                     f"al 0,5: patrón invalidado", marks)], \
             [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), int(ts[leg.breach]) + tf_sec, levels, "invalidada", label,
-                    tbr.day.isoformat())]
+                    tbr.day.isoformat(), target=level_name(tp))]
     if entry is not None:
         t, half = entry
         detail = (f"rotura con cuerpo del {side} en {_when(ctx, j)}, swing high (0) en {_when(ctx, leg.zero_idx)} y swing low (1) en "
                   f"{_when(ctx, leg.origin_idx)}; reversión al 0,5 ({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el "
-                  f"swing low y objetivo en el -0,5 (2R)")
+                  f"{level_name(sl)} y objetivo en el {level_name(tp)} (RR {rr_of(sl, tp):.2g})")
         found = hit(DETECTED, direction, t, sign * half, detail,
-                    {"stop": sign * swing, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half})
-        pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * swing, sign * target, label)
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "entrada", label, tbr.day.isoformat()), pos]
+                    {"stop": sign * stop, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half})
+        pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * stop, sign * target, label)
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
     if ctx.window_closed:                                     # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»
         x = min(max(end, 0), len(ts) - 1)
         return [hit(EXPIRED, direction, x, sign * half, f"rotura con cuerpo del {side} en {_when(ctx, j)} pero sin reversión al 0,5 "
                                                         f"antes de que {ctx.limit_verb} {ctx.next_zone} ({ctx.next_hours} NY)",
-                    {"stop": sign * swing, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half})], \
-            [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "vencida", label, tbr.day.isoformat())]
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "en curso", label, tbr.day.isoformat())]
+                    {"stop": sign * stop, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half})], \
+            [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "vencida", label, tbr.day.isoformat(), target=level_name(tp))]
+    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "en curso", label, tbr.day.isoformat(), target=level_name(tp))]
 
 
 def _when(ctx: PatternContext, i: int) -> str:
