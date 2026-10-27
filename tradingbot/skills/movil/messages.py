@@ -18,9 +18,14 @@ def _day(value) -> str:
     return value.strftime("%d/%m") if isinstance(value, date) else _e(value or "")
 
 
+def _strategy(title) -> str:
+    """Primera línea de cada aviso: qué estrategia lo origina (varias comparten la cuenta del perfil)."""
+    return f"<b>Estrategia:</b> {_e(title)}\n"
+
+
 def _where(order) -> str:
-    zone = f" · {_e(order.tbr_zone)} {_day(order.tbr_day)}" if order.tbr_zone else ""
-    return f"{_e(order.pattern)}{zone}"
+    """Zona TBR y día, si la estrategia los tiene (Calendario no): línea propia tras la cabecera, vacía si no hay."""
+    return f"{_e(order.tbr_zone)} {_day(order.tbr_day)}\n" if order.tbr_zone else ""
 
 
 def _levels(order) -> str:
@@ -37,25 +42,25 @@ def _footer(profile: str | None) -> str:
 
 
 def opened(order, profile: str | None = None) -> str:
-    return (f"🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> {_e(order.timeframe)}\n"
-            f"{_where(order)}\n{_levels(order)}\n"
+    return (f"{_strategy(order.pattern)}🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> "
+            f"{_e(order.timeframe)}\n{_where(order)}{_levels(order)}\n"
             f"Sesgo {_e(order.bias)} {order.score:+g}{_footer(profile)}")
 
 
 def closed(order, result, profile: str | None = None) -> str:
     icon, short = RESULT.get(result.result, ("•", result.result))
     peak = f" · máx. {result.max_r:+.2f} R" if result.max_r is not None else ""
-    return (f"{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b>"
-            f" {_e(order.timeframe)}\n{_where(order)}\n"
+    return (f"{_strategy(order.pattern)}{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} "
+            f"{_e(order.symbol)}</b> {_e(order.timeframe)}\n{_where(order)}"
             f"Entrada {fmt_price(order.price)} → salida {fmt_price(result.exit_price)}{peak}{_footer(profile)}")
 
 
 def decision(payload: dict, profile: str | None = None) -> str:
     hit, tbr, dec = payload["hit"], payload.get("tbr"), payload["decision"]
-    zone = f" · {_e(tbr.zone)}" if tbr is not None and getattr(tbr, "zone", "") else ""
+    zone = f"{_e(tbr.zone)}\n" if tbr is not None and getattr(tbr, "zone", "") else ""
     head = "✓ GO" if dec.allowed else "✕ NO GO"
-    return (f"<b>{head} {SIDE.get(hit.direction, hit.direction)} {_e(payload['symbol'])}</b> {_e(payload['timeframe'])}\n"
-            f"{_e(hit.title)}{zone}\n{_e(dec.reason)}{_footer(profile)}")
+    return (f"{_strategy(hit.title)}<b>{head} {SIDE.get(hit.direction, hit.direction)} {_e(payload['symbol'])}</b> "
+            f"{_e(payload['timeframe'])}\n{zone}{_e(dec.reason)}{_footer(profile)}")
 
 
 def started(profile: str | None = None) -> str:

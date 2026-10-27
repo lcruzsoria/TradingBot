@@ -84,7 +84,9 @@ def test_avisa_de_lo_que_abre_y_cierra_setup_en_directo_y_no_del_repaso(sent):
     texts = [t for _, _, t in sent]
     assert all(token == "t0k3n" and chat == "42" for token, chat, _ in sent)
     assert len(texts) == 3 and "en marcha" in texts[0]                                # aviso de arranque, abre y cierra
-    assert "Abre Corto EURUSD" in texts[1] and "Continuación · NY Open 23/10" in texts[1] and "Stop 1.09600" in texts[1]
+    assert texts[1].startswith("<b>Estrategia:</b> Continuación\n")                  # la estrategia, por delante de todo
+    assert "Abre Corto EURUSD" in texts[1] and "NY Open 23/10" in texts[1] and "Stop 1.09600" in texts[1]
+    assert texts[2].startswith("<b>Estrategia:</b> Continuación\n")
     assert "TP +2.00 R · Corto EURUSD" in texts[2] and "máx. +2.40 R" in texts[2] and "perfil puprime" in texts[2]
     assert skill.caption == "3 aviso(s)"
 
@@ -97,6 +99,17 @@ def test_el_cierre_de_una_abierta_antes_de_reiniciar_si_se_avisa(sent):
     assert len(sent) == 1 and "TP +2.00 R" in sent[0][2]
 
 
+def test_el_aviso_de_calendario_lleva_su_estrategia_y_no_zona_tbr():
+    from tradingbot.skills.cortex.order import build_calendar_order
+    from tradingbot.skills.movil import messages
+    signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 29171.5, "stop": 29025.64,
+              "target": 29463.22, "day": date(2026, 10, 26), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
+    bias = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=4.0)
+    text = messages.opened(build_calendar_order(signal, bias, "Calendario"), "puprime")
+    assert text.split("\n") == ["<b>Estrategia:</b> Calendario (largo a hora fija)", "🟡 <b>Abre Largo NAS100ft.s</b> 15m",
+                                "Entrada 29,171.50 · Stop 29,025.64 · Obj. 29,463.22", "Sesgo No Bias +4", "<i>perfil puprime</i>"]
+
+
 def test_go_y_nogo_solo_si_se_piden(sent):
     hit = SimpleNamespace(direction="long", title="Reversión", ts=1000)
     go = {"symbol": "EURUSD", "timeframe": "15m", "tbr": SimpleNamespace(zone="London"), "hit": hit,
@@ -107,7 +120,8 @@ def test_go_y_nogo_solo_si_se_piden(sent):
     assert sent == []                                                                  # por defecto, solo abre y cierra
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\nTELEGRAM_NOTIFY=go, nogo\n")
     settle(manager, bus, candles(), ("cortex.decision", go, "cortex"), ("cortex.decision", nogo, "cortex"))
-    assert [t.split("\n")[0] for _, _, t in sent] == ["<b>✓ GO Largo EURUSD</b> 15m", "<b>✕ NO GO Largo EURUSD</b> 15m"]
+    assert [t.split("\n")[:2] for _, _, t in sent] == [["<b>Estrategia:</b> Reversión", "<b>✓ GO Largo EURUSD</b> 15m"],
+                                                       ["<b>Estrategia:</b> Reversión", "<b>✕ NO GO Largo EURUSD</b> 15m"]]
 
 
 def test_sin_token_o_con_un_aviso_desconocido_la_skill_avisa_del_error(monkeypatch, tmp_path):
