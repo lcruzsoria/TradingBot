@@ -1332,7 +1332,7 @@ class MainWindow(QMainWindow):
         if o.tbr_zone:
             lines.append(f"TBR:      {o.tbr_zone} del {o.tbr_day:%d/%m/%Y} (High {fmt_price(o.tbr_high)}, Low {fmt_price(o.tbr_low)}, "
                          f"50 % {fmt_price(o.tbr_mid)})")
-        lines.append(f"Patrón:   {o.pattern}   Precio: {fmt_price(o.price)}")
+        lines.append(f"Patrón:   {o.pattern}{f' (caso {o.caso})' if getattr(o, 'caso', '') else ''}   Precio: {fmt_price(o.price)}")
         if o.stop is not None:
             lines.append(f"Stop:     {fmt_price(o.stop)}")
         if o.target is not None:

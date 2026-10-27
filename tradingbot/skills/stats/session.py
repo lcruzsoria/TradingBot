@@ -68,6 +68,7 @@ class Signal:
     reason: str = ""
     ts: int | None = None                # hora (servidor) de la vela del patrón
     zone: str = ""                       # TBR del patrón
+    variant: str = ""                    # caso del patrón (Continuación: «A. Ideal» / «B. Flexible»)
 
     @property
     def key(self) -> tuple | None:

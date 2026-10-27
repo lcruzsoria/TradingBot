@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from tradingbot.skills.setup.positions import Closed
 
 ORDER = Order("EURUSD", "15m", "short", "Continuación", "continuacion", "NY Open", date(2026, 10, 23), 1.1, 1.09, 1.095, 1.09500,
               1.09600, 1.09300, "Bearish", -3.0, "Short a favor del sesgo", None, 1000, 1000 + 24 * 3600)
-REPLAY = Order(*[*ORDER.__dict__.values()][:-2], 400, 400 + 24 * 3600)                   # una del repaso al arrancar
+REPLAY = replace(ORDER, entry_ts=400, close_ts=400 + 24 * 3600)                   # una del repaso al arrancar
 TP = Closed("objetivo", 1.093, 1900, 2.0, 0.18, None, 2.4, -0.3)
 
 

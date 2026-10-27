@@ -132,6 +132,7 @@ class PatternHit:
     levels: dict[str, float] = field(default_factory=dict)   # otros precios del patrón (stop, objetivo...) para mostrarlos
     ts: int = 0              # hora (servidor) de esa vela, para mostrarla aunque el gráfico tenga otro timeframe
     status: str = DETECTED   # detected / invalidated / annulled / expired
+    variant: str = ""        # caso del patrón (Continuación: «A. Ideal» o «B. Flexible»); vacío si el patrón no distingue casos
 
 
 @dataclass(frozen=True)

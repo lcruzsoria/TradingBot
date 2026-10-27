@@ -28,6 +28,7 @@ class Order:
     close_at: str | None = None    # cierre por tiempo, si la estrategia lo tiene (Calendario), para mostrarlo
     entry_ts: int | None = None    # hora de servidor de la vela de entrada y del cierre por tiempo: Setup sigue la posición
     close_ts: int | None = None
+    caso: str = ""                 # caso del patrón («A. Ideal» / «B. Flexible» en Continuación), para el diario del forwardtest
 
     @property
     def label(self) -> str:
@@ -49,7 +50,7 @@ def build_order(payload: dict, decision, bias_result) -> Order:
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
                  bias_result.bias.value, float(bias_result.score), decision.reason, "fin del día de trading",
-                 hit.ts or None, close_time(hit.ts, payload.get("session_close")))
+                 hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "")
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:

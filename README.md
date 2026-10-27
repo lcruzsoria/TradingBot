@@ -74,13 +74,18 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
    solo con la mecha (cerrando dentro), el lado es de Reversión y la Continuación no se da.
 2. **Swing points tras la rotura** (`PATTERN_CONTINUACION_SWING_BARS` velas de cada lado, 1 al inicio: el patrón de tres velas):
    el **0** es un swing high y el **1** el swing low que viene después de él (en la rotura bajista, al revés). Mientras no hay swing
-   low, un swing high más alto sustituye al 0; si el precio pierde el 1 antes de superar el 0, se busca otro swing low.
+   low, un swing high más alto sustituye al 0. El 1 es el stop: **sin ese swing formado no hay trade**, y mientras no se forme se
+   sigue buscando más adelante en el precio (no se dibuja ni se opera nada).
 3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): del swing high (0) al swing low (1), con el **0,5**
-   como punto medio y el **-0,5** (en rojo) media vuelta del tramo más allá del 0. El tramo queda fijo. Se **activa** cuando el
-   precio supera el 0; hasta entonces solo se dibuja.
-4. **Entrada:** ya activado, la primera vela que retrocede hasta el 0,5 (su mínimo lo toca).
-   **Stop** en el swing low (el 1) y **objetivo** en el -0,5: con entrada en el 0,5 son **2R**. Si pierde el 1 antes de entrar, el
-   patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5, vence y el Registro lo indica.
+   como punto medio. El tramo queda fijo y dibuja el stop y el objetivo configurados (`PATTERN_STOP_LEVEL` / `PATTERN_TARGET_LEVEL`).
+4. **Entrada:** la primera vela **posterior a la que confirma el swing del 1** que retrocede hasta el 0,5 (su mínimo lo toca) y
+   abre por encima de él (viene del lado del 0; en la rotura bajista, al revés). No hace falta que el precio rompa antes el 0.
+   Si pierde el 1 antes de entrar, el patrón se invalida (NO GO «I»); si el plazo de la TBR termina sin retroceso al 0,5, vence
+   (NO GO «T»).
+5. **Dos casos, los dos disparan a Cortex:** **A. Ideal** si el swing que marca el stop está **dentro del rango de la TBR** (el
+   precio vuelve al rango tras la rotura); **B. Flexible** si queda fuera (el primer swing tras la rotura). La orden, el diario del
+   forwardtest y el Registro anotan de qué caso se trata, el diario de operaciones lo muestra junto al patrón («Continuación · A. Ideal»)
+   y la ventana Forwardtest suma un libro «Continuación por caso» para compararlos.
 
 Solo se trata el fibonacci en curso; stop y objetivo viajan en la orden que Cortex le pasa a Setup (en simulación).
 

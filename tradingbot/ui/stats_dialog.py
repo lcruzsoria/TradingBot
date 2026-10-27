@@ -313,6 +313,7 @@ class StatsDialog(QDialog):
 
         self.by_pattern = Book("Por patrón", "el patrón que dio la entrada", ("Patrón",) + GROUP_HEADERS, highlights=True)
         self.by_side = Book("Por lado", "largos contra cortos", ("Lado",) + GROUP_HEADERS)
+        self.by_case = Book("Continuación por caso", "A. Ideal: el swing del stop está dentro de la TBR · B. Flexible: fuera", ("Caso",) + GROUP_HEADERS)
         self.by_session = Book("Por sesión", "la sesión a la hora de entrada (NY)", ("Sesión",) + GROUP_HEADERS)
         self.by_symbol = Book("Por mercado", "todos los mercados de la lista · pincha uno para verlo", ("Mercado",) + GROUP_HEADERS,
                               on_name=self.market_clicked.emit)
@@ -320,7 +321,7 @@ class StatsDialog(QDialog):
         self.by_reason = Book("Señales de Cortex", "por qué dio GO o NO GO", ("Motivo", "Veredicto", "Señales", "% del total"))
         self.signals_by_pattern = Book("Señales por patrón", "cuántas pasan el filtro de Cortex",
                                        ("Patrón", "Señales", "GO", "NO GO", "% GO"))
-        for book in (self.by_pattern, self.by_side, self.by_session, self.by_symbol, self.by_bias, self.by_reason,
+        for book in (self.by_pattern, self.by_case, self.by_side, self.by_session, self.by_symbol, self.by_bias, self.by_reason,
                      self.signals_by_pattern):
             lay.addWidget(book)
 
@@ -467,6 +468,9 @@ class StatsDialog(QDialog):
 
         self._paint_curve(s.equity)
         self._fill_patterns(s)
+        cont = s.only(lambda t: t.order.pattern_key == "continuacion")
+        cases = ("A. Ideal", "B. Flexible") + (("Sin caso",) if any(not getattr(t.order, "caso", "") for t in cont.trades) else ())
+        self._fill(self.by_case, cont.groups(lambda t: getattr(t.order, "caso", "") or "Sin caso", cases))
         self._fill(self.by_side, s.groups(lambda t: t.order.direction, ("long", "short")),
                    lambda n: _colored("▲ LARGO", theme.BULL) if n == "long" else _colored("▼ CORTO", theme.BEAR))
         self._fill(self.by_session, s.groups(self._session, SESSIONS))
@@ -590,7 +594,7 @@ class StatsDialog(QDialog):
             market.setData(Qt.ItemDataRole.UserRole, o.symbol)
             market.setToolTip(f"Ver {o.symbol} en el gráfico")
             self._cell(self.history, i, 2, "Largo" if o.direction == "long" else "Corto")
-            self._cell(self.history, i, 3, o.pattern)
+            self._cell(self.history, i, 3, f"{o.pattern} · {o.caso}" if getattr(o, "caso", "") else o.pattern)
             session = self._session(t)
             self._cell(self.history, i, 4, session, SESSION_COLORS.get(session))
             if t.closed:

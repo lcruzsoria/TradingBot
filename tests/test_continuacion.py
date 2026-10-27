@@ -69,18 +69,29 @@ def test_el_fibo_se_dibuja_con_los_dos_swing_points_y_no_hay_entrada_hasta_que_r
     assert analyze(ctx_for(ROWS, last_bar=8), 1) == ([], [])                                              # sin rotura: nada
 
 
-def test_no_hay_entrada_si_el_precio_no_supera_el_0_aunque_toque_el_05():
-    rows = ROWS[:14] + [(108, 110, 106, 107)]                              # toca el 0,5 (107) pero su máximo no supera el 0 (111)
+def test_entra_en_el_05_sin_necesidad_de_superar_antes_el_0():
+    rows = ROWS[:14] + [(108, 110, 106, 107)]                              # toca el 0,5 (107) sin que su máximo supere el 0 (111)
     hits, figs = analyze(ctx_for(rows), 1)
-    assert hits == [] and figs[0].state == "en curso"
+    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 14, 107.0)] and figs[0].state == "entrada"
 
 
-def test_si_pierde_el_1_antes_de_superar_el_0_se_busca_otro_swing_low():
-    rows = ROWS[:14] + [(108, 109, 101, 102), (102, 105, 102, 104), (104, 114, 103, 113), (113, 114, 105, 106)]
-    # 14: pierde el 103 (mínimo 101); 15: confirma el swing low 101; 16: supera el 0; 17: retrocede al 0,5 de 111 y 101 (106)
+def test_sin_el_swing_del_1_formado_no_hay_trade():
+    assert analyze(ctx_for(ROWS[:13]), 1) == ([], [])                      # el swing low (12) aún no está confirmado: no hay 1, no hay stop
+    confirma = ROWS[:13] + [(109, 110, 106, 108)]                          # 13: confirma el swing low y llega al 0,5, pero esa vela no vale
+    assert analyze(ctx_for(confirma), 1)[0] == []
+    siguiente = confirma + [(108, 110, 106.5, 109)]                        # 14: la primera posterior que retrocede al 0,5 (abre sobre él)
+    assert [(h.status, h.x) for h in analyze(ctx_for(siguiente), 1)[0]] == [(DETECTED, 14)]
+
+
+def test_perder_el_1_antes_de_la_entrada_invalida_el_patron():
+    rows = ROWS[:14] + [(108, 109, 101, 102)]                              # 14: pierde el 103 (mínimo 101) sin haber entrado
     hits, figs = analyze(ctx_for(rows), 1)
-    assert figs[0].levels == {"-0,5": 116.0, "0": 111.0, "0,5": 106.0, "1": 101.0}
-    assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 17, 106.0)]
+    assert [(h.status, h.x) for h in hits] == [(INVALIDATED, 14)] and [f.state for f in figs] == ["invalidada"]
+
+
+def test_la_entrada_no_cruza_el_nivel_si_abre_por_debajo_del_05():
+    rows = ROWS[:14] + [(105, 110, 104, 108)]                              # 14 abre en 105, ya por debajo del 0,5 (107): no es un retroceso
+    assert analyze(ctx_for(rows), 1)[0] == []
 
 
 def test_un_swing_high_mas_alto_antes_del_swing_low_sustituye_al_0():
@@ -316,3 +327,33 @@ def test_el_grafico_dibuja_las_posiciones_como_tradingview_y_el_boton_las_apaga(
     assert win.chart.position_count == 1
     win._on_candles({"df": df, "symbol": "GBPUSD", "timeframe": "5m", "seconds": 0.1})                    # otro activo: se olvidan
     assert win.chart.position_count == 0
+
+
+def test_el_caso_a_ideal_y_el_b_flexible_disparan_y_se_identifican():
+    ideal = analyze(ctx_for(ROWS[:14] + [(108, 110, 106, 107)]), 1)[0][0]                     # el swing low del stop (103) está dentro de la TBR 95-105
+    assert ideal.status == DETECTED and ideal.variant == "A. Ideal" and "Caso A. Ideal" in ideal.detail
+    flexible_rows = ROWS[:11] + [(109, 110.5, 107.2, 108), (108, 108.5, 106.2, 107.5), (107.5, 111, 107.2, 110), (110, 111, 108.2, 109)]
+    # 12: swing low en 106,2 (por encima del High de la TBR: fuera del rango); 13: lo confirma; 14: retrocede al 0,5 (108,6)
+    flexible = analyze(ctx_for(flexible_rows), 1)[0][0]
+    assert flexible.status == DETECTED and flexible.variant == "B. Flexible" and "Caso B. Flexible" in flexible.detail
+
+
+def test_el_caso_viaja_a_la_orden_al_diario_y_a_la_senal(tmp_path):
+    from datetime import date
+    from tradingbot.skills.cortex.order import build_order
+    from tradingbot.skills.cortex.validation import Decision
+    from tradingbot.skills.stats.journal import Journal
+    from tradingbot.skills.setup.positions import Closed
+    from types import SimpleNamespace
+    from tradingbot.skills.pattern.patterns import PatternHit
+    hit = PatternHit("continuacion", "Continuación", "long", 1, 100.0, "d", {"stop": 95.0, "target": 110.0}, 1_000, DETECTED, "B. Flexible")
+    payload = {"symbol": "EURUSD", "timeframe": "15m", "hit": hit, "tbr": TBR}
+    order = build_order(payload, Decision(True, "ok"), SimpleNamespace(bias=SimpleNamespace(value="Bullish"), score=4.0))
+    assert order.caso == "B. Flexible"
+    j = Journal(tmp_path)
+    j.opened(order)
+    j.closed(order, Closed("objetivo", 110.0, 2_000, 2.0, 1.0))
+    back = Journal(tmp_path).load_recent().trades[0].order
+    assert back.caso == "B. Flexible"                                                       # sobrevive al diario
+    from tradingbot.skills.stats.skill import _signal
+    assert _signal({"decision": Decision(True, "ok"), "hit": hit, "tbr": TBR, "symbol": "EURUSD", "timeframe": "15m"}).variant == "B. Flexible"

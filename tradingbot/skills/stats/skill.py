@@ -131,4 +131,4 @@ def _signal(p: dict) -> Signal:
     day = getattr(tbr, "day", None)
     return Signal(p["decision"].allowed, p.get("symbol", ""), p.get("timeframe", ""), getattr(hit, "title", ""),
                   getattr(hit, "direction", ""), getattr(p["decision"], "reason", ""), getattr(hit, "ts", None) or None,
-                  f"{zone} {day:%d/%m}" if zone and day else zone)
+                  f"{zone} {day:%d/%m}" if zone and day else zone, getattr(hit, "variant", "") or "")
