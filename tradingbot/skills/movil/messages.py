@@ -101,7 +101,7 @@ def today(s: dict) -> str:
         return "<b>Hoy</b>\nAún no ha cerrado ninguna."
     head = (f"<b>Hoy</b> {_r(t['r'])}\n{t['count']} cerrada(s): {t['TP']} TP · {t['SL']} SL · {t['BE']} BE"
             + (f" · {t['T']} T" if t["T"] else ""))
-    rows = [c for c in s["closed"] if c["day"] == t["day"]]
+    rows = [c for c in s["closed"] if c["closed_day"] == t["day"]]
     icon = {short: ico for ico, short in RESULT.values()}
     lines = [f"{icon.get(c['result'], '•')} {_e(c['result'])} {_r(c['r'])} · {_e(c['side'])} {_e(c['symbol'])} · {_e(c['pattern'])}"
              for c in rows]

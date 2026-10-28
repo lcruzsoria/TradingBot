@@ -197,6 +197,27 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     assert skill.server is None
 
 
+def test_hoy_cuenta_por_dia_de_cierre_y_no_por_el_de_la_tbr(tmp_path):
+    """Una operación con la TBR Asia de ayer que cierra hoy es de hoy (el fallo: «Hoy» salía vacío con dos TP notificados)."""
+    import json
+    from datetime import datetime
+    from tradingbot.skills.movil import messages, panel
+    from tradingbot.skills.setup import store
+    data = tmp_path / "perfil"
+    (data / "forwardtest").mkdir(parents=True)
+    now = datetime(2026, 10, 28, 3, 50, tzinfo=panel.NY)                                # 28/10 por la mañana en Nueva York
+    ayer = {**store.order_to_json(ORDER), "tbr_day": "2026-10-27"}                      # TBR «Asia 27/10»
+    viejo = {**store.order_to_json(ORDER), "tbr_day": "2026-10-20", "entry_ts": 5}      # cerró otro día
+    lines = [{"t": "close", "at": "2026-10-28T08:59:00", "order": ayer, "closed": TP.__dict__},
+             {"t": "close", "at": "2026-10-27T09:00:00", "order": viejo, "closed": TP.__dict__}]
+    (data / "forwardtest" / "2026-10.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    state = panel.PanelState({"app": {"data_dir": str(data), "profile_name": "puprime"}}, now=lambda: now)
+    snap = state.snapshot()
+    assert snap["today"]["count"] == 1 and snap["today"]["TP"] == 1 and snap["today"]["r"] == 2.0
+    text = messages.today(snap)
+    assert text.startswith("<b>Hoy</b> +2.00 R") and text.count("TP +2.00 R") == 1 and "Corto EURUSD" in text
+
+
 def test_el_panel_no_se_abre_a_otros_equipos_sin_clave(monkeypatch, tmp_path):
     monkeypatch.delenv("PANEL_TOKEN", raising=False)
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_HOST=0.0.0.0\nPANEL_PORT=0\n", {"env_file": str(tmp_path / "x.env")})

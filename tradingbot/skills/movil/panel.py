@@ -43,6 +43,15 @@ def _day(value) -> str:
     return value.isoformat() if isinstance(value, date) else str(value or "")
 
 
+def _closed_day(at, fallback: str) -> str:
+    """Día de Nueva York en que se cerró la operación: el diario anota `at` con la hora local de este equipo (sin zona).
+    Es el día que cuenta para «hoy»; el de la TBR (`day`) puede ser anterior (una zona Asia de ayer cierra hoy)."""
+    try:
+        return datetime.fromisoformat(str(at)).astimezone(NY).date().isoformat()
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _r_now(order, price: float | None) -> float | None:
     if price is None or order.stop is None:
         return None
@@ -108,7 +117,7 @@ class PanelState:
                           if virtual.started else None)
         closed = self._closed()
         today = self._now().date().isoformat()
-        day = [c for c in closed if c["day"] == today]
+        day = [c for c in closed if c["closed_day"] == today]
         out["today"] = {"day": today, "count": len(day), "r": round(sum(c["r"] for c in day), 2),
                         **{k: sum(1 for c in day if c["result"] == k) for k in ("TP", "SL", "BE", "T")}}
         out["closed"] = closed[:MAX_CLOSED]
@@ -141,12 +150,13 @@ class PanelState:
                     rows.append({"symbol": o["symbol"], "timeframe": o.get("timeframe", ""),
                                  "side": SIDE.get(o["direction"], o["direction"]), "pattern": o.get("pattern", ""),
                                  "zone": o.get("tbr_zone", ""), "day": _day(o.get("tbr_day")),
+                                 "closed_day": _closed_day(rec.get("at"), _day(o.get("tbr_day"))),
                                  "result": RESULT.get(c["result"], c["result"]), "r": round(float(c["r"]), 2),
                                  "max_r": None if c.get("max_r") is None else round(float(c["max_r"]), 2),
                                  "exit_ts": int(c.get("exit_ts") or 0)})
                 except (ValueError, KeyError, TypeError):
                     continue
-        rows.sort(key=lambda r: (r["day"], r["exit_ts"]), reverse=True)
+        rows.sort(key=lambda r: (r["closed_day"], r["exit_ts"]), reverse=True)
         return rows
 
 
