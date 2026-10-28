@@ -129,8 +129,9 @@ def status(s: dict) -> str:
     return "\n\n".join([_header(s), today(s), open_positions(s), bias(s)])
 
 
-def help_text() -> str:
-    return "<b>Comandos</b>\n" + "\n".join(f"/{c} · {_e(d)}" for c, d in COMMANDS)
+def help_text(extra: tuple = ()) -> str:
+    """La lista de comandos; `extra` son los de cada cuenta (/puprime, /metaquotes...), que dependen de los perfiles."""
+    return "<b>Comandos</b>\n" + "\n".join(f"/{c} · {_e(d)}" for c, d in (*COMMANDS, *extra))
 
 
 def answer(command: str, s: dict) -> str | None:

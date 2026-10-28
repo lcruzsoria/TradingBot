@@ -15,6 +15,7 @@ GREEN, RED, GRAY, YELLOW = "#2ECC71", "#EF5350", "#9E9E9E", "#F2C94C"
 RESULT_COLOR = {"TP": GREEN, "SL": RED, "BE": GRAY, "T": MUTED}
 BIAS_COLOR = {"Bullish": GREEN, "Bearish": RED}
 MAX_CLOSED = 8
+MAX_OPERATIONS = 14                                          # cierres de la tarjeta del forwardtest de una cuenta
 
 
 def _r(value) -> str:
@@ -89,21 +90,21 @@ class _Canvas:
         return bytes(data)
 
 
-def render(s: dict) -> bytes:
-    """El PNG del panel a partir de la foto que da `PanelState.snapshot()`."""
+def _need_qt() -> None:
     if QGuiApplication.instance() is None:                  # Qt cierra el proceso si se dibuja texto sin aplicación
         raise RuntimeError("la imagen del panel necesita la aplicación de Qt en marcha")
-    c = _Canvas()
-    inner = WIDTH - 2 * PAD
 
-    # -- cabecera ---------------------------------------------------------------------------------------
-    w = c.text(PAD, c.y + 24, "TradingBot", TEXT, 28, True)
+
+def _header(c: _Canvas, s: dict, title: str = "TradingBot") -> None:
+    w = c.text(PAD, c.y + 24, title, TEXT, 28, True)
     if s.get("profile"):
         c.text(PAD + w + 12, c.y + 24, f"· {s['profile']}", MUTED, 19)
     c.text(WIDTH - PAD, c.y + 24, s["updated"], MUTED, 16, right=True)
     c.y += 46
 
-    # -- tres cifras ------------------------------------------------------------------------------------
+
+def _figures(c: _Canvas, s: dict, inner: float) -> None:
+    """Tres cifras: resultado de hoy, abiertas y saldo."""
     t = s["today"]
     virtual, broker = s.get("virtual"), s.get("broker")
     if virtual:
@@ -122,7 +123,8 @@ def render(s: dict) -> bytes:
         c.text(x + 16, c.y + 64, value, color, 26, True, width=bw - 32)
     c.y += 82
 
-    # -- abiertas ---------------------------------------------------------------------------------------
+
+def _open(c: _Canvas, s: dict, inner: float) -> None:
     c.label("Abiertas")
     if not s["open"]:
         c.text(PAD, c.y + 18, "Ninguna operación abierta.", MUTED, 17)
@@ -144,7 +146,9 @@ def render(s: dict) -> bytes:
             c.text(WIDTH - PAD - 18, c.y + 112, f"ahora {fmt_price(o['price'])}", MUTED, 15, right=True)
         c.y += h + 10
 
-    # -- hoy y últimos cierres --------------------------------------------------------------------------
+
+def _today(c: _Canvas, s: dict) -> None:
+    t = s["today"]
     c.label("Hoy")
     if t["count"]:
         x = PAD
@@ -157,50 +161,79 @@ def render(s: dict) -> bytes:
         c.text(PAD, c.y + 18, "Aún no ha cerrado ninguna.", MUTED, 17)
     c.y += 34
 
+
+def _closed(c: _Canvas, s: dict, inner: float, limit: int) -> None:
     c.label("Últimos cierres")
-    rows = s["closed"][:MAX_CLOSED]
+    rows = s["closed"][:limit]
     if not rows:
         c.text(PAD, c.y + 18, "Sin cierres este mes.", MUTED, 17)
         c.y += 34
-    else:
-        row_h = 62
-        c.box(PAD, c.y, inner, row_h * len(rows) + 8)
-        for i, r in enumerate(rows):
-            y = c.y + 4 + i * row_h
-            if i:
-                c.p.setPen(QPen(QColor(LINE), 1))
-                c.p.drawLine(PAD + 16, int(y), WIDTH - PAD - 16, int(y))
-            c.text(PAD + 20, y + 26, f"{r['side']} {r['symbol']}", TEXT, 18, True, width=inner - 200)
-            day = f"{r['day'][8:10]}/{r['day'][5:7]}" if len(r["day"]) == 10 else r["day"]
-            detail = f"{r['pattern']}" + (f" · {r['zone']}" if r["zone"] else "") + f" · {day}"
-            if r.get("max_r") is not None:
-                detail += f" · máx. {_r(r['max_r'])}"
-            c.text(PAD + 20, y + 48, detail, MUTED, 14, width=inner - 200)
-            c.chip(WIDTH - PAD - 18, y + 22, r["result"], RESULT_COLOR.get(r["result"], MUTED))
-            c.text(WIDTH - PAD - 18, y + 52, _r(r["r"]), _tone(r["r"]), 15, right=True)
-        c.y += row_h * len(rows) + 8
+        return
+    row_h = 62
+    c.box(PAD, c.y, inner, row_h * len(rows) + 8)
+    for i, r in enumerate(rows):
+        y = c.y + 4 + i * row_h
+        if i:
+            c.p.setPen(QPen(QColor(LINE), 1))
+            c.p.drawLine(PAD + 16, int(y), WIDTH - PAD - 16, int(y))
+        c.text(PAD + 20, y + 26, f"{r['side']} {r['symbol']}", TEXT, 18, True, width=inner - 200)
+        day = f"{r['day'][8:10]}/{r['day'][5:7]}" if len(r["day"]) == 10 else r["day"]
+        detail = f"{r['pattern']}" + (f" · {r['zone']}" if r["zone"] else "") + f" · {day}"
+        if r.get("max_r") is not None:
+            detail += f" · máx. {_r(r['max_r'])}"
+        c.text(PAD + 20, y + 48, detail, MUTED, 14, width=inner - 200)
+        c.chip(WIDTH - PAD - 18, y + 22, r["result"], RESULT_COLOR.get(r["result"], MUTED))
+        c.text(WIDTH - PAD - 18, y + 52, _r(r["r"]), _tone(r["r"]), 15, right=True)
+    c.y += row_h * len(rows) + 8
 
-    # -- sesgo ------------------------------------------------------------------------------------------
+
+def _bias(c: _Canvas, s: dict) -> None:
     c.label("Sesgo")
     if not s["bias"]:
         c.text(PAD, c.y + 18, "Esperando al sesgo…", MUTED, 17)
         c.y += 34
-    else:
-        x, row_y = PAD, c.y
-        for b in s["bias"]:
-            name = b["symbol"]
-            state = b["bias"] + (" · lateral" if b["lateral"] else "")
-            score = f"{b['score']:+g}"
-            fm = QFontMetrics(c.font(16, True))
-            fs = QFontMetrics(c.font(16))
-            width = fm.horizontalAdvance(name) + fs.horizontalAdvance(f"  {state}  {score}") + 28
-            if x + width > WIDTH - PAD:
-                x, row_y = PAD, row_y + 46
-            c.box(x, row_y, width, 36, radius=9)
-            tx = x + 14
-            tx += c.text(tx, row_y + 25, name, TEXT, 16, True)
-            tx += c.text(tx, row_y + 25, f"  {state}", BIAS_COLOR.get(b["bias"], MUTED), 16)
-            c.text(tx, row_y + 25, f"  {score}", MUTED, 16)
-            x += width + 8
-        c.y = row_y + 44
+        return
+    x, row_y = PAD, c.y
+    for b in s["bias"]:
+        name = b["symbol"]
+        state = b["bias"] + (" · lateral" if b["lateral"] else "")
+        score = f"{b['score']:+g}"
+        fm = QFontMetrics(c.font(16, True))
+        fs = QFontMetrics(c.font(16))
+        width = fm.horizontalAdvance(name) + fs.horizontalAdvance(f"  {state}  {score}") + 28
+        if x + width > WIDTH - PAD:
+            x, row_y = PAD, row_y + 46
+        c.box(x, row_y, width, 36, radius=9)
+        tx = x + 14
+        tx += c.text(tx, row_y + 25, name, TEXT, 16, True)
+        tx += c.text(tx, row_y + 25, f"  {state}", BIAS_COLOR.get(b["bias"], MUTED), 16)
+        c.text(tx, row_y + 25, f"  {score}", MUTED, 16)
+        x += width + 8
+    c.y = row_y + 44
+
+
+def render(s: dict) -> bytes:
+    """El PNG del panel a partir de la foto que da `PanelState.snapshot()`."""
+    _need_qt()
+    c = _Canvas()
+    inner = WIDTH - 2 * PAD
+    _header(c, s)
+    _figures(c, s, inner)
+    _open(c, s, inner)
+    _today(c, s)
+    _closed(c, s, inner, MAX_CLOSED)
+    _bias(c, s)
+    return c.png()
+
+
+def render_operations(s: dict) -> bytes:
+    """El PNG del forwardtest de una cuenta: solo las operaciones (abiertas, resultado de hoy y últimos cierres), sin cifras
+    de saldo ni sesgo. Es lo que manda el comando de cada perfil (/puprime, /metaquotes...)."""
+    _need_qt()
+    c = _Canvas()
+    inner = WIDTH - 2 * PAD
+    _header(c, s, "Forwardtest")
+    _open(c, s, inner)
+    _today(c, s)
+    _closed(c, s, inner, MAX_OPERATIONS)
     return c.png()

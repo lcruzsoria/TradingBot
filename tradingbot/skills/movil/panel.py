@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from ...config import profile_dir
 from ..setup import account, store
 from ..stats import journal
 
@@ -104,18 +105,25 @@ class PanelState:
                                        "go": bool(dec.allowed), "reason": dec.reason})
 
     # -- la foto para el móvil ---------------------------------------------------------------------
-    def snapshot(self) -> dict:
+    def snapshot(self, profile: str | None = None) -> dict:
+        """La foto del panel. Con `profile` (otra cuenta, p. ej. «metaquotes») lee de su carpeta las abiertas, la cuenta
+        virtual y el diario del forwardtest; el sesgo, las decisiones y la cuenta del broker son solo los de esta ejecución."""
         app = self.app_cfg.get("app") or {}
+        cfg = self.app_cfg
+        other = bool(profile) and profile.lower() != (app.get("profile_name") or "").lower()
+        if other:
+            cfg = {**self.app_cfg, "app": {**app, "data_dir": str(profile_dir(profile)), "profile_name": profile.lower()}}
         with self._lock:
             prices = dict(self.prices)
-            out = {"profile": app.get("profile_name") or "", "updated": self._now().strftime("%d/%m %H:%M:%S"),
-                   "broker": self.account, "bias": sorted(self.bias.values(), key=lambda b: b["symbol"]),
-                   "decisions": list(self.decisions)}
-        out["open"] = [self._open(o, prices.get(o.symbol)) for o in store.load(store.file_for(self.app_cfg))]
-        virtual = account.VirtualAccount(account.file_for(self.app_cfg))
+            out = {"profile": (cfg.get("app") or {}).get("profile_name") or "", "updated": self._now().strftime("%d/%m %H:%M:%S"),
+                   "broker": None if other else self.account,
+                   "bias": [] if other else sorted(self.bias.values(), key=lambda b: b["symbol"]),
+                   "decisions": [] if other else list(self.decisions)}
+        out["open"] = [self._open(o, prices.get(o.symbol)) for o in store.load(store.file_for(cfg))]
+        virtual = account.VirtualAccount(account.file_for(cfg))
         out["virtual"] = ({"balance": round(virtual.balance, 2), "currency": virtual.currency, "since": virtual.since}
                           if virtual.started else None)
-        closed = self._closed()
+        closed = self._closed(cfg)
         today = self._now().date().isoformat()
         day = [c for c in closed if c["closed_day"] == today]
         out["today"] = {"day": today, "count": len(day), "r": round(sum(c["r"] for c in day), 2),
@@ -130,9 +138,9 @@ class PanelState:
                 "stop": order.stop, "target": order.target, "price": price, "r_now": _r_now(order, price),
                 "bias": order.bias, "score": order.score}
 
-    def _closed(self) -> list[dict]:
+    def _closed(self, cfg: dict | None = None) -> list[dict]:
         """Los cierres del diario del forwardtest de este mes y el anterior, del más reciente al más antiguo."""
-        folder = journal.folder_for(self.app_cfg, self.stats_dir)
+        folder = journal.folder_for(cfg or self.app_cfg, self.stats_dir)
         month = journal.month_of(self._now())
         rows = []
         for m in (journal.previous_month(month), month):
