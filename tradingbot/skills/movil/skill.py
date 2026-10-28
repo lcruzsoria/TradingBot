@@ -3,6 +3,7 @@ un panel web de solo lectura (abiertas, cierres, sesgo y decisiones) que se abre
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 
 from ...core import Event, Skill, register_skill
@@ -16,6 +17,9 @@ NOTIFY_ALL = ("abre", "cierra", "go", "nogo")
 DEFAULT_NOTIFY = ("abre", "cierra")
 DEFAULT_PORT = 8765
 CAPTURE_TIMEOUT = 15.0                                       # segundos que se espera a la ventana
+
+
+COMMAND_NAME = re.compile(r"^[a-z0-9_]{1,32}$")                  # lo que Telegram admite como nombre de comando
 
 
 def _key(order) -> tuple:
@@ -76,6 +80,7 @@ class MovilSkill(Skill):
             raise ValueError(self.error)
         self.notify = set(notify)
         self.commands = settings.get_bool("COMMANDS", True)
+        self.accounts = self._accounts()                     # un comando por cuenta: /puprime, /metaquotes...
         self._offset: int | None = None                      # siguiente mensaje de Telegram por leer
         self._capture_asked: float | None = None             # cuándo se pidió a la ventana una captura (/captura)
         self.token, self.chat = telegram.credentials(self.env_file)
@@ -89,6 +94,19 @@ class MovilSkill(Skill):
         if settings.get_bool("NOTIFY_START", True):
             self._send(messages.started(self.profile))
 
+    def _accounts(self) -> dict[str, str]:
+        """Los perfiles del selector (cuentas) con nombre válido de comando de Telegram: {nombre: texto del menú}."""
+        taken = {c for c, _ in messages.COMMANDS} | {"start", "help"}
+        found = {}
+        for name, display in (self.services.app_cfg.get("app") or {}).get("profiles") or []:
+            name = str(name).lower()
+            if COMMAND_NAME.match(name) and name not in taken:
+                found[name] = f"Forwardtest de {display}"
+        return found
+
+    def _command_menu(self) -> list[tuple[str, str]]:
+        return [*messages.COMMANDS, *self.accounts.items()]
+
     def _send(self, text: str) -> None:
         telegram.send_message(self.token, self.chat, text)
         self.sent += 1
@@ -100,7 +118,7 @@ class MovilSkill(Skill):
         try:
             old = telegram.get_updates(self.token, -1)
             self._offset = old[-1]["update_id"] + 1 if old else 0
-            telegram.set_commands(self.token, list(messages.COMMANDS))
+            telegram.set_commands(self.token, self._command_menu())
         except telegram.TelegramError:
             self._offset = None                              # sin red al arrancar: se reintenta en el primer tick
 
@@ -130,16 +148,22 @@ class MovilSkill(Skill):
         if command == "panel":
             self._photo(card.render(self.board.snapshot()))
             return
+        if command in self.accounts:                         # el forwardtest de esa cuenta: solo sus operaciones
+            snap = self.board.snapshot(command)
+            self._photo(card.render_operations(snap), f"<b>Forwardtest · {command}</b> <i>{snap['updated']}</i>")
+            return
         if command == "captura":                             # la ventana la dibuja la interfaz (hilo de Qt): se le pide
             self._capture_asked = time.monotonic()
             self.publish("movil.capture.request", {"request_id": "tg"})
             return
-        reply = messages.answer(command, self.board.snapshot())
-        self._send(reply if reply is not None else messages.help_text())
+        reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot())
+        self._send(reply if reply is not None else messages.help_text(tuple(self.accounts.items())))
 
-    def _photo(self, png: bytes) -> None:
-        stamp = self.board.snapshot()["updated"]
-        telegram.send_photo(self.token, self.chat, png, f"<i>{stamp}{' · ' + self.profile if self.profile else ''}</i>")
+    def _photo(self, png: bytes, caption: str | None = None) -> None:
+        if caption is None:
+            stamp = self.board.snapshot()["updated"]
+            caption = f"<i>{stamp}{' · ' + self.profile if self.profile else ''}</i>"
+        telegram.send_photo(self.token, self.chat, png, caption)
         self.sent += 1
         self._caption()
 

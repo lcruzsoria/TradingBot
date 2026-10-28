@@ -198,6 +198,27 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     assert skill.server is None
 
 
+def test_hoy_cuenta_por_dia_de_cierre_y_no_por_el_de_la_tbr(tmp_path):
+    """Una operación con la TBR Asia de ayer que cierra hoy es de hoy (el fallo: «Hoy» salía vacío con dos TP notificados)."""
+    import json
+    from datetime import datetime
+    from tradingbot.skills.movil import messages, panel
+    from tradingbot.skills.setup import store
+    data = tmp_path / "perfil"
+    (data / "forwardtest").mkdir(parents=True)
+    now = datetime(2026, 10, 28, 3, 50, tzinfo=panel.NY)                                # 28/10 por la mañana en Nueva York
+    ayer = {**store.order_to_json(ORDER), "tbr_day": "2026-10-27"}                      # TBR «Asia 27/10»
+    viejo = {**store.order_to_json(ORDER), "tbr_day": "2026-10-20", "entry_ts": 5}      # cerró otro día
+    lines = [{"t": "close", "at": "2026-10-28T08:59:00", "order": ayer, "closed": TP.__dict__},
+             {"t": "close", "at": "2026-10-27T09:00:00", "order": viejo, "closed": TP.__dict__}]
+    (data / "forwardtest" / "2026-10.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    state = panel.PanelState({"app": {"data_dir": str(data), "profile_name": "puprime"}}, now=lambda: now)
+    snap = state.snapshot()
+    assert snap["today"]["count"] == 1 and snap["today"]["TP"] == 1 and snap["today"]["r"] == 2.0
+    text = messages.today(snap)
+    assert text.startswith("<b>Hoy</b> +2.00 R") and text.count("TP +2.00 R") == 1 and "Corto EURUSD" in text
+
+
 def test_el_panel_no_se_abre_a_otros_equipos_sin_clave(monkeypatch, tmp_path):
     monkeypatch.delenv("PANEL_TOKEN", raising=False)
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_HOST=0.0.0.0\nPANEL_PORT=0\n", {"env_file": str(tmp_path / "x.env")})
@@ -232,6 +253,51 @@ def test_los_comandos_de_telegram_contestan_con_lo_del_panel_solo_a_tu_chat(sent
     assert skill._offset == 8
     skill.tick()                                                                         # lo ya contestado no se repite
     assert len(sent) == 4
+
+
+def test_un_comando_por_cuenta_manda_la_tarjeta_de_su_forwardtest(sent, monkeypatch):
+    """/puprime y /metaquotes: una imagen con solo las operaciones de esa cuenta (leídas de la carpeta de su perfil)."""
+    import json
+    from datetime import datetime
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import config
+    from tradingbot.skills.movil import card, panel, telegram as client
+    from tradingbot.skills.setup import store
+    QApplication.instance() or QApplication([])
+    month = panel.journal.month_of(datetime.now())
+    for name, symbol in (("puprime", "EURUSD"), ("metaquotes", "XAUUSD")):
+        folder = config.profile_dir(name)
+        store.save([Order(symbol, "15m", "long", "Reversión", "reversion", "Asia", date(2026, 10, 27), 1, 1, 1, 1.5, 1.4, 1.8,
+                          "No Bias", 0.0, "go", None, 1000, 2000)], folder / "abiertas.json")
+        (folder / "forwardtest").mkdir(parents=True, exist_ok=True)
+        close = {"t": "close", "at": datetime.now().isoformat(timespec="seconds"),
+                 "order": {**store.order_to_json(ORDER), "symbol": symbol}, "closed": TP.__dict__}
+        (folder / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\n", encoding="utf-8")
+    drawn, menu = [], []
+    monkeypatch.setattr(card, "render_operations", lambda snap: drawn.append(snap) or b"\x89PNG-operaciones")
+    monkeypatch.setattr(client, "set_commands", lambda token, commands: menu.extend(commands))
+    app = {"profile_name": "puprime", "data_dir": str(config.profile_dir("puprime")),
+           "profiles": [("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"), ("panel", "Choca con un comando"), ("Raro-1", "x")]}
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", app)
+    skill = manager.skills["movil"]
+    INBOX.extend([message(1, "/puprime"), message(2, "/metaquotes@mi_bot"), message(3, "/ayuda")])
+    skill.tick()
+    manager.stop()
+    assert [(snap["profile"], snap["open"][0]["symbol"], snap["closed"][0]["symbol"]) for snap in drawn] == [
+        ("puprime", "EURUSD", "EURUSD"), ("metaquotes", "XAUUSD", "XAUUSD")]       # cada cuenta, con lo suyo
+    assert [p[1] for p in PHOTOS] == [b"\x89PNG-operaciones"] * 2 and "Forwardtest · puprime" in PHOTOS[0][2]
+    assert [c for c, _ in menu][-2:] == ["puprime", "metaquotes"]                    # en el menú de «/»; «panel» no se pisa
+    assert "/puprime · Forwardtest de PUPrime" in sent[-1][2] and "/metaquotes" in sent[-1][2] and "/Raro" not in sent[-1][2]
+
+
+def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.movil import card, messages, panel
+    QApplication.instance() or QApplication([])
+    snap = panel.PanelState({"app": {"profile_name": "puprime"}}).snapshot("metaquotes")
+    png = card.render_operations(snap)
+    assert png[:4] == b"\x89PNG" and len(png) > 3000 and snap["bias"] == [] and snap["profile"] == "metaquotes"
+    assert "/puprime · Forwardtest de PUPrime" in messages.help_text((("puprime", "Forwardtest de PUPrime"),))
 
 
 def test_sin_comandos_no_se_pregunta_a_telegram(sent, monkeypatch):

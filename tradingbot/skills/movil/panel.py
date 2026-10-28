@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from ...config import profile_dir
 from ..setup import account, store
 from ..stats import journal
 
@@ -43,12 +44,13 @@ def _day(value) -> str:
     return value.isoformat() if isinstance(value, date) else str(value or "")
 
 
-def _closed_day(at) -> str:
-    """Día (NY) en que se anotó el cierre: «at» del diario es la hora local de este equipo."""
+def _closed_day(at, fallback: str) -> str:
+    """Día de Nueva York en que se cerró la operación: el diario anota `at` con la hora local de este equipo (sin zona).
+    Es el día que cuenta para «hoy»; el de la TBR (`day`) puede ser anterior (una zona Asia de ayer cierra hoy)."""
     try:
         return datetime.fromisoformat(str(at)).astimezone(NY).date().isoformat()
-    except ValueError:
-        return ""
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _r_now(order, price: float | None) -> float | None:
@@ -103,20 +105,27 @@ class PanelState:
                                        "go": bool(dec.allowed), "reason": dec.reason})
 
     # -- la foto para el móvil ---------------------------------------------------------------------
-    def snapshot(self) -> dict:
+    def snapshot(self, profile: str | None = None) -> dict:
+        """La foto del panel. Con `profile` (otra cuenta, p. ej. «metaquotes») lee de su carpeta las abiertas, la cuenta
+        virtual y el diario del forwardtest; el sesgo, las decisiones y la cuenta del broker son solo los de esta ejecución."""
         app = self.app_cfg.get("app") or {}
+        cfg = self.app_cfg
+        other = bool(profile) and profile.lower() != (app.get("profile_name") or "").lower()
+        if other:
+            cfg = {**self.app_cfg, "app": {**app, "data_dir": str(profile_dir(profile)), "profile_name": profile.lower()}}
         with self._lock:
             prices = dict(self.prices)
-            out = {"profile": app.get("profile_name") or "", "updated": self._now().strftime("%d/%m %H:%M:%S"),
-                   "broker": self.account, "bias": sorted(self.bias.values(), key=lambda b: b["symbol"]),
-                   "decisions": list(self.decisions)}
-        out["open"] = [self._open(o, prices.get(o.symbol)) for o in store.load(store.file_for(self.app_cfg))]
-        virtual = account.VirtualAccount(account.file_for(self.app_cfg))
+            out = {"profile": (cfg.get("app") or {}).get("profile_name") or "", "updated": self._now().strftime("%d/%m %H:%M:%S"),
+                   "broker": None if other else self.account,
+                   "bias": [] if other else sorted(self.bias.values(), key=lambda b: b["symbol"]),
+                   "decisions": [] if other else list(self.decisions)}
+        out["open"] = [self._open(o, prices.get(o.symbol)) for o in store.load(store.file_for(cfg))]
+        virtual = account.VirtualAccount(account.file_for(cfg))
         out["virtual"] = ({"balance": round(virtual.balance, 2), "currency": virtual.currency, "since": virtual.since}
                           if virtual.started else None)
-        closed = self._closed()
+        closed = self._closed(cfg)
         today = self._now().date().isoformat()
-        day = [c for c in closed if c["closed_day"] == today]      # cerradas hoy, aunque su TBR sea de ayer (Asia)
+        day = [c for c in closed if c["closed_day"] == today]
         out["today"] = {"day": today, "count": len(day), "r": round(sum(c["r"] for c in day), 2),
                         **{k: sum(1 for c in day if c["result"] == k) for k in ("TP", "SL", "BE", "T")}}
         out["closed"] = closed[:MAX_CLOSED]
@@ -129,9 +138,9 @@ class PanelState:
                 "stop": order.stop, "target": order.target, "price": price, "r_now": _r_now(order, price),
                 "bias": order.bias, "score": order.score}
 
-    def _closed(self) -> list[dict]:
+    def _closed(self, cfg: dict | None = None) -> list[dict]:
         """Los cierres del diario del forwardtest de este mes y el anterior, del más reciente al más antiguo."""
-        folder = journal.folder_for(self.app_cfg, self.stats_dir)
+        folder = journal.folder_for(cfg or self.app_cfg, self.stats_dir)
         month = journal.month_of(self._now())
         rows = []
         for m in (journal.previous_month(month), month):
@@ -149,12 +158,13 @@ class PanelState:
                     rows.append({"symbol": o["symbol"], "timeframe": o.get("timeframe", ""),
                                  "side": SIDE.get(o["direction"], o["direction"]), "pattern": o.get("pattern", ""),
                                  "zone": o.get("tbr_zone", ""), "day": _day(o.get("tbr_day")),
+                                 "closed_day": _closed_day(rec.get("at"), _day(o.get("tbr_day"))),
                                  "result": RESULT.get(c["result"], c["result"]), "r": round(float(c["r"]), 2),
                                  "max_r": None if c.get("max_r") is None else round(float(c["max_r"]), 2),
-                                 "exit_ts": int(c.get("exit_ts") or 0), "closed_day": _closed_day(rec.get("at"))})
+                                 "exit_ts": int(c.get("exit_ts") or 0)})
                 except (ValueError, KeyError, TypeError):
                     continue
-        rows.sort(key=lambda r: (r["day"], r["exit_ts"]), reverse=True)
+        rows.sort(key=lambda r: (r["closed_day"], r["exit_ts"]), reverse=True)
         return rows
 
 
