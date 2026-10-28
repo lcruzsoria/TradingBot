@@ -37,6 +37,13 @@ def _levels(order) -> str:
     return " · ".join(parts)
 
 
+def _bias_text(bias, score, lateral: bool = False, efficiency=None) -> str:
+    """«Bearish -4», «No Bias · lateral -4 · ef. 0.08»: la eficiencia del precio explica por qué el filtro de lateralidad
+    anula una puntuación (la de las reglas) que por sí sola daría sesgo."""
+    ef = f" · ef. {efficiency:.2f}" if efficiency is not None else ""
+    return f"{_e(bias)}{' · lateral' if lateral else ''} {score:+g}{ef}"
+
+
 def _footer(profile: str | None) -> str:
     return f"\n<i>perfil {_e(profile)}</i>" if profile else ""
 
@@ -44,7 +51,7 @@ def _footer(profile: str | None) -> str:
 def opened(order, profile: str | None = None) -> str:
     return (f"{_strategy(order.pattern)}🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> "
             f"{_e(order.timeframe)}\n{_where(order)}{_levels(order)}\n"
-            f"Sesgo {_e(order.bias)} {order.score:+g}{_footer(profile)}")
+            f"Sesgo {_bias_text(order.bias, order.score, order.lateral, order.efficiency)}{_footer(profile)}")
 
 
 def closed(order, result, profile: str | None = None) -> str:
@@ -113,8 +120,8 @@ def bias(s: dict) -> str:
         return "<b>Sesgo</b>\nTodavía no hay sesgo calculado."
     icon = {"Bullish": "🟢", "Bearish": "🔴"}
     return "<b>Sesgo</b>\n" + "\n".join(
-        f"{icon.get(b['bias'], '⚪')} <b>{_e(b['symbol'])}</b> {_e(b['bias'])}{' · lateral' if b['lateral'] else ''} {b['score']:+g}"
-        for b in s["bias"])
+        f"{icon.get(b['bias'], '⚪')} <b>{_e(b['symbol'])}</b> "
+        f"{_bias_text(b['bias'], b['score'], b['lateral'], b.get('efficiency'))}" for b in s["bias"])
 
 
 def decisions(s: dict) -> str:
