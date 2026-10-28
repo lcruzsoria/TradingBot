@@ -77,11 +77,9 @@ def test_entra_en_el_05_sin_necesidad_de_superar_antes_el_0():
 
 def test_sin_el_swing_del_1_formado_no_hay_trade():
     assert analyze(ctx_for(ROWS[:13]), 1) == ([], [])                      # el swing low (12) aún no está confirmado: no hay 1, no hay stop
-    confirma = ROWS[:13] + [(109, 110, 106, 108)]                          # 13: confirma el swing low y toca el 0,5: basta para entrar
-    assert [(h.status, h.x) for h in analyze(ctx_for(confirma), 1)[0]] == [(DETECTED, 13)]
-    sin_tocar = ROWS[:13] + [(109, 110, 108, 109)]                         # 13: confirma el swing low sin llegar al 0,5 (107): aún no hay entrada
-    assert analyze(ctx_for(sin_tocar), 1)[0] == []
-    siguiente = sin_tocar + [(108, 110, 106.5, 109)]                       # 14: la primera que retrocede al 0,5 (abre sobre él)
+    confirma = ROWS[:13] + [(109, 110, 106, 108)]                          # 13: confirma el swing low y llega al 0,5, pero esa vela no vale
+    assert analyze(ctx_for(confirma), 1)[0] == []
+    siguiente = confirma + [(108, 110, 106.5, 109)]                        # 14: la primera posterior que retrocede al 0,5 (abre sobre él)
     assert [(h.status, h.x) for h in analyze(ctx_for(siguiente), 1)[0]] == [(DETECTED, 14)]
 
 
