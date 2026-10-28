@@ -16,7 +16,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..clock import NY
+from ..clock import NY, trading_day
 from ..skills.stats.backtest import PATTERNS
 from ..skills.stats.journal import month_label
 from ..skills.stats.session import (ALIGNMENTS, SESSIONS, Group, Signal, Trade, TradeStats, alignment_of,  # noqa: F401
@@ -442,7 +442,7 @@ class StatsDialog(QDialog):
         if self.window_days is None or self.month != LIVE:
             return True
         ny = self._to_ny(ts) if ts else None
-        return ny is not None and (self._today().date() - ny.date()).days <= self.window_days
+        return ny is not None and (trading_day(self._today()) - trading_day(ny)).days <= self.window_days
 
     def _session(self, t: Trade) -> str:
         ny = self._ny_of(t)

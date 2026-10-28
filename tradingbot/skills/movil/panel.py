@@ -22,6 +22,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ...config import profile_dir
+from ...clock import trading_day
 from ..setup import account, store
 from ..stats import journal
 
@@ -45,10 +46,10 @@ def _day(value) -> str:
 
 
 def _closed_day(at, fallback: str) -> str:
-    """Día de Nueva York en que se cerró la operación: el diario anota `at` con la hora local de este equipo (sin zona).
-    Es el día que cuenta para «hoy»; el de la TBR (`day`) puede ser anterior (una zona Asia de ayer cierra hoy)."""
+    """Día de trading (desde el inicio de la TBR de Asia, 20:00 NY) en que se cerró la operación: el diario anota `at`
+    con la hora local de este equipo (sin zona). Es el día que cuenta para «hoy»."""
     try:
-        return datetime.fromisoformat(str(at)).astimezone(NY).date().isoformat()
+        return trading_day(datetime.fromisoformat(str(at)).astimezone(NY)).isoformat()
     except (TypeError, ValueError):
         return fallback
 
@@ -124,7 +125,7 @@ class PanelState:
         out["virtual"] = ({"balance": round(virtual.balance, 2), "currency": virtual.currency, "since": virtual.since}
                           if virtual.started else None)
         closed = self._closed(cfg)
-        today = self._now().date().isoformat()
+        today = trading_day(self._now()).isoformat()
         day = [c for c in closed if c["closed_day"] == today]
         out["today"] = {"day": today, "count": len(day), "r": round(sum(c["r"] for c in day), 2),
                         **{k: sum(1 for c in day if c["result"] == k) for k in ("TP", "SL", "BE", "T")}}

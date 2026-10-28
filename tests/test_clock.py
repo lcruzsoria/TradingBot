@@ -132,3 +132,11 @@ def test_la_caja_ultimo_tick_muestra_nueva_york(qapp, tmp_path, monkeypatch):
     assert "21:30:05" in win.stat_tick.toolTip() and "UTC+3" in win.stat_tick.toolTip()
     win._show_last_tick(ts, None, None)
     assert win.stat_tick.value.text() == "14:30:05" and win.stat_tick.sub.text() == "Nueva York (estimada)"
+
+
+def test_el_dia_de_trading_empieza_con_la_tbr_de_asia_a_las_20_00_de_ny():
+    from datetime import date, datetime
+    from tradingbot.clock import trading_day
+    assert trading_day(datetime(2026, 10, 27, 19, 59)) == date(2026, 10, 27)
+    assert trading_day(datetime(2026, 10, 27, 20, 0)) == date(2026, 10, 28)       # Asia de la tarde ya es el día siguiente
+    assert trading_day(datetime(2026, 10, 28, 9, 30)) == date(2026, 10, 28)
