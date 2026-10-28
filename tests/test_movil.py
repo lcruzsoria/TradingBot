@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -169,8 +169,9 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     (data / "forwardtest").mkdir(parents=True)
     from tradingbot.skills.movil import panel
     month = panel.journal.month_of(panel.datetime.now(panel.NY))
-    today = panel.datetime.now(panel.NY).date().isoformat()
-    close = {"t": "close", "order": {**store.order_to_json(ORDER), "tbr_day": today}, "closed": TP.__dict__}
+    yesterday = (panel.datetime.now(panel.NY).date() - timedelta(days=1)).isoformat()      # una TBR de ayer (Asia) cerrada hoy cuenta hoy
+    close = {"t": "close", "at": panel.datetime.now().isoformat(timespec="seconds"),
+             "order": {**store.order_to_json(ORDER), "tbr_day": yesterday}, "closed": TP.__dict__}
     (data / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\nbasura\n", encoding="utf-8")
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_PORT=0\n", {"data_dir": str(data), "profile_name": "puprime"})
     skill = manager.skills["movil"]

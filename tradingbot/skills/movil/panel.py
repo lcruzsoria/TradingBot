@@ -43,6 +43,14 @@ def _day(value) -> str:
     return value.isoformat() if isinstance(value, date) else str(value or "")
 
 
+def _closed_day(at) -> str:
+    """Día (NY) en que se anotó el cierre: «at» del diario es la hora local de este equipo."""
+    try:
+        return datetime.fromisoformat(str(at)).astimezone(NY).date().isoformat()
+    except ValueError:
+        return ""
+
+
 def _r_now(order, price: float | None) -> float | None:
     if price is None or order.stop is None:
         return None
@@ -108,7 +116,7 @@ class PanelState:
                           if virtual.started else None)
         closed = self._closed()
         today = self._now().date().isoformat()
-        day = [c for c in closed if c["day"] == today]
+        day = [c for c in closed if c["closed_day"] == today]      # cerradas hoy, aunque su TBR sea de ayer (Asia)
         out["today"] = {"day": today, "count": len(day), "r": round(sum(c["r"] for c in day), 2),
                         **{k: sum(1 for c in day if c["result"] == k) for k in ("TP", "SL", "BE", "T")}}
         out["closed"] = closed[:MAX_CLOSED]
@@ -143,7 +151,7 @@ class PanelState:
                                  "zone": o.get("tbr_zone", ""), "day": _day(o.get("tbr_day")),
                                  "result": RESULT.get(c["result"], c["result"]), "r": round(float(c["r"]), 2),
                                  "max_r": None if c.get("max_r") is None else round(float(c["max_r"]), 2),
-                                 "exit_ts": int(c.get("exit_ts") or 0)})
+                                 "exit_ts": int(c.get("exit_ts") or 0), "closed_day": _closed_day(rec.get("at"))})
                 except (ValueError, KeyError, TypeError):
                     continue
         rows.sort(key=lambda r: (r["day"], r["exit_ts"]), reverse=True)
