@@ -110,6 +110,21 @@ def test_el_aviso_de_calendario_lleva_su_estrategia_y_no_zona_tbr():
                                 "Entrada 29,171.50 · Stop 29,025.64 · Obj. 29,463.22", "Sesgo No Bias +4", "<i>perfil puprime</i>"]
 
 
+def test_el_sesgo_lleva_la_eficiencia_cuando_el_filtro_de_lateralidad_la_midio():
+    from tradingbot.skills.cortex.order import build_calendar_order
+    from tradingbot.skills.movil import messages
+    signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 100.0, "stop": 99.0, "target": 102.0,
+              "day": date(2026, 10, 28), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
+    lateral = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=-4.0, lateral=True, efficiency=0.0834)
+    tendencia = SimpleNamespace(bias=SimpleNamespace(value="Bearish"), score=-4.0, lateral=False, efficiency=0.31)
+    assert "Sesgo No Bias · lateral -4 · ef. 0.08\n" in messages.opened(build_calendar_order(signal, lateral, "x")) + "\n"
+    assert "Sesgo Bearish -4 · ef. 0.31" in messages.opened(build_calendar_order(signal, tendencia, "x"))
+    state = {"bias": [{"symbol": "NAS100ft.s", "bias": "No Bias", "score": -4.0, "lateral": True, "efficiency": 0.0834},
+                      {"symbol": "XAUUSD.s", "bias": "Bullish", "score": 4.0, "lateral": False, "efficiency": None}]}
+    assert messages.bias(state).split("\n")[1:] == ["⚪ <b>NAS100ft.s</b> No Bias · lateral -4 · ef. 0.08",
+                                                   "🟢 <b>XAUUSD.s</b> Bullish +4"]
+
+
 def test_go_y_nogo_solo_si_se_piden(sent):
     hit = SimpleNamespace(direction="long", title="Reversión", ts=1000)
     go = {"symbol": "EURUSD", "timeframe": "15m", "tbr": SimpleNamespace(zone="London"), "hit": hit,

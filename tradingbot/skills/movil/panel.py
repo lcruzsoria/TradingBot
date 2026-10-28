@@ -95,7 +95,8 @@ class PanelState:
             self.bias[payload["symbol"]] = {"symbol": payload["symbol"], "timeframe": payload.get("timeframe", ""),
                                             "bias": getattr(result.bias, "value", str(result.bias)),
                                             "score": float(getattr(result, "score", 0.0)),
-                                            "lateral": bool(getattr(result, "lateral", False))}
+                                            "lateral": bool(getattr(result, "lateral", False)),
+                                            "efficiency": getattr(result, "efficiency", None)}
 
     def decision(self, payload: dict) -> None:
         hit, tbr, dec = payload["hit"], payload.get("tbr"), payload["decision"]
