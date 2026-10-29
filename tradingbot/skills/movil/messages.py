@@ -18,9 +18,14 @@ def _day(value) -> str:
     return value.strftime("%d/%m") if isinstance(value, date) else _e(value or "")
 
 
+def _strategy(title) -> str:
+    """Primera línea de cada aviso: qué estrategia lo origina (varias comparten la cuenta del perfil)."""
+    return f"<b>Estrategia:</b> {_e(title)}\n"
+
+
 def _where(order) -> str:
-    zone = f" · {_e(order.tbr_zone)} {_day(order.tbr_day)}" if order.tbr_zone else ""
-    return f"{_e(order.pattern)}{zone}"
+    """Zona TBR y día, si la estrategia los tiene (Calendario no): línea propia tras la cabecera, vacía si no hay."""
+    return f"{_e(order.tbr_zone)} {_day(order.tbr_day)}\n" if order.tbr_zone else ""
 
 
 def _levels(order) -> str:
@@ -32,30 +37,37 @@ def _levels(order) -> str:
     return " · ".join(parts)
 
 
+def _bias_text(bias, score, lateral: bool = False, efficiency=None) -> str:
+    """«Bearish -4», «No Bias · lateral -4 · ef. 0.08»: la eficiencia del precio explica por qué el filtro de lateralidad
+    anula una puntuación (la de las reglas) que por sí sola daría sesgo."""
+    ef = f" · ef. {efficiency:.2f}" if efficiency is not None else ""
+    return f"{_e(bias)}{' · lateral' if lateral else ''} {score:+g}{ef}"
+
+
 def _footer(profile: str | None) -> str:
     return f"\n<i>perfil {_e(profile)}</i>" if profile else ""
 
 
 def opened(order, profile: str | None = None) -> str:
-    return (f"🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> {_e(order.timeframe)}\n"
-            f"{_where(order)}\n{_levels(order)}\n"
-            f"Sesgo {_e(order.bias)} {order.score:+g}{_footer(profile)}")
+    return (f"{_strategy(order.pattern)}🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> "
+            f"{_e(order.timeframe)}\n{_where(order)}{_levels(order)}\n"
+            f"Sesgo {_bias_text(order.bias, order.score, order.lateral, order.efficiency)}{_footer(profile)}")
 
 
 def closed(order, result, profile: str | None = None) -> str:
     icon, short = RESULT.get(result.result, ("•", result.result))
     peak = f" · máx. {result.max_r:+.2f} R" if result.max_r is not None else ""
-    return (f"{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b>"
-            f" {_e(order.timeframe)}\n{_where(order)}\n"
+    return (f"{_strategy(order.pattern)}{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} "
+            f"{_e(order.symbol)}</b> {_e(order.timeframe)}\n{_where(order)}"
             f"Entrada {fmt_price(order.price)} → salida {fmt_price(result.exit_price)}{peak}{_footer(profile)}")
 
 
 def decision(payload: dict, profile: str | None = None) -> str:
     hit, tbr, dec = payload["hit"], payload.get("tbr"), payload["decision"]
-    zone = f" · {_e(tbr.zone)}" if tbr is not None and getattr(tbr, "zone", "") else ""
+    zone = f"{_e(tbr.zone)}\n" if tbr is not None and getattr(tbr, "zone", "") else ""
     head = "✓ GO" if dec.allowed else "✕ NO GO"
-    return (f"<b>{head} {SIDE.get(hit.direction, hit.direction)} {_e(payload['symbol'])}</b> {_e(payload['timeframe'])}\n"
-            f"{_e(hit.title)}{zone}\n{_e(dec.reason)}{_footer(profile)}")
+    return (f"{_strategy(hit.title)}<b>{head} {SIDE.get(hit.direction, hit.direction)} {_e(payload['symbol'])}</b> "
+            f"{_e(payload['timeframe'])}\n{zone}{_e(dec.reason)}{_footer(profile)}")
 
 
 def started(profile: str | None = None) -> str:
@@ -96,7 +108,7 @@ def today(s: dict) -> str:
         return "<b>Hoy</b>\nAún no ha cerrado ninguna."
     head = (f"<b>Hoy</b> {_r(t['r'])}\n{t['count']} cerrada(s): {t['TP']} TP · {t['SL']} SL · {t['BE']} BE"
             + (f" · {t['T']} T" if t["T"] else ""))
-    rows = [c for c in s["closed"] if c["day"] == t["day"]]
+    rows = [c for c in s["closed"] if c["closed_day"] == t["day"]]
     icon = {short: ico for ico, short in RESULT.values()}
     lines = [f"{icon.get(c['result'], '•')} {_e(c['result'])} {_r(c['r'])} · {_e(c['side'])} {_e(c['symbol'])} · {_e(c['pattern'])}"
              for c in rows]
@@ -108,8 +120,8 @@ def bias(s: dict) -> str:
         return "<b>Sesgo</b>\nTodavía no hay sesgo calculado."
     icon = {"Bullish": "🟢", "Bearish": "🔴"}
     return "<b>Sesgo</b>\n" + "\n".join(
-        f"{icon.get(b['bias'], '⚪')} <b>{_e(b['symbol'])}</b> {_e(b['bias'])}{' · lateral' if b['lateral'] else ''} {b['score']:+g}"
-        for b in s["bias"])
+        f"{icon.get(b['bias'], '⚪')} <b>{_e(b['symbol'])}</b> "
+        f"{_bias_text(b['bias'], b['score'], b['lateral'], b.get('efficiency'))}" for b in s["bias"])
 
 
 def decisions(s: dict) -> str:
@@ -124,8 +136,9 @@ def status(s: dict) -> str:
     return "\n\n".join([_header(s), today(s), open_positions(s), bias(s)])
 
 
-def help_text() -> str:
-    return "<b>Comandos</b>\n" + "\n".join(f"/{c} · {_e(d)}" for c, d in COMMANDS)
+def help_text(extra: tuple = ()) -> str:
+    """La lista de comandos; `extra` son los de cada cuenta (/puprime, /metaquotes...), que dependen de los perfiles."""
+    return "<b>Comandos</b>\n" + "\n".join(f"/{c} · {_e(d)}" for c, d in (*COMMANDS, *extra))
 
 
 def answer(command: str, s: dict) -> str | None:

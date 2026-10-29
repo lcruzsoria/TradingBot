@@ -415,7 +415,7 @@ def test_la_posicion_dibujada_pasa_a_breakeven_como_la_simulada():
     assert sl.state == "stop"                                           # sin breakeven (be_r None) se dibuja como antes
 
 
-def test_la_entrada_del_fibo_espera_al_swing_y_viene_de_arriba():
+def test_la_entrada_del_fibo_puede_ser_la_vela_que_confirma_el_swing_y_viene_de_arriba():
     import numpy as np
     from tradingbot.skills.pattern.fibo import run_fibo
     #            0     1     2     3     4     5     6
@@ -425,6 +425,8 @@ def test_la_entrada_del_fibo_espera_al_swing_y_viene_de_arriba():
     # origen 5 (nivel 1); el pivote del 0 es la vela 1 (máx. 12), confirmado por la 2; 0,5 = 8,5
     s = run_fibo(H, L, 0, 6, 5.0, 1, 1, 10.0, O)
     assert s.zero == 12.0 and s.zero_idx == 1
-    # la vela 2 (confirma el swing) llega a 6,5 pero no vale; la 3 abre en 6 (ya por debajo del 0,5): tampoco; la 4 abre en 8,5 sin tocarlo...
-    # la 6 abre en 9 por encima del 0,5 y baja a 6,5: es la entrada
-    assert s.entry == (6, 8.5)
+    # la vela 2 confirma el swing y abre en 11 (por encima del 0,5) y baja a 6,5: basta con tocar el nivel, es la entrada
+    assert s.entry == (2, 8.5)
+    L2 = L.copy(); L2[2] = 9.0                           # si la que confirma no llega al 0,5, se sigue buscando:
+    s = run_fibo(H, L2, 0, 6, 5.0, 1, 1, 10.0, O)         # la 3 abre en 6 (ya por debajo del 0,5): no vale; la 4 abre en 8,5 sin tocarlo...
+    assert s.entry == (6, 8.5)                           # la 6 abre en 9 por encima del 0,5 y baja a 6,5

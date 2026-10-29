@@ -5,9 +5,8 @@ Todo se calcula «en largo» (el origen es un mínimo y el tramo sube); el corto
 - Nivel 1: el origen del tramo (la mecha pivote en Reversión).
 - Nivel 0: el primer pivote confirmado (el máximo más alto en la vela del medio de `k` velas a cada lado) tras el origen. Queda fijo:
   un pivote posterior más alto no lo alarga. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
-- Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca) viniendo de arriba (abre por encima del 0,5) y
-  después de la vela que confirma el pivote del 0: no se puede entrar en la propia vela que confirma el swing, porque hasta
-  que cierra no se sabe que el 0 existe.
+- Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca) viniendo de arriba (abre por encima del 0,5), a partir de
+  la vela que confirma el pivote del 0 (incluida): el pivote fija el 0, pero la entrada solo pide que el precio toque el 0,5.
 - Si el precio pierde el origen antes de la entrada (mínimo por debajo del nivel 1), el tramo se anula.
 - Stop y objetivo en los niveles de PATTERN_STOP_LEVEL (1 al inicio: la mecha pivote o el swing) y PATTERN_TARGET_LEVEL (-0,2 al
   inicio; el -0,5 sería media vuelta del tramo más allá del 0). Con entrada en el 0,5: RR = (0,5 - objetivo) / (stop - 0,5).
@@ -86,6 +85,6 @@ def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: flo
             if zero is None:
                 zero, zero_idx = float(H[p]), p                             # el primer pivote fija el 0
         running = max(running, float(H[t]))
-        if zero is not None and t > zero_idx + k and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
+        if zero is not None and t >= zero_idx + k and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
             return FiboState(zero, zero_idx, running, (t, (zero + origin) / 2), None)
     return FiboState(zero, zero_idx, running, None, None)

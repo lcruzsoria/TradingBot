@@ -29,6 +29,8 @@ class Order:
     entry_ts: int | None = None    # hora de servidor de la vela de entrada y del cierre por tiempo: Setup sigue la posición
     close_ts: int | None = None
     caso: str = ""                 # caso del patrón («A. Ideal» / «B. Flexible» en Continuación), para el diario del forwardtest
+    lateral: bool = False          # el filtro de lateralidad dejó el sesgo en No Bias (la puntuación es la de las reglas)
+    efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia) al dar la orden
 
     @property
     def label(self) -> str:
@@ -44,13 +46,20 @@ def close_time(entry_ts: int | None, session_close: int | None) -> int | None:
     return min(limit, session_close) if session_close else limit
 
 
+def _lateral(bias_result) -> dict:
+    """Lo que dijo el filtro de lateralidad del sesgo (nada si no se consultó el sesgo)."""
+    eff = getattr(bias_result, "efficiency", None)
+    return {"lateral": bool(getattr(bias_result, "lateral", False)), "efficiency": None if eff is None else float(eff)}
+
+
 def build_order(payload: dict, decision, bias_result) -> Order:
     """Orden a partir de un `pattern.detected`, la decisión de Cortex y el sesgo vigente."""
     hit, tbr = payload["hit"], payload["tbr"]
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
                  bias_result.bias.value, float(bias_result.score), decision.reason, "fin del día de trading",
-                 hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "")
+                 hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "",
+                 **_lateral(bias_result))
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
@@ -60,4 +69,4 @@ def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
     score = float(bias_result.score) if bias_result is not None else 0.0
     return Order(payload["symbol"], payload["timeframe"], payload["direction"], "Calendario (largo a hora fija)", "calendario",
                  "", payload["day"], price, price, price, price, payload["stop"], payload["target"], bias, score, reason,
-                 payload["close_at"], payload["entry_ts"], payload["close_ts"])
+                 payload["close_at"], payload["entry_ts"], payload["close_ts"], **_lateral(bias_result))

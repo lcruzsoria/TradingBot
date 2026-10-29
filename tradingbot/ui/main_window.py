@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QG
 from ..skills.bias import BiasResult
 from ..skills.bias.models import Bias, RuleVote
 from ..skills.bias.rules import fmt_price
-from ..clock import format_offset, ny_from_server, server_minus_ny
+from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
@@ -863,7 +863,7 @@ class MainWindow(QMainWindow):
                                  f"última {fecha_hora(last)}  -  {zone}")
 
     def _on_quotes(self, p: dict) -> None:
-        if _ny_today().date() != self._trades_day:
+        if trading_day(_ny_today()) != self._trades_day:
             self._paint_trades()                                # empieza otro día (NY): la tarjeta Operaciones vuelve a cero
         quotes, account = p["quotes"], p["account"]
         shift, estimated = server_minus_ny(p.get("server_offset"))
@@ -944,7 +944,7 @@ class MainWindow(QMainWindow):
     def _paint_trades(self) -> None:
         """Tarjeta Operaciones: las del Forwardtest con entrada hoy (fecha de Nueva York), igual que la ventana con «Hoy»:
         ganadas (G), perdidas (P), en breakeven (B: 0 R) y las que siguen abiertas."""
-        today = _ny_today().date()
+        today = trading_day(_ny_today())
         self._trades_day = today
         stats = self.stats if getattr(self, "stats", None) is not None else TradeStats()   # aún sin la skill Stats
         open_trades: dict[str, list[str]] = {}                  # mercados con operación abierta: se marcan en Quotes
@@ -952,8 +952,8 @@ class MainWindow(QMainWindow):
             open_trades.setdefault(t.order.symbol.lower(), []).append(t.order.direction)
         if hasattr(self, "markets"):
             self.markets.set_trades(open_trades)
-        s = stats.only(lambda t: bool(t.order.entry_ts) and self._ny(t.order.entry_ts).date() == today,
-                            lambda x: bool(x.ts) and self._ny(x.ts).date() == today)
+        s = stats.only(lambda t: bool(t.order.entry_ts) and trading_day(self._ny(t.order.entry_ts)) == today,
+                            lambda x: bool(x.ts) and trading_day(self._ny(x.ts)) == today)
         wins, losses, be, opened = s.wins, s.losses, s.flat, len(s.open)
         dot = '<span style="color:{};">●</span>'
         hollow = '<span style="color:{};">○</span>'                  # bola transparente: las NO GO de Cortex (NG)
@@ -967,7 +967,7 @@ class MainWindow(QMainWindow):
         text = (" · ".join(parts) + " hoy") if parts else "ninguna hoy"
         if n:
             text += f" · {s.total_r:+.2f} R"
-        tip = (f"Operaciones del Forwardtest con entrada hoy ({today:%d/%m/%Y}, fecha de Nueva York): ganadas (G), "
+        tip = (f"Operaciones del Forwardtest con entrada hoy (día de trading del {today:%d/%m/%Y}: desde las 20:00 NY del día anterior, inicio de Asia): ganadas (G), "
                "perdidas (P) y en breakeven (B: 0 R), más las que siguen abiertas.\nPulsa para abrir o cerrar el "
                "Forwardtest con el día en curso; el botón Forwardtest lo abre con todo el diario.")
         reached = [f"{name}: {avg:.2f} R" for result, name in (("stop", "stops"), ("breakeven", "breakeven"))

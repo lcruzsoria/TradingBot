@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -84,7 +84,9 @@ def test_avisa_de_lo_que_abre_y_cierra_setup_en_directo_y_no_del_repaso(sent):
     texts = [t for _, _, t in sent]
     assert all(token == "t0k3n" and chat == "42" for token, chat, _ in sent)
     assert len(texts) == 3 and "en marcha" in texts[0]                                # aviso de arranque, abre y cierra
-    assert "Abre Corto EURUSD" in texts[1] and "Continuación · NY Open 23/10" in texts[1] and "Stop 1.09600" in texts[1]
+    assert texts[1].startswith("<b>Estrategia:</b> Continuación\n")                  # la estrategia, por delante de todo
+    assert "Abre Corto EURUSD" in texts[1] and "NY Open 23/10" in texts[1] and "Stop 1.09600" in texts[1]
+    assert texts[2].startswith("<b>Estrategia:</b> Continuación\n")
     assert "TP +2.00 R · Corto EURUSD" in texts[2] and "máx. +2.40 R" in texts[2] and "perfil puprime" in texts[2]
     assert skill.caption == "3 aviso(s)"
 
@@ -97,6 +99,32 @@ def test_el_cierre_de_una_abierta_antes_de_reiniciar_si_se_avisa(sent):
     assert len(sent) == 1 and "TP +2.00 R" in sent[0][2]
 
 
+def test_el_aviso_de_calendario_lleva_su_estrategia_y_no_zona_tbr():
+    from tradingbot.skills.cortex.order import build_calendar_order
+    from tradingbot.skills.movil import messages
+    signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 29171.5, "stop": 29025.64,
+              "target": 29463.22, "day": date(2026, 10, 26), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
+    bias = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=4.0)
+    text = messages.opened(build_calendar_order(signal, bias, "Calendario"), "puprime")
+    assert text.split("\n") == ["<b>Estrategia:</b> Calendario (largo a hora fija)", "🟡 <b>Abre Largo NAS100ft.s</b> 15m",
+                                "Entrada 29,171.50 · Stop 29,025.64 · Obj. 29,463.22", "Sesgo No Bias +4", "<i>perfil puprime</i>"]
+
+
+def test_el_sesgo_lleva_la_eficiencia_cuando_el_filtro_de_lateralidad_la_midio():
+    from tradingbot.skills.cortex.order import build_calendar_order
+    from tradingbot.skills.movil import messages
+    signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 100.0, "stop": 99.0, "target": 102.0,
+              "day": date(2026, 10, 28), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
+    lateral = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=-4.0, lateral=True, efficiency=0.0834)
+    tendencia = SimpleNamespace(bias=SimpleNamespace(value="Bearish"), score=-4.0, lateral=False, efficiency=0.31)
+    assert "Sesgo No Bias · lateral -4 · ef. 0.08\n" in messages.opened(build_calendar_order(signal, lateral, "x")) + "\n"
+    assert "Sesgo Bearish -4 · ef. 0.31" in messages.opened(build_calendar_order(signal, tendencia, "x"))
+    state = {"bias": [{"symbol": "NAS100ft.s", "bias": "No Bias", "score": -4.0, "lateral": True, "efficiency": 0.0834},
+                      {"symbol": "XAUUSD.s", "bias": "Bullish", "score": 4.0, "lateral": False, "efficiency": None}]}
+    assert messages.bias(state).split("\n")[1:] == ["⚪ <b>NAS100ft.s</b> No Bias · lateral -4 · ef. 0.08",
+                                                   "🟢 <b>XAUUSD.s</b> Bullish +4"]
+
+
 def test_go_y_nogo_solo_si_se_piden(sent):
     hit = SimpleNamespace(direction="long", title="Reversión", ts=1000)
     go = {"symbol": "EURUSD", "timeframe": "15m", "tbr": SimpleNamespace(zone="London"), "hit": hit,
@@ -107,7 +135,8 @@ def test_go_y_nogo_solo_si_se_piden(sent):
     assert sent == []                                                                  # por defecto, solo abre y cierra
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\nTELEGRAM_NOTIFY=go, nogo\n")
     settle(manager, bus, candles(), ("cortex.decision", go, "cortex"), ("cortex.decision", nogo, "cortex"))
-    assert [t.split("\n")[0] for _, _, t in sent] == ["<b>✓ GO Largo EURUSD</b> 15m", "<b>✕ NO GO Largo EURUSD</b> 15m"]
+    assert [t.split("\n")[:2] for _, _, t in sent] == [["<b>Estrategia:</b> Reversión", "<b>✓ GO Largo EURUSD</b> 15m"],
+                                                       ["<b>Estrategia:</b> Reversión", "<b>✕ NO GO Largo EURUSD</b> 15m"]]
 
 
 def test_sin_token_o_con_un_aviso_desconocido_la_skill_avisa_del_error(monkeypatch, tmp_path):
@@ -155,8 +184,9 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     (data / "forwardtest").mkdir(parents=True)
     from tradingbot.skills.movil import panel
     month = panel.journal.month_of(panel.datetime.now(panel.NY))
-    today = panel.datetime.now(panel.NY).date().isoformat()
-    close = {"t": "close", "order": {**store.order_to_json(ORDER), "tbr_day": today}, "closed": TP.__dict__}
+    yesterday = (panel.datetime.now(panel.NY).date() - timedelta(days=1)).isoformat()      # una TBR de ayer (Asia) cerrada hoy cuenta hoy
+    close = {"t": "close", "at": panel.datetime.now().isoformat(timespec="seconds"),
+             "order": {**store.order_to_json(ORDER), "tbr_day": yesterday}, "closed": TP.__dict__}
     (data / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\nbasura\n", encoding="utf-8")
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_PORT=0\n", {"data_dir": str(data), "profile_name": "puprime"})
     skill = manager.skills["movil"]
@@ -181,6 +211,27 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     finally:
         manager.stop()
     assert skill.server is None
+
+
+def test_hoy_cuenta_por_dia_de_cierre_y_no_por_el_de_la_tbr(tmp_path):
+    """Una operación con la TBR Asia de ayer que cierra hoy es de hoy (el fallo: «Hoy» salía vacío con dos TP notificados)."""
+    import json
+    from datetime import datetime
+    from tradingbot.skills.movil import messages, panel
+    from tradingbot.skills.setup import store
+    data = tmp_path / "perfil"
+    (data / "forwardtest").mkdir(parents=True)
+    now = datetime(2026, 10, 28, 3, 50, tzinfo=panel.NY)                                # 28/10 por la mañana en Nueva York
+    ayer = {**store.order_to_json(ORDER), "tbr_day": "2026-10-27"}                      # TBR «Asia 27/10»
+    viejo = {**store.order_to_json(ORDER), "tbr_day": "2026-10-20", "entry_ts": 5}      # cerró otro día
+    lines = [{"t": "close", "at": "2026-10-28T08:59:00", "order": ayer, "closed": TP.__dict__},
+             {"t": "close", "at": "2026-10-27T09:00:00", "order": viejo, "closed": TP.__dict__}]
+    (data / "forwardtest" / "2026-10.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    state = panel.PanelState({"app": {"data_dir": str(data), "profile_name": "puprime"}}, now=lambda: now)
+    snap = state.snapshot()
+    assert snap["today"]["count"] == 1 and snap["today"]["TP"] == 1 and snap["today"]["r"] == 2.0
+    text = messages.today(snap)
+    assert text.startswith("<b>Hoy</b> +2.00 R") and text.count("TP +2.00 R") == 1 and "Corto EURUSD" in text
 
 
 def test_el_panel_no_se_abre_a_otros_equipos_sin_clave(monkeypatch, tmp_path):
@@ -217,6 +268,51 @@ def test_los_comandos_de_telegram_contestan_con_lo_del_panel_solo_a_tu_chat(sent
     assert skill._offset == 8
     skill.tick()                                                                         # lo ya contestado no se repite
     assert len(sent) == 4
+
+
+def test_un_comando_por_cuenta_manda_la_tarjeta_de_su_forwardtest(sent, monkeypatch):
+    """/puprime y /metaquotes: una imagen con solo las operaciones de esa cuenta (leídas de la carpeta de su perfil)."""
+    import json
+    from datetime import datetime
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import config
+    from tradingbot.skills.movil import card, panel, telegram as client
+    from tradingbot.skills.setup import store
+    QApplication.instance() or QApplication([])
+    month = panel.journal.month_of(datetime.now())
+    for name, symbol in (("puprime", "EURUSD"), ("metaquotes", "XAUUSD")):
+        folder = config.profile_dir(name)
+        store.save([Order(symbol, "15m", "long", "Reversión", "reversion", "Asia", date(2026, 10, 27), 1, 1, 1, 1.5, 1.4, 1.8,
+                          "No Bias", 0.0, "go", None, 1000, 2000)], folder / "abiertas.json")
+        (folder / "forwardtest").mkdir(parents=True, exist_ok=True)
+        close = {"t": "close", "at": datetime.now().isoformat(timespec="seconds"),
+                 "order": {**store.order_to_json(ORDER), "symbol": symbol}, "closed": TP.__dict__}
+        (folder / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\n", encoding="utf-8")
+    drawn, menu = [], []
+    monkeypatch.setattr(card, "render_operations", lambda snap: drawn.append(snap) or b"\x89PNG-operaciones")
+    monkeypatch.setattr(client, "set_commands", lambda token, commands: menu.extend(commands))
+    app = {"profile_name": "puprime", "data_dir": str(config.profile_dir("puprime")),
+           "profiles": [("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"), ("panel", "Choca con un comando"), ("Raro-1", "x")]}
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", app)
+    skill = manager.skills["movil"]
+    INBOX.extend([message(1, "/puprime"), message(2, "/metaquotes@mi_bot"), message(3, "/ayuda")])
+    skill.tick()
+    manager.stop()
+    assert [(snap["profile"], snap["open"][0]["symbol"], snap["closed"][0]["symbol"]) for snap in drawn] == [
+        ("puprime", "EURUSD", "EURUSD"), ("metaquotes", "XAUUSD", "XAUUSD")]       # cada cuenta, con lo suyo
+    assert [p[1] for p in PHOTOS] == [b"\x89PNG-operaciones"] * 2 and "Forwardtest · puprime" in PHOTOS[0][2]
+    assert [c for c, _ in menu][-2:] == ["puprime", "metaquotes"]                    # en el menú de «/»; «panel» no se pisa
+    assert "/puprime · Forwardtest de PUPrime" in sent[-1][2] and "/metaquotes" in sent[-1][2] and "/Raro" not in sent[-1][2]
+
+
+def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.movil import card, messages, panel
+    QApplication.instance() or QApplication([])
+    snap = panel.PanelState({"app": {"profile_name": "puprime"}}).snapshot("metaquotes")
+    png = card.render_operations(snap)
+    assert png[:4] == b"\x89PNG" and len(png) > 3000 and snap["bias"] == [] and snap["profile"] == "metaquotes"
+    assert "/puprime · Forwardtest de PUPrime" in messages.help_text((("puprime", "Forwardtest de PUPrime"),))
 
 
 def test_sin_comandos_no_se_pregunta_a_telegram(sent, monkeypatch):

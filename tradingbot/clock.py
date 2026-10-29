@@ -18,6 +18,14 @@ except Exception:  # noqa: BLE001 - sin base de zonas horarias (en Windows hace 
 NY_CLOSE_SERVER_AHEAD_HOURS = 7
 
 
+TRADING_DAY_START_HOURS = 4    # el día de trading («hoy») empieza con la TBR de Asia, a las 20:00 NY: 4 h antes de la medianoche
+
+
+def trading_day(ny: datetime) -> date:
+    """Día de trading de una hora de Nueva York: desde las 20:00 (inicio de Asia) hasta las 19:59 del día siguiente."""
+    return (ny + timedelta(hours=TRADING_DAY_START_HOURS)).date()
+
+
 def ny_from_server(server_ts: int, utc_offset_seconds: int | None) -> tuple[datetime, bool]:
     """Devuelve (hora en Nueva York, estimada).
 
