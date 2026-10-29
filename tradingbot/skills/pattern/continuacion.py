@@ -15,6 +15,8 @@ Ejemplo alcista (el bajista es el espejo exacto, con el Low):
 4. Entrada: la primera vela posterior a la que confirma el swing del 1 que retrocede hasta el 0,5 (su mínimo lo toca) viniendo de
    arriba (abre por encima del 0,5). No hace falta que el precio rompa antes el 0. Si pierde el 1 antes de eso, el patrón se invalida;
    si termina el plazo de la TBR sin entrada, vence.
+   Si antes de tener el fibo definido (el 0 y el swing del 1 confirmado) el precio toca el extremo contrario de la TBR (el Low en una
+   alcista), el setup se invalida (NO GO «I»).
 5. Stop en el swing low (el nivel 1) y objetivo en el nivel -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5, 2R.
 
 Solo trata el fibonacci en curso de las TBR recientes que se han activado.
@@ -73,13 +75,17 @@ class Leg:
     breach: int | None        # vela en la que el precio perdió el 1 antes de la entrada
 
 
-def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None) -> Leg:
+def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None, opp: float | None = None) -> Leg:
     """Recorre las velas `brk + 1 .. end` buscando el swing high (0), el swing low posterior (1) y la entrada en el 0,5.
 
     La entrada solo puede ser una vela posterior a la que confirma el swing low (hasta que cierra no se sabe que el 1 existe) y, si se
-    dan las aperturas `O`, que abra por encima del 0,5 (viene del lado del 0, no cruza el nivel de largo)."""
+    dan las aperturas `O`, que abra por encima del 0,5 (viene del lado del 0, no cruza el nivel de largo).
+
+    Si antes de confirmar el swing del 1 una vela toca `opp` (el extremo contrario de la TBR), el setup se invalida (`breach`, sin fibo)."""
     zero, zero_idx, origin, origin_idx = None, -1, None, -1
     for t in range(brk + 1, end + 1):
+        if origin is None and opp is not None and L[t] <= opp:           # tocó el extremo contrario de la TBR sin tener el fibo definido
+            return Leg(zero, zero_idx, None, -1, False, None, t)
         if origin is not None:
             if L[t] < origin:                                               # perdió el 1 (el stop) antes de la entrada
                 return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
@@ -132,7 +138,12 @@ def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -
     side = "High" if up else "Low"
     direction = "long" if up else "short"
     # 2) swing high (0) y swing low posterior (1) tras la rotura; 3) entrada en el 0,5 con el swing del 1 ya confirmado
-    leg = run_leg(H, L, j, end, swing_bars, o if up else -o)
+    leg = run_leg(H, L, j, end, swing_bars, o if up else -o, tbr.low if up else -tbr.high)
+    if leg.origin is None and leg.breach is not None:         # el precio tocó el extremo contrario de la TBR antes de tener el fibo definido
+        other = "Low" if up else "High"
+        return [hit(INVALIDATED, direction, leg.breach, tbr.low if up else tbr.high,
+                    f"rotura con cuerpo del {side} en {_when(ctx, j)}; el precio tocó el {other} de la TBR en {_when(ctx, leg.breach)} antes de "
+                    f"definir el fibo (0 y 1): patrón invalidado", {"extremo contrario": tbr.low if up else tbr.high})], []
     if leg.origin is None:
         if ctx.window_closed:
             x = min(max(end, 0), len(ts) - 1)

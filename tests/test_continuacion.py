@@ -357,3 +357,16 @@ def test_el_caso_viaja_a_la_orden_al_diario_y_a_la_senal(tmp_path):
     assert back.caso == "B. Flexible"                                                       # sobrevive al diario
     from tradingbot.skills.stats.skill import _signal
     assert _signal({"decision": Decision(True, "ok"), "hit": hit, "tbr": TBR, "symbol": "EURUSD", "timeframe": "15m"}).variant == "B. Flexible"
+
+
+def test_tocar_el_extremo_contrario_de_la_tbr_sin_fibo_definido_invalida_el_setup():
+    rows = ROWS[:12] + [(106, 107, 94, 100), (100, 109, 99, 108)]       # 12: el mínimo (94) toca el Low de la TBR (95) antes del swing low
+    for r in (rows, mirror(rows)):
+        hits, figs = analyze(ctx_for(r), 1)
+        assert len(hits) == 1 and hits[0].status == INVALIDATED and hits[0].x == 12 and hits[0].levels
+        assert "antes de definir el fibo" in hits[0].detail and figs == []
+
+
+def test_tocar_el_extremo_contrario_con_el_fibo_ya_definido_no_cambia_nada():
+    hits, _ = analyze(ctx_for(ROWS), 1)                                  # el 1 (103) se confirma antes de cualquier toque
+    assert hits[0].status == DETECTED

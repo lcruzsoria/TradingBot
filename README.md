@@ -80,7 +80,8 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
    como punto medio. El tramo queda fijo y dibuja el stop y el objetivo configurados (`PATTERN_STOP_LEVEL` / `PATTERN_TARGET_LEVEL`).
 4. **Entrada:** la primera vela **posterior a la que confirma el swing del 1** que retrocede hasta el 0,5 (su mínimo lo toca) y
    abre por encima de él (viene del lado del 0; en la rotura bajista, al revés). No hace falta que el precio rompa antes el 0.
-   Si pierde el 1 antes de entrar, el patrón se invalida (NO GO «I»); si el plazo de la TBR termina sin retroceso al 0,5, vence
+   Si antes de tener el fibo definido (el 0 y el swing del 1 confirmado) el precio toca el extremo contrario de la TBR, el patrón se
+   invalida (NO GO «I»). Si pierde el 1 antes de entrar, también se invalida (NO GO «I»); si el plazo de la TBR termina sin retroceso al 0,5, vence
    (NO GO «T»).
 5. **Dos casos, los dos disparan a Cortex:** **A. Ideal** si el swing que marca el stop está **dentro del rango de la TBR** (el
    precio vuelve al rango tras la rotura); **B. Flexible** si queda fuera (el primer swing tras la rotura). La orden, el diario del
