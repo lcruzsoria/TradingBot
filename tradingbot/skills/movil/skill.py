@@ -2,14 +2,18 @@
 un panel web de solo lectura (abiertas, cierres, sesgo y decisiones) que se abre en el navegador del móvil."""
 from __future__ import annotations
 
+import html
 import ipaddress
 import re
 import time
+from datetime import datetime
 
+from ...clock import NY, ny_from_server, trading_day
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
 from ..setup import store
-from . import card, messages, telegram
+from ..tbr.zones import zones_from_settings
+from . import card, messages, setup_chart, telegram
 from .panel import PanelServer, PanelState
 from .secrets import secret
 
@@ -17,6 +21,13 @@ NOTIFY_ALL = ("abre", "cierra", "go", "nogo")
 DEFAULT_NOTIFY = ("abre", "cierra")
 DEFAULT_PORT = 8765
 CAPTURE_TIMEOUT = 15.0                                       # segundos que se espera a la ventana
+
+
+MAX_DRAWN = 10                                               # tope de dibujos de un /dibujar
+
+
+def _e(value) -> str:
+    return html.escape(str(value))
 
 
 COMMAND_NAME = re.compile(r"^[a-z0-9_]{1,32}$")                  # lo que Telegram admite como nombre de comando
@@ -43,7 +54,7 @@ class MovilSkill(Skill):
                    "arrancar. Panel: una página web de solo lectura con las abiertas, los cierres, el sesgo y las decisiones, "
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
-                  "movil.capture")
+                  "movil.capture", "clock.offset")
     publishes = ("movil.capture.request",)
     slot = "aux4"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
@@ -55,6 +66,12 @@ class MovilSkill(Skill):
         self.profile = app.get("profile_name")
         self.env_file = app.get("env_file")
         self._start: dict[str, int] = {}                     # mercado -> última vela al arrancar: lo anterior no se avisa
+        self._candles: dict[tuple[str, str], object] = {}    # (mercado, temporalidad) -> últimas velas: /dibujar las necesita
+        self._server_offset: int | None = None               # desfase del servidor, para la hora de NY de los dibujos
+        try:
+            self.zones = zones_from_settings(env.section("TBR"))        # los colores de cada TBR
+        except ValueError:
+            self.zones = []
         self.sent = 0
         self.server: PanelServer | None = None
         self.board = PanelState(self.services.app_cfg, env.section("STATS").get("FORWARD_DIR"))
@@ -152,12 +169,57 @@ class MovilSkill(Skill):
             snap = self.board.snapshot(command)
             self._photo(card.render_operations(snap), f"<b>Forwardtest · {command}</b> <i>{snap['updated']}</i>")
             return
+        if command == "dibujar":                             # los setups ejecutados hoy: /dibujar, /dibujar 2, /dibujar nas100
+            self._draw(text.split()[1:])
+            return
         if command == "captura":                             # la ventana la dibuja la interfaz (hilo de Qt): se le pide
             self._capture_asked = time.monotonic()
             self.publish("movil.capture.request", {"request_id": "tg"})
             return
         reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot())
         self._send(reply if reply is not None else messages.help_text(tuple(self.accounts.items())))
+
+    def _draw(self, args: list[str]) -> None:
+        """Dibuja los setups ejecutados HOY (día de trading) de este perfil: todos, el n-ésimo (/dibujar 2) o los de un mercado
+        (/dibujar nas100). Los de días anteriores no se dibujan."""
+        today = trading_day(datetime.now(NY)).isoformat()
+        rows = sorted((r for r in self.board.executed() if self._entry_day(r) == today),
+                      key=lambda r: int(r["order"]["entry_ts"]))              # por orden de entrada: el 1 es el primero del día
+        word = args[0].lower() if args else ""
+        if not rows:
+            self._send("Hoy no se ha ejecutado ningún setup.")
+            return
+        if word.isdigit():
+            if not 1 <= int(word) <= len(rows):
+                self._send(f"Hoy hay {len(rows)} setup(s) ejecutado(s): el {_e(word)} no existe.")
+                return
+            rows = [rows[int(word) - 1]]
+        elif word:
+            rows = [r for r in rows if word in str(r["order"]["symbol"]).lower()]
+            if not rows:
+                self._send(f"Hoy no se ha ejecutado ningún setup de «{_e(word)}».")
+                return
+        for row in rows[:MAX_DRAWN]:
+            order, closed = row["order"], row["closed"]
+            df = self._candles.get((str(order["symbol"]).lower(), str(order.get("timeframe", ""))))
+            if df is None:
+                self._send(f"Aún no tengo las velas de {_e(order['symbol'])} {_e(order.get('timeframe', ''))}: espera a que cargue el mercado.")
+                continue
+            try:
+                png = setup_chart.render(order, closed, df, self._server_offset, self.zones)
+            except (RuntimeError, ValueError, KeyError) as exc:
+                self._send(f"No se pudo dibujar {_e(order['symbol'])}: {_e(exc)}")
+                continue
+            self._photo(png, self._draw_caption(order, closed))
+
+    def _entry_day(self, row: dict) -> str:
+        ny, _ = ny_from_server(int(row["order"]["entry_ts"]), self._server_offset)
+        return trading_day(ny).isoformat()
+
+    @staticmethod
+    def _draw_caption(order: dict, closed: dict | None) -> str:
+        result = f" · {setup_chart.RESULT.get(closed['result'], closed['result'])} {float(closed['r']):+.2f} R" if closed else " · abierta"
+        return f"<b>{_e(order['symbol'])}</b> {_e(order['pattern'])} · {_e(order.get('tbr_zone', ''))}{result}"
 
     def _photo(self, png: bytes, caption: str | None = None) -> None:
         if caption is None:
@@ -207,7 +269,9 @@ class MovilSkill(Skill):
                 else:
                     self._send("No se pudo capturar la ventana.")
             return
-        if topic == "quotes.updated":
+        if topic == "clock.offset":
+            self._server_offset = p.get("server_offset")
+        elif topic == "quotes.updated":
             self.board.quotes(p)
         elif topic == "bias.updated":
             self.board.bias_updated(p)
@@ -215,6 +279,8 @@ class MovilSkill(Skill):
             df = p.get("df")
             if df is not None and len(df):
                 self._start.setdefault(str(p["symbol"]).lower(), int(df["ts"].iloc[-1]))
+                self._candles[(str(p["symbol"]).lower(), str(p.get("timeframe", "")))] = df
+
         elif topic == "cortex.decision":
             if not self._live(p["symbol"], getattr(p["hit"], "ts", None)):
                 return

@@ -170,6 +170,39 @@ class PanelState:
         return rows
 
 
+    def executed(self, profile: str | None = None) -> list[dict]:
+        """Los setups ejecutados (abiertos y cerrados) del diario de este mes y el anterior, del más reciente al más antiguo:
+        [{"order": {...}, "closed": {...} | None}]. Con `profile`, los de esa otra cuenta."""
+        app = self.app_cfg.get("app") or {}
+        cfg = self.app_cfg
+        if profile and profile.lower() != (app.get("profile_name") or "").lower():
+            cfg = {**self.app_cfg, "app": {**app, "data_dir": str(profile_dir(profile)), "profile_name": profile.lower()}}
+        folder = journal.folder_for(cfg, self.stats_dir)
+        month = journal.month_of(self._now())
+        found: dict[tuple, dict] = {}
+        for m in (journal.previous_month(month), month):
+            try:
+                lines = (folder / f"{m}.jsonl").read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("t") not in ("open", "close"):
+                        continue
+                    o = rec["order"]
+                    key = (o["symbol"], o["direction"], o.get("pattern_key"), o.get("entry_ts"))
+                    row = found.setdefault(key, {"order": o, "closed": None})
+                    if rec["t"] == "close":
+                        row["closed"] = rec["closed"]
+                except (ValueError, KeyError, TypeError):
+                    continue
+        rows = [r for r in found.values() if r["order"].get("entry_ts") and r["order"].get("stop") is not None
+                and r["order"].get("target") is not None]
+        rows.sort(key=lambda r: int(r["order"]["entry_ts"]), reverse=True)
+        return rows
+
+
 class PanelServer:
     """El servidor web del panel, en un hilo aparte (se para con la skill)."""
 

@@ -557,6 +557,12 @@ repo (`C:\Users\claude\mt5\.env`), o en variables de entorno.
    apaga). Solo contesta a tu chat (`TELEGRAM_CHAT_ID`), no deja operar ni cambiar nada, y lo que le escribas con el bot parado
    no se contesta al arrancar.
 
+   **`/dibujar`** dibuja los **setups ejecutados hoy** (día de trading, desde las 20:00 NY) del diario del forwardtest de este
+   perfil, no los de días anteriores: `/dibujar` todos los de hoy por orden de entrada (hasta 10), `/dibujar 2` el segundo del día
+   y `/dibujar nas100` los de ese mercado. El dibujo lleva las velas, la caja de la TBR **con el color de su zona** (Asia,
+   London, NY Open), el fibo (1, 0,5, 0 y -0,2) y la posición: el tramo del SL en rosa y el del TP en verde si el trade acabó
+   en TP (o sigue abierto) y en **gris claro si no llegó** (SL, breakeven o tiempo). Usa las velas que el bot tiene cargadas, así que el mercado tiene que haber cargado ya.
+
 **Panel**
 
 1. Pon `PANEL_ENABLED=true` en `tradingbot.env`. Con `PANEL_HOST=127.0.0.1` solo se ve en el propio PC: `http://127.0.0.1:8765`.

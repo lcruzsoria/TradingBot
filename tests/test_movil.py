@@ -5,12 +5,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from tradingbot.clock import NY
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.cortex.order import Order
 from tradingbot.skills.setup.positions import Closed
@@ -393,3 +394,88 @@ def test_la_subida_de_la_imagen_es_un_multipart_valido():
     assert kind.startswith("multipart/form-data") and body.endswith(end)
     assert ("name=\"chat_id\"" + crlf + crlf + "42" + crlf).encode() in body
     assert b"filename=\"x.png\"" in body and b"\x89PNG-datos" in body
+
+
+# -- /dibujar: el dibujo de los setups ejecutados hoy ---------------------------------------------------------------
+NOW = int(datetime.now(NY).replace(tzinfo=timezone.utc).timestamp()) + 7 * 3600           # ahora en hora de servidor (NY + 7 h)
+DRAWN = replace(ORDER, entry_ts=NOW - 900 * 3, close_ts=NOW + 24 * 3600)                # entró hace 45 min: de hoy
+OLD = replace(ORDER, symbol="XAUUSD", entry_ts=NOW - 3 * 86400, close_ts=NOW - 2 * 86400)   # de hace tres días
+CLOSED_SL = Closed("stop", 1.096, NOW - 900, -1.0, 0.0, None, 0.3, -1.0)
+
+
+def chart_candles(symbol="EURUSD"):
+    rows = [(NOW - 900 * (80 - i), 1.0950 + 0.0002 * (i % 5), 1.0953 + 0.0002 * (i % 5), 1.0947 + 0.0002 * (i % 5),
+             1.0951 + 0.0002 * (i % 5)) for i in range(100)]
+    df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])
+    return "candles.loaded", {"symbol": symbol, "timeframe": "15m", "df": df}, "feed"
+
+
+def write_diary(folder, *entries):
+    """El diario del mes con (orden, cierre o None) por entrada."""
+    import json
+    from datetime import datetime
+    from tradingbot.skills.setup import store
+    from tradingbot.skills.stats import journal
+    (folder / "forwardtest").mkdir(parents=True, exist_ok=True)
+    month = journal.month_of(datetime.now())
+    records = []
+    for order, closed in entries:
+        at = datetime.now().isoformat(timespec="seconds")
+        records.append({"t": "open", "at": at, "order": store.order_to_json(order)})
+        if closed is not None:
+            records.append({"t": "close", "at": at, "order": store.order_to_json(order), "closed": closed.__dict__})
+    (folder / "forwardtest" / f"{month}.jsonl").write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+
+def dibujar_skill(tmp_path):
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n",
+                             {"data_dir": str(tmp_path / "perfil"), "profile_name": "puprime"})
+    return manager, bus
+
+
+def test_el_dibujo_del_setup_es_una_imagen_con_el_tramo_del_tp_segun_el_resultado():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.movil import setup_chart
+    from tradingbot.skills.setup import store
+    QApplication.instance() or QApplication([])
+    df = chart_candles()[1]["df"]
+    order = store.order_to_json(DRAWN)
+    tp = setup_chart.render(order, {"result": "objetivo", "exit_ts": NOW - 900, "r": 2.0, "max_r": 2.4}, df, None)
+    sl = setup_chart.render(order, {"result": "stop", "exit_ts": NOW - 900, "r": -1.0, "max_r": 0.3}, df, None)
+    open_ = setup_chart.render(order, None, df, None)
+    assert all(png[:4] == b"\x89PNG" and len(png) > 3000 for png in (tp, sl, open_)) and tp != sl
+
+
+def test_dibujar_manda_los_setups_de_hoy_y_no_los_de_dias_anteriores(sent, tmp_path):
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    write_diary(tmp_path / "perfil", (OLD, TP), (DRAWN, CLOSED_SL))
+    manager, bus = dibujar_skill(tmp_path)
+    skill = manager.skills["movil"]
+    bus.publish(*chart_candles()[:2], source="feed")
+    time.sleep(0.4)
+    INBOX.extend([message(1, "/dibujar"), message(2, "/dibujar xau"), message(3, "/dibujar 5"), message(4, "/dibujar 1")])
+    skill.tick()
+    manager.stop()
+    texts = [t for _, _, t in sent]
+    assert len(PHOTOS) == 2 and all(p[1][:4] == b"\x89PNG" and "EURUSD" in p[2] and "SL -1.00 R" in p[2] for p in PHOTOS)   # /dibujar y /dibujar 1
+    assert "Hoy no se ha ejecutado ningún setup de «xau»." in texts                                  # el de XAUUSD es de hace tres días
+    assert "Hoy hay 1 setup(s) ejecutado(s): el 5 no existe." in texts
+
+
+def test_dibujar_sin_setups_hoy_lo_dice(sent, tmp_path):
+    write_diary(tmp_path / "perfil", (OLD, TP))
+    manager, bus = dibujar_skill(tmp_path)
+    INBOX.append(message(1, "/dibujar"))
+    manager.skills["movil"].tick()
+    manager.stop()
+    assert PHOTOS == [] and sent[-1][2] == "Hoy no se ha ejecutado ningún setup."
+
+
+def test_dibujar_sin_velas_cargadas_lo_dice(sent, tmp_path):
+    write_diary(tmp_path / "perfil", (DRAWN, None))
+    manager, bus = dibujar_skill(tmp_path)
+    INBOX.append(message(1, "/dibujar"))
+    manager.skills["movil"].tick()
+    manager.stop()
+    assert PHOTOS == [] and "Aún no tengo las velas de EURUSD" in sent[-1][2]
