@@ -33,6 +33,14 @@ Uso (desde la raíz del proyecto):
     uv run python scripts/backtest_orb_nasdaq.py --cache            # reutiliza las velas ya descargadas
     uv run python scripts/backtest_orb_nasdaq.py --colchon 0.3
     uv run python scripts/backtest_orb_nasdaq.py --cache --sesion londres
+    uv run python scripts/backtest_orb_nasdaq.py --cache --rejilla 15      # todos los ORB de 15 min, de 00:00 a 23:45
+    uv run python scripts/backtest_orb_nasdaq.py --cache --rejilla 30      # todos los de 30 min
+
+Rejilla (--rejilla N): un ORB de N minutos que empieza cada 15 minutos, de 00:00 a 23:45 (96 ORB). La rotura vale durante
+--ventana minutos desde el final del ORB (por defecto 360, 6 h, como Londres y Nueva York) y a esa hora se cierra la operación.
+Mismas reglas y criterios que arriba. Un fichero por hora con sus 4 ORB en docs/backtest_orb_nasdaq/orbs_<N>m/ y un RESUMEN.md con
+la clasificación. Con 96 pruebas, alguna saldrá con t > 2 por azar: el resumen marca además las que superan el umbral corregido por
+comparaciones múltiples (Bonferroni, t > 3,1) y elige con la 1.ª mitad del histórico para medir en la 2.ª.
 
 Salida: docs/backtest_orb_nasdaq/RESULTADOS_<sesión>.md (resumen, se sube a git) y analisis/backtest_orb_nasdaq_<sesión>.csv
 (operaciones, ignorada).
@@ -65,6 +73,10 @@ CACHE = ROOT / "analisis" / "orb_nasdaq_m5.pkl"
 CSV = ROOT / "analisis" / "backtest_orb_nasdaq_{}.csv"
 DOC = ROOT / "docs" / "backtest_orb_nasdaq" / "RESULTADOS_{}.md"
 MIN_TRADES, MIN_MEAN, MIN_T = 300, 0.05, 2.0
+GRID_STEP = 15                              # la rejilla prueba un ORB que empieza cada 15 minutos
+GRID_WINDOW = 360                           # la rotura vale 6 h desde el final del ORB, y a las 6 h se cierra
+BONFERRONI_T = 3.1                          # t para un 5 % de falsos positivos con 96 pruebas (0,05 / 96, una cola)
+GRID_DIR = ROOT / "docs" / "backtest_orb_nasdaq" / "orbs_{}m"
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
@@ -74,15 +86,17 @@ class Params:
     rr: float = 1.0                         # objetivo en R
     exit_min: int = NY_OPEN                 # cierre por tiempo (minutos NY); las velas que cierran después no cuentan
     side: str = "ambos"                     # "ambos", "long" o "short"
-    start: int = 60                         # inicio del ORB (minutos NY)
-    deadline: int = NY_OPEN                 # la rotura tiene que cerrar como tarde aquí
+    start: int = 60                         # inicio del ORB (minutos NY desde las 00:00 del día)
+    deadline: int = NY_OPEN                 # la rotura tiene que cerrar como tarde aquí (puede pasar de 1440: el día siguiente)
+    minutes: int = ORB_MINUTES              # duración del ORB
 
     @property
     def orb_bars(self) -> tuple[int, ...]:
-        return tuple(range(self.start, self.start + ORB_MINUTES, BAR))
+        return tuple(range(self.start, self.start + self.minutes, BAR))
 
 
 def hhmm(minutes: int) -> str:
+    minutes %= 1440
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
@@ -123,32 +137,35 @@ def load(profile: str, want: str, use_cache: bool) -> tuple[str, pd.DataFrame]:
 
 # -- simulación ----------------------------------------------------------------------------------------
 def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
-    """Una operación por día como mucho, con las reglas de `p`. Devuelve las operaciones y el embudo de días."""
+    """Una operación por ORB (uno al día) como mucho, con las reglas de `p`. Devuelve las operaciones y el embudo de días.
+
+    Trabaja en tiempo absoluto: el ORB, la ventana de la rotura y la salida por tiempo pueden pasar de medianoche (`deadline` y
+    `exit_min` mayores de 1440). Solo cuentan los ORB con todas sus velas (así se saltan fines de semana, festivos y la pausa
+    diaria de las 17:00).
+    """
     ny = df["ts"].to_numpy() - AHEAD
-    day, mins = ny // 86400, (ny % 86400) // 60
-    o, h, l, c, sp = (df[k].to_numpy() for k in ("open", "high", "low", "close", "spread"))
+    h, l, c, sp = (df[k].to_numpy() for k in ("high", "low", "close", "spread"))
+    need = p.minutes // BAR
     rows, funnel = [], {"días": 0, "con ORB": 0, "con rotura": 0}
-    starts = np.flatnonzero(np.r_[True, day[1:] != day[:-1]])
-    ends = np.r_[starts[1:], len(day)]
-    for a, b in zip(starts, ends):
-        weekday = int((day[a] + 3) % 7)
-        if weekday > 4:
-            continue
+    for d in np.unique(ny // 86400):
+        base = int(d) * 86400
         funnel["días"] += 1
-        m = mins[a:b]
-        orb = [a + k for k in np.flatnonzero(np.isin(m, p.orb_bars))]
-        if len(orb) != len(p.orb_bars):
+        t0 = base + p.start * 60
+        i0, i1 = np.searchsorted(ny, (t0, t0 + p.minutes * 60))
+        if i1 - i0 != need or ny[i0] != t0:
             continue
-        hi, lo = float(h[orb].max()), float(l[orb].min())
+        hi, lo = float(h[i0:i1].max()), float(l[i0:i1].min())
         width = hi - lo
         if width <= 0:
             continue
         funnel["con ORB"] += 1
-        scan = [a + k for k in np.flatnonzero((m >= p.start + ORB_MINUTES) & (m + BAR <= p.deadline))]
-        hit = next((i for i in scan if c[i] > hi or c[i] < lo), None)
-        if hit is None:
+        j1 = np.searchsorted(ny, base + (p.deadline - BAR) * 60, "right")     # velas que cierran como tarde a la hora límite
+        seg = c[i1:j1]
+        broke = np.flatnonzero((seg > hi) | (seg < lo))
+        if not len(broke):
             continue
         funnel["con rotura"] += 1
+        hit = i1 + int(broke[0])
         long = c[hit] > hi
         if p.side != "ambos" and p.side != ("long" if long else "short"):
             continue
@@ -156,20 +173,24 @@ def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
         stop = lo - p.buffer * width if long else hi + p.buffer * width
         risk = abs(entry - stop)
         target = entry + p.rr * risk if long else entry - p.rr * risk
-        after = [i for i in range(hit + 1, b) if mins[i] + BAR <= p.exit_min]
+        k0, k1 = hit + 1, int(np.searchsorted(ny, base + (p.exit_min - BAR) * 60, "right"))
         result, gross, last = "tiempo", 0.0, hit
-        for i in after:
-            last = i
-            if (l[i] <= stop) if long else (h[i] >= stop):
-                result, gross = "stop", -1.0
-                break
-            if (h[i] >= target) if long else (l[i] <= target):
-                result, gross = "objetivo", p.rr
-                break
+        if k1 > k0:
+            hs, ls = h[k0:k1], l[k0:k1]
+            stops = np.flatnonzero(ls <= stop if long else hs >= stop)
+            targets = np.flatnonzero(hs >= target if long else ls <= target)
+            first_stop = int(stops[0]) if len(stops) else None
+            first_target = int(targets[0]) if len(targets) else None
+            if first_stop is not None and (first_target is None or first_stop <= first_target):   # en la misma vela, el stop
+                result, gross, last = "stop", -1.0, k0 + first_stop
+            elif first_target is not None:
+                result, gross, last = "objetivo", p.rr, k0 + first_target
+            else:
+                last = k1 - 1
         if result == "tiempo":
             gross = ((c[last] - entry) if long else (entry - c[last])) / risk
         cost = float(sp[hit]) / risk
-        rows.append({"día": pd.Timestamp(int(day[a]) * 86400, unit="s").date(), "día semana": DAYS[weekday],
+        rows.append({"día": pd.Timestamp(base, unit="s").date(), "día semana": DAYS[int((d + 3) % 7)],
                      "dirección": "long" if long else "short",
                      "entrada (NY)": pd.Timestamp(int(ny[hit]) + BAR * 60, unit="s"),      # al cierre de la vela de rotura
                      "cierre (NY)": pd.Timestamp(int(ny[last]) + BAR * 60, unit="s"),
@@ -219,7 +240,7 @@ def report(sym: str, df: pd.DataFrame, base: Params, session: str) -> str:
     main.to_csv(str(CSV).format(session), index=False)
     title = SESSIONS[session][0]
     bars = ", ".join(hhmm(b) for b in base.orb_bars)
-    first_scan, limit, last_bar = hhmm(base.start + ORB_MINUTES), hhmm(base.deadline), hhmm(base.deadline - BAR)
+    first_scan, limit, last_bar = hhmm(base.start + base.minutes), hhmm(base.deadline), hhmm(base.deadline - BAR)
     ny = df["ts"].to_numpy() - AHEAD
     hours = pd.Series((ny % 86400) // 3600).value_counts().reindex(range(24), fill_value=0)
     first, last = pd.Timestamp(int(ny[0]), unit="s"), pd.Timestamp(int(ny[-1]), unit="s")
@@ -251,7 +272,7 @@ def report(sym: str, df: pd.DataFrame, base: Params, session: str) -> str:
            "## Datos", "",
            f"- {len(df):,} velas M5 de {sym} del {first:%d/%m/%Y} al {last:%d/%m/%Y} (hora de NY, servidor = NY + "
            f"{AHEAD // 3600} h).".replace(",", "."),
-           f"- Días laborables: {funnel['días']}; con las tres velas del ORB: {funnel['con ORB']}; con rotura antes de las {limit}: "
+           f"- Días con mercado: {funnel['días']}; con todas las velas del ORB: {funnel['con ORB']}; con rotura antes de las {limit}: "
            f"{funnel['con rotura']} ({100 * funnel['con rotura'] / max(1, funnel['con ORB']):.0f} %).",
            f"- Comprobación del horario: velas con hora NY 17 (la pausa diaria de los índices): {int(hours[17])} de "
            f"{len(df):,}.".replace(",", "."), "",
@@ -308,15 +329,148 @@ def report(sym: str, df: pd.DataFrame, base: Params, session: str) -> str:
     return "\n".join(out)
 
 
+# -- rejilla de ORB -----------------------------------------------------------------------------------
+def verdict_of(t: pd.DataFrame) -> dict:
+    """Cifras y criterios de un ORB (los mismos de la variante principal)."""
+    s, g = summary(t), summary(t, "R bruto")
+    n = s.get("operaciones", 0)
+    if not n:
+        return {"ops": 0, "pasa": False}
+    h1, h2 = halves(t)
+    s1, s2 = summary(h1), summary(h2)
+    m1, m2 = s1.get("R medio", float("nan")), s2.get("R medio", float("nan"))
+    ok = n >= MIN_TRADES and s["R medio"] > MIN_MEAN and s["estadístico t"] > MIN_T and m1 > 0 and m2 > 0
+    return {"ops": n, "acierto %": s["win rate %"], "R neto": s["R medio"], "t": s["estadístico t"], "R total": s["R total"],
+            "PF": s["profit factor"], "máx. DD": s["máx. drawdown (R)"], "R bruto": g["R medio"], "t bruto": g["estadístico t"],
+            "coste (R)": float(t["coste (R)"].mean()), "ancho ORB %": float(t["ancho ORB %"].mean()),
+            "R neto 1.ª mitad": m1, "R neto 2.ª mitad": m2, "pasa": ok, "Bonferroni": ok and s["estadístico t"] > BONFERRONI_T,
+            "R neto long": summary(t[t["dirección"] == "long"]).get("R medio", float("nan")),
+            "R neto short": summary(t[t["dirección"] == "short"]).get("R medio", float("nan"))}
+
+
+def _f(v, fmt: str) -> str:
+    return "-" if v is None or (isinstance(v, float) and np.isnan(v)) else format(v, fmt)
+
+
+def orb_section(df: pd.DataFrame, p: Params) -> tuple[str, dict]:
+    """Apartado de un ORB en el fichero de su hora, y su fila para el resumen."""
+    t, funnel = trades(df, p)
+    v = verdict_of(t)
+    end, limit = hhmm(p.start + p.minutes), hhmm(p.deadline)
+    head = (f"### ORB {hhmm(p.start)}–{end}\n\nRotura con cuerpo desde las {end} hasta las {limit}"
+            f"{' (día siguiente)' if p.deadline >= 1440 else ''}; a esa hora se cierra. ORB completos: {funnel['con ORB']}; "
+            f"con rotura: {funnel['con rotura']}.\n")
+    if not v["ops"]:
+        return head + "\nSin operaciones.\n", v
+    h1, h2 = halves(t)
+    res = t["resultado"].value_counts()
+    lines = [head, f"**{'Pasa' if v['pasa'] else 'No pasa'} los criterios**"
+             + (" y supera el umbral corregido por comparaciones múltiples." if v["Bonferroni"] else ".")
+             + f" Coste medio {v['coste (R)']:.3f} R; ancho medio del ORB {v['ancho ORB %']:.2f} %; cómo terminan: objetivo "
+             f"{int(res.get('objetivo', 0))}, stop {int(res.get('stop', 0))}, por tiempo {int(res.get('tiempo', 0))}.", "",
+             table([row("Todas (con spread)", t), row("Sin costes", t, "R bruto"),
+                    row("Long", t[t["dirección"] == "long"]), row("Short", t[t["dirección"] == "short"]),
+                    row("1.ª mitad", h1), row("2.ª mitad", h2)]), "",
+             "Por año (R neto medio y operaciones): " + ", ".join(
+                 f"{y} {summary(g)['R medio']:+.3f} ({len(g)})" for y, g in t.groupby(pd.to_datetime(t["entrada (NY)"]).dt.year)) + ".", "",
+             "Sensibilidad (R neto medio y t): " + ", ".join(
+                 f"{name} {summary(tt).get('R medio', 0):+.3f} (t {summary(tt).get('estadístico t', 0):+.2f})"
+                 for name, tt in (("colchón 0 %", trades(df, replace(p, buffer=0.0))[0]),
+                                  ("colchón 50 %", trades(df, replace(p, buffer=0.5))[0]),
+                                  ("objetivo 1,5:1", trades(df, replace(p, rr=1.5))[0]),
+                                  ("objetivo 2:1", trades(df, replace(p, rr=2.0))[0]))) + ".", ""]
+    return "\n".join(lines), v
+
+
+def run_grid(sym: str, df: pd.DataFrame, minutes: int, window: int, buffer: float) -> Path:
+    """Los 96 ORB de `minutes` minutos: un fichero por hora (sus 4 ORB) y un RESUMEN.md con la clasificación."""
+    folder = Path(str(GRID_DIR).format(minutes))
+    folder.mkdir(parents=True, exist_ok=True)
+    ny = df["ts"].to_numpy() - AHEAD
+    first, last = pd.Timestamp(int(ny[0]), unit="s"), pd.Timestamp(int(ny[-1]), unit="s")
+    rules = (f"Reglas: ORB de {minutes} min; entrada al cierre de la primera vela M5 que cierra fuera del ORB, como tarde "
+             f"{window // 60} h después de su final; stop en el extremo opuesto ± {buffer:.0%} del ancho; objetivo 1:1; a las "
+             f"{window // 60} h se cierra. Una operación por ORB y día. Con el spread real de MT5 (R neto). {sym} de PUPrime, del "
+             f"{first:%d/%m/%Y} al {last:%d/%m/%Y}, hora de Nueva York.")
+    summary_rows = []
+    for hour in range(24):
+        parts = [f"# ORB de {minutes} min de las {hour:02d}:00 en {sym} (M5, PUPrime)", "", rules, "",
+                 f"Criterios (fijados antes de ver resultados): al menos {MIN_TRADES} operaciones, R neto medio > +{MIN_MEAN} con "
+                 f"t > {MIN_T}, y R neto medio positivo en las dos mitades del histórico.", ""]
+        compare = []
+        for quarter in range(0, 60, GRID_STEP):
+            start = hour * 60 + quarter
+            p = Params(buffer=buffer, start=start, minutes=minutes, deadline=start + minutes + window,
+                       exit_min=start + minutes + window)
+            text, v = orb_section(df, p)
+            parts.append(text)
+            summary_rows.append({"ORB": hhmm(start), "minutos": minutes, **v})
+            compare.append([f"{hhmm(start)}–{hhmm(start + minutes)}", v["ops"], _f(v.get("acierto %"), ".1f"),
+                            _f(v.get("R neto"), "+.3f"), _f(v.get("t"), "+.2f"), _f(v.get("R bruto"), "+.3f"),
+                            _f(v.get("coste (R)"), ".3f"), "sí" if v["pasa"] else "no"])
+            print(f"  ORB {hhmm(start)} ({minutes} min): {v['ops']} ops, R neto {_f(v.get('R neto'), '+.3f')}, t {_f(v.get('t'), '+.2f')}",
+                  flush=True)
+        parts[6:6] = ["## Los 4 ORB de esta hora", "",
+                      table(compare, ["ORB", "Ops", "Acierto %", "R neto", "t", "Sin costes", "Coste (R)", "Pasa"]), "",
+                      "## Detalle", ""]
+        (folder / f"ORB_{hour:02d}h.md").write_text("\n".join(parts) + "\n", encoding="utf-8")
+    grid = pd.DataFrame(summary_rows)
+    grid.to_csv(ROOT / "analisis" / f"orbs_{minutes}m_resumen.csv", index=False)
+    (folder / "RESUMEN.md").write_text(grid_summary(grid, minutes, rules) + "\n", encoding="utf-8")
+    return folder
+
+
+def grid_summary(grid: pd.DataFrame, minutes: int, rules: str) -> str:
+    played = grid[grid["ops"] > 0]
+    n = len(played)
+    pos, neg = int((played["t"] > MIN_T).sum()), int((played["t"] < -MIN_T).sum())
+    passed, bonf = played[played["pasa"]], played[played["Bonferroni"]]
+
+    def rows_of(frame: pd.DataFrame) -> list:
+        return [[r["ORB"], r["ops"], f"{r['acierto %']:.1f}", f"{r['R neto']:+.3f}", f"{r['t']:+.2f}", f"{r['R bruto']:+.3f}",
+                 f"{r['coste (R)']:.3f}", f"{r['R neto 1.ª mitad']:+.3f}", f"{r['R neto 2.ª mitad']:+.3f}",
+                 f"{r['R neto long']:+.3f}", f"{r['R neto short']:+.3f}", "sí" if r["pasa"] else "no"] for _, r in frame.iterrows()]
+
+    head = ["ORB", "Ops", "Acierto %", "R neto", "t", "Sin costes", "Coste", "1.ª mitad", "2.ª mitad", "Long", "Short", "Pasa"]
+    # elegir con la 1.ª mitad y medir en la 2.ª
+    pick = played.sort_values("R neto 1.ª mitad", ascending=False).head(5)
+    out = [f"# Resumen de los ORB de {minutes} min en NAS100", "", rules, "",
+           "## Lo importante", "",
+           f"- ORB con operaciones: {n}. Con t > {MIN_T}: **{pos}**; con t < −{MIN_T}: {neg}. Solo por azar se esperarían unos "
+           f"{0.025 * n:.1f} de cada lado.",
+           f"- Pasan los criterios (≥ {MIN_TRADES} operaciones, R neto > +{MIN_MEAN} con t > {MIN_T} y las dos mitades en "
+           f"positivo): **{len(passed)}**" + (f" ({', '.join(passed['ORB'])})" if len(passed) else "") + ".",
+           f"- Superan además el umbral corregido por comparaciones múltiples (t > {BONFERRONI_T}): **{len(bonf)}**"
+           + (f" ({', '.join(bonf['ORB'])})" if len(bonf) else "") + ".",
+           f"- R neto medio de todos los ORB: {played['R neto'].mean():+.3f} R; sin costes: {played['R bruto'].mean():+.3f} R; coste "
+           f"medio {played['coste (R)'].mean():.3f} R.", "",
+           "## Elegidos con la 1.ª mitad, medidos en la 2.ª", "",
+           "Los 5 mejores ORB por su R neto en la 1.ª mitad del histórico, y lo que hicieron después sin haberlos visto. Si la ventaja "
+           "fuera real, la 2.ª mitad seguiría en positivo.", "",
+           table(rows_of(pick), head), "",
+           "## Los 10 mejores por t (todo el histórico)", "",
+           table(rows_of(played.sort_values("t", ascending=False).head(10)), head), "",
+           "## Todos los ORB", "",
+           f"Ficheros por hora en esta carpeta (`ORB_HHh.md`). Ordenados por hora de inicio:", "",
+           table(rows_of(grid[grid["ops"] > 0]), head)]
+    return "\n".join(out)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--perfil", default="puprime")
     ap.add_argument("--simbolo", default="NAS100")
     ap.add_argument("--colchon", type=float, default=0.2, help="colchón del stop en anchos del ORB (0,2 = 20 %%)")
     ap.add_argument("--sesion", choices=list(SESSIONS), default="0100", help="sesión del ORB (por defecto la 01:00)")
+    ap.add_argument("--rejilla", type=int, choices=(15, 30, 45, 60), help="prueba todos los ORB de esa duración (min), de 00:00 a 23:45")
+    ap.add_argument("--ventana", type=int, default=GRID_WINDOW, help="rejilla: minutos que vale la rotura desde el final del ORB")
     ap.add_argument("--cache", action="store_true", help="reutiliza las velas guardadas en analisis/orb_nasdaq_m5.pkl")
     args = ap.parse_args()
     sym, df = load(args.perfil, args.simbolo, args.cache)
+    if args.rejilla:
+        folder = run_grid(sym, df, args.rejilla, args.ventana, args.colchon)
+        print(f"\nRejilla: {folder}")
+        return
     _, start, deadline = SESSIONS[args.sesion]
     text = report(sym, df, Params(buffer=args.colchon, start=start, deadline=deadline, exit_min=deadline), args.sesion)
     doc = Path(str(DOC).format(args.sesion))

@@ -13,7 +13,7 @@ Script: `scripts/backtest_orb_nasdaq.py --sesion nueva_york` → operaciones en 
 ## Datos
 
 - 573.084 velas M5 de NAS100.s del 10/09/2018 al 30/10/2026 (hora de NY. servidor = NY + 7 h).
-- Días laborables: 2117; con las tres velas del ORB: 2093; con rotura antes de las 16:00: 2088 (100 %).
+- Días con mercado: 2537; con todas las velas del ORB: 2093; con rotura antes de las 16:00: 2088 (100 %).
 - Comprobación del horario: velas con hora NY 17 (la pausa diaria de los índices): 0 de 573.084.
 
 ## Veredicto (criterios fijados antes de ver los resultados)
