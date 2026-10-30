@@ -69,7 +69,26 @@ VARIANTS = (
     Variant("stop a 0,15 rangos del VWAP", Params(stop_frac=0.15)),
     Variant("stop a 0,5 rangos del VWAP", Params(stop_frac=0.5)),
     Variant("objetivo: extremo + 0,5 rangos", Params(target=0.5)),
+    Variant("VWAP del lado del objetivo respecto al 50 % (largo: por encima)", Params(vwap_side="above")),
+    Variant("VWAP del lado del stop respecto al 50 % (largo: por debajo)", Params(vwap_side="below")),
 )
+
+# Rejilla de stop y objetivo (exploratoria): lado del VWAP x stop x objetivo. No se elige la mejor celda por sus resultados en todo
+# el histórico: el informe la elige solo con la 1.ª mitad y la mide en la 2.ª (ver `walk_forward`).
+GRID_SIDES = (None, "above", "below")
+GRID_STOPS = (0.0, 0.15, 0.25, 0.5)                                        # rangos más allá del VWAP (0 = la mínima / máxima del retest)
+GRID_TARGETS = (("extremo", {}), ("extremo + 0,5", {"target": 0.5}), ("1 R", {"target_r": 1.0}), ("1,5 R", {"target_r": 1.5}),
+                ("2 R", {"target_r": 2.0}))
+GRID_PREFIX = "rejilla | "
+
+
+def grid_name(side, stop, label) -> str:
+    return f"{GRID_PREFIX}VWAP {'indiferente' if side is None else 'sobre 50 %' if side == 'above' else 'bajo 50 %'} | stop {stop:g} | objetivo {label}"
+
+
+GRID = tuple(Variant(grid_name(side, stop, label), Params(vwap_side=side, stop_frac=stop, **extra))
+             for side in GRID_SIDES for stop in GRID_STOPS for label, extra in GRID_TARGETS)
+ALL_VARIANTS = VARIANTS + GRID
 
 
 def run_symbol(source, sym: str, order, zones, be_r, max_hold):
@@ -108,7 +127,7 @@ def run_symbol(source, sym: str, order, zones, be_r, max_hold):
         funnel += 1
         lo = max(0, first - PAD)
         sl = slice(lo, end + 2)
-        for var in VARIANTS:
+        for var in ALL_VARIANTS:
             if var.min_rel_range is not None and not rel >= var.min_rel_range:
                 continue                                  # NaN (poco historial) también se descarta
             anchor = vw[sl] if var.anchor == "vwap" else np.full(len(vw[sl]), (s.high + s.low) / 2)
@@ -175,6 +194,51 @@ def evaluate(primary: pd.DataFrame, control: pd.DataFrame) -> list[tuple[str, bo
     return out
 
 
+MIN_CELL_HALF = 100                                         # operaciones mínimas en la 1.ª mitad para que una celda de la rejilla pueda elegirse
+
+
+def half_means(r: pd.DataFrame) -> tuple[float, float]:
+    """R neto medio de cada mitad (por fecha) de un grupo de operaciones."""
+    a, b = split_halves(r)
+    return (a["R neto"].mean() if len(a) else float("nan"), b["R neto"].mean() if len(b) else float("nan"))
+
+
+def grid_table(trades: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for v in GRID:
+        g = trades[trades["variante"] == v.name]
+        m1, m2 = half_means(g)
+        s = summary_row(g)
+        rows.append({"celda": v.name.removeprefix(GRID_PREFIX), "operaciones": s["operaciones"], "R potencial medio": s.get("R potencial medio", float("nan")),
+                     "win rate %": s.get("win rate %", float("nan")), "equilibrio %": s.get("equilibrio %", float("nan")),
+                     "R neto medio": s.get("R neto medio", float("nan")), "t": s.get("t", float("nan")), "R neto 1.ª mitad": m1, "R neto 2.ª mitad": m2})
+    return pd.DataFrame(rows)
+
+
+def walk_forward(trades: pd.DataFrame) -> dict:
+    """Elige la celda de la rejilla con mejor R neto medio en la 1.ª mitad (con operaciones suficientes) y la mide en la 2.ª.
+
+    Es la única forma honesta de «elegir stop y objetivo»: con 60 celdas mirando los mismos datos, la mejor de todo el histórico
+    sale bien por azar. Devuelve también cuántas celdas son positivas en las dos mitades y la media de la 2.ª mitad de todas
+    (lo que se esperaría elegir una al azar).
+    """
+    cells = [(v.name, *half_means(trades[trades["variante"] == v.name]), len(split_halves(trades[trades["variante"] == v.name])[0]))
+             for v in GRID]
+    valid = [c for c in cells if c[3] >= MIN_CELL_HALF and not np.isnan(c[1])]
+    out = {"celdas": len(cells), "con operaciones suficientes": len(valid),
+           "positivas en las dos mitades": sum(1 for c in valid if c[1] > 0 and c[2] > 0)}
+    seconds = [c[2] for c in valid if not np.isnan(c[2])]
+    out["media 2.ª mitad de todas"] = float(np.mean(seconds)) if seconds else float("nan")
+    if valid:
+        best = max(valid, key=lambda c: c[1])
+        g = trades[trades["variante"] == best[0]]
+        second = split_halves(g)[1]
+        out.update({"celda elegida": best[0].removeprefix(GRID_PREFIX), "1.ª mitad (R neto)": best[1],
+                    "2.ª mitad (R neto)": best[2], "operaciones 2.ª mitad": len(second),
+                    "t 2.ª mitad": summary_row(second).get("t", float("nan"))})
+    return out
+
+
 def md_table(df: pd.DataFrame, floats: int = 3) -> str:
     def fmt(x):
         if isinstance(x, (float, np.floating)):
@@ -199,8 +263,25 @@ def build_report(trades: pd.DataFrame, infos: pd.DataFrame, args) -> str:
               "**La hipótesis NO cumple los criterios: no hay ventaja demostrada.**", ""]
     lines += [f"- {'CUMPLE' if ok else 'NO CUMPLE'} - {name}: {detail}" for name, ok, detail in results]
     lines += ["", "## Variantes", "", "La primera es la hipótesis; las demás son sensibilidad, no se eligen por sus resultados.", ""]
-    rows = [{"variante": name, **summary_row(g)} for name, g in ((v.name, trades[trades["variante"] == v.name]) for v in VARIANTS)]
+    rows = [{"variante": name, **summary_row(g), "R neto 1.ª mitad": half_means(g)[0], "R neto 2.ª mitad": half_means(g)[1]}
+            for name, g in ((v.name, trades[trades["variante"] == v.name]) for v in VARIANTS)]
     lines += [md_table(pd.DataFrame(rows)), ""]
+    lines += ["## Lado del VWAP respecto al 50 % de la TBR (largo: por encima / por debajo)", "",
+              "Pregunta: ¿aporta algo que el VWAP esté del lado del objetivo (por encima del 50 % en un largo) o del lado del stop "
+              "(por debajo)? Si un lado no supera a la línea base (retest del 50 % sin VWAP) ni al VWAP indiferente, el VWAP no añade "
+              "solidez. El corto es el espejo.", ""]
+    side_names = (CONTROL, "sin confluencia (el VWAP en cualquier punto del rango)", VARIANTS[8].name, VARIANTS[9].name)
+    lines += [md_table(pd.DataFrame([{"variante": n, **summary_row(trades[trades["variante"] == n]),
+                                       "R neto 1.ª mitad": half_means(trades[trades["variante"] == n])[0],
+                                       "R neto 2.ª mitad": half_means(trades[trades["variante"] == n])[1]} for n in side_names])), ""]
+    wf = walk_forward(trades)
+    lines += ["## Stop y objetivo: rejilla exploratoria", "",
+              f"{len(GRID)} celdas (lado del VWAP x stop x objetivo). **No se elige la mejor del histórico completo**: con tantas celdas "
+              "mirando los mismos datos, la mejor sale bien por azar. Se elige solo con la 1.ª mitad y se mide en la 2.ª.", ""]
+    lines += [f"- {k}: {v:+.3f}" if isinstance(v, float) else f"- {k}: {v}" for k, v in wf.items()]
+    lines += ["", "Una celda solo merece seguirse si su R neto de la 2.ª mitad es positivo con t > 2 y supera la media de todas las celdas "
+              "en esa mitad; después habría que confirmarla con datos nuevos (el forwardtest del bot).", "",
+              md_table(grid_table(trades)), ""]
     if len(primary):
         for title, key in (("Por mercado", "mercado"), ("Por zona", "zona"), ("Por dirección", "dirección")):
             lines += [f"## Variante principal: {title.lower()}", "",

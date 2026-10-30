@@ -97,3 +97,23 @@ def test_solo_busca_desde_el_cierre_de_la_tbr_y_dentro_del_plazo():
     v = np.full(len(c), VWAP)
     assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 1) is None   # la vela de la señal (2) queda fuera del plazo
     assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 2) is not None
+
+
+def test_lado_del_vwap_respecto_al_50_por_ciento():
+    # VWAP en 104 y 50 % en 105: queda del lado del stop (por debajo en un largo)
+    assert signal(params=Params(vwap_side="below")) is not None
+    assert signal(params=Params(vwap_side="above")) is None
+    high_rows = list(LONG)
+    high_rows[2] = (107.0, 107.2, 103.5, 106.5)                        # retest que cierra en 106,5: ahora el VWAP puede estar en 105,5 (> 50 %)
+    assert signal(high_rows, vwap=105.5, params=Params(vwap_side="above", min_rr=0.9)) is not None
+    assert signal(high_rows, vwap=105.5, params=Params(vwap_side="below", min_rr=0.9)) is None
+    mirror = [(210 - o, 210 - l, 210 - h, 210 - c) for o, h, l, c in high_rows]     # el corto es el espejo: «above» = por debajo del 50 %
+    assert signal(mirror, vwap=210 - 105.5, params=Params(vwap_side="above", min_rr=0.9)) is not None
+    assert signal(mirror, vwap=210 - 105.5, params=Params(vwap_side="below", min_rr=0.9)) is None
+
+
+def test_objetivo_en_r_fijo():
+    s = signal(params=Params(target_r=1.5))
+    assert s.target == pytest.approx(105.0 + 1.5 * 3.5)                      # entrada 105, stop 101,5
+    assert signal(params=Params(target_r=0.8)) is None                       # por debajo de min_rr = 1
+    assert signal(params=Params(stop_frac=0.0)).stop == 103.5                # sin colchón: la mínima del retest

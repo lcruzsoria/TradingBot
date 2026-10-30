@@ -62,7 +62,7 @@ def test_las_operaciones_son_coherentes(monkeypatch):
     module, trades, info = run(monkeypatch, 300)
     primary = trades[trades["variante"] == module.PRIMARY]
     assert len(primary) > 20 and info["TBR evaluadas"] > 100
-    assert set(trades["variante"]) <= {v.name for v in module.VARIANTS} and module.CONTROL in set(trades["variante"])
+    assert set(trades["variante"]) <= {v.name for v in module.ALL_VARIANTS} and module.CONTROL in set(trades["variante"])
     long_, short = primary[primary["dirección"] == "long"], primary[primary["dirección"] == "short"]
     assert len(long_) and len(short)
     assert ((long_["stop"] < long_["entrada"]) & (long_["entrada"] < long_["objetivo"])).all()
@@ -99,3 +99,16 @@ def test_el_informe_y_el_veredicto_con_los_criterios_fijados(monkeypatch):
     good["R neto"] = np.where(np.arange(len(good)) % 2 == 0, 1.0, 0.0)              # media 0,5 con varianza
     verdict = module.evaluate(good, control)
     assert verdict[0][1] and verdict[1][1] and verdict[3][1]                       # >= 500 operaciones, mitades positivas, mejora a la base
+
+
+def test_informe_con_lado_del_vwap_y_rejilla_con_seleccion_en_la_primera_mitad(monkeypatch):
+    module, trades, info = run(monkeypatch, 1500)
+    report = module.build_report(trades, pd.DataFrame([info]), None)
+    assert "## Lado del VWAP respecto al 50 %" in report and "## Stop y objetivo: rejilla exploratoria" in report
+    assert len(module.GRID) == 60 and len({v.name for v in module.GRID} & set(trades["variante"])) >= 40   # alguna celda puede quedarse sin operaciones (RR < 1)
+    wf = module.walk_forward(trades)
+    assert wf["celdas"] == 60 and wf["con operaciones suficientes"] > 0 and "celda elegida" in wf
+    # un paseo aleatorio no tiene ventaja: la celda elegida en la 1.ª mitad no debe poder presumir en la 2.ª
+    assert wf["t 2.ª mitad"] < 3
+    side = trades[trades["variante"].str.startswith("VWAP del lado")]
+    assert set(side["variante"]) == {module.VARIANTS[8].name, module.VARIANTS[9].name}

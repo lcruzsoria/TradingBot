@@ -34,6 +34,9 @@ class Params:
     min_rr: float = 1.0                # el objetivo debe estar al menos a esta distancia en R
     slope_bars: int = 0                # 0 = sin filtro; n: el VWAP debe ir a favor de la operación respecto de hace n velas
     confluence: float | None = None    # None = sin filtro; x: |VWAP - 50 %| <= x * rango
+    vwap_side: str | None = None       # None = sin filtro; "above": el VWAP queda del lado del objetivo respecto al 50 % (largo: por encima);
+                                       # "below": del lado del stop (largo: por debajo). El corto es el espejo
+    target_r: float | None = None      # None = objetivo en el extremo de la TBR; x: objetivo a x veces el riesgo (R fijo)
 
 
 @dataclass(frozen=True)
@@ -67,11 +70,15 @@ def _scan_long(o, h, l, c, vwap, high, low, first, end, p: Params):
             continue
         if p.confluence is not None and abs(v - mid) > p.confluence * rng:
             continue
+        if p.vwap_side == "above" and not v > mid:
+            continue
+        if p.vwap_side == "below" and not v < mid:
+            continue
         entry = float(c[t])
         stop = min(float(l[t]), v - p.stop_frac * rng)
-        target = high + p.target * rng
         risk = entry - stop
-        if risk <= 0 or (target - entry) < p.min_rr * risk:
+        target = entry + p.target_r * risk if p.target_r is not None else high + p.target * rng
+        if risk <= 0 or (target - entry) < p.min_rr * risk - 1e-9:
             continue
         return t, entry, stop, target, float(v)
     return None
