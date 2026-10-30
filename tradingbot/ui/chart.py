@@ -333,6 +333,9 @@ class ChartView(pg.PlotWidget):
         self._sma: tuple | None = None            # (valores, color, trazo) de la última SMA recibida
         self._sma_visible = False
         self._sma_item = None
+        self._ma_show = "sma"                     # qué dibuja el botón SMA: "sma", "vwap" o "ambos"
+        self._vwap: tuple | None = None           # (valores, inicios de día, color, trazo) del último VWAP recibido
+        self._vwap_item = None
         self._positions: list[dict] = []          # posiciones de los patrones: {x0, x1, entry, stop, target, label, state, direction}
         self._pos_visible = True
         self._pos_items: list = []
@@ -391,6 +394,7 @@ class ChartView(pg.PlotWidget):
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
         self.set_day_levels([], [], self._day_colors)
         self.set_sma(None)
+        self.set_vwap(None)
         self.set_last_price(float(c[-1]))
         vb.setLimits(xMin=-5, xMax=self._n + 60)
         self._update_crosshair()
@@ -863,20 +867,32 @@ class ChartView(pg.PlotWidget):
         self._draw_sma()
 
     def show_sma(self, visible: bool) -> None:
+        """Botón SMA encendido o apagado (lo que dibuja lo decide set_ma_show)."""
         self._sma_visible = visible
         self._draw_sma()
+        self._draw_vwap()
+
+    def set_ma_show(self, mode: str) -> None:
+        """Qué dibuja el botón SMA cuando está encendido: "sma", "vwap" o "ambos"."""
+        self._ma_show = mode
+        self._draw_sma()
+        self._draw_vwap()
+
+    @staticmethod
+    def _ma_pen(color: str, style: str):
+        pen_style = {"discontinuo": Qt.PenStyle.DashLine, "punteado": Qt.PenStyle.DotLine}.get(style, Qt.PenStyle.SolidLine)
+        return pg.mkPen(color, width=1.5, style=pen_style)
 
     def _draw_sma(self) -> None:
         pi = self.getPlotItem()
         if self._sma_item is not None:
             pi.removeItem(self._sma_item)
             self._sma_item = None
-        if self._sma is None or not self._sma_visible:
+        if self._sma is None or not self._sma_visible or self._ma_show == "vwap":
             return
         values, color, style = self._sma
-        pen_style = {"discontinuo": Qt.PenStyle.DashLine, "punteado": Qt.PenStyle.DotLine}.get(style, Qt.PenStyle.SolidLine)
         item = pg.PlotCurveItem(x=np.arange(len(values), dtype=float), y=values, connect="finite",
-                                pen=pg.mkPen(color, width=1.5, style=pen_style))
+                                pen=self._ma_pen(color, style))
         item.setZValue(-3)
         pi.addItem(item, ignoreBounds=True)
         self._sma_item = item
@@ -884,6 +900,32 @@ class ChartView(pg.PlotWidget):
     @property
     def sma_drawn(self) -> bool:
         return self._sma_item is not None
+
+    # -- VWAP (precio medio ponderado por volumen, con reinicio en cada día de trading) ---------------------
+    def set_vwap(self, values, breaks=(), color: str = "#E040FB", style: str = "normal") -> None:
+        """values: el VWAP de cada vela (NaN sin volumen) o None para quitarlo; breaks: velas donde empieza un día nuevo."""
+        self._vwap = None if values is None else (np.asarray(values, dtype=float), list(breaks), color, style)
+        self._draw_vwap()
+
+    def _draw_vwap(self) -> None:
+        pi = self.getPlotItem()
+        if self._vwap_item is not None:
+            pi.removeItem(self._vwap_item)
+            self._vwap_item = None
+        if self._vwap is None or not self._sma_visible or self._ma_show == "sma":
+            return
+        values, breaks, color, style = self._vwap
+        x = np.arange(len(values), dtype=float)
+        if breaks:                                           # un hueco (NaN) entre un día y el siguiente: el VWAP se reinicia
+            x, values = np.insert(x, breaks, np.nan), np.insert(values, breaks, np.nan)
+        item = pg.PlotCurveItem(x=x, y=values, connect="finite", pen=self._ma_pen(color, style))
+        item.setZValue(-3)
+        pi.addItem(item, ignoreBounds=True)
+        self._vwap_item = item
+
+    @property
+    def vwap_drawn(self) -> bool:
+        return self._vwap_item is not None
 
     @property
     def day_item_count(self) -> int:

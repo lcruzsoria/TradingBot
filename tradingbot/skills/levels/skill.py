@@ -7,9 +7,11 @@ from datetime import datetime
 from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
+import numpy as np
+
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
-                        DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_US_INDICES, SMA_STYLES, compute, days, is_us_index,
-                        market_close, new_trading_day, parse_time)
+                        DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_SMA_SHOW, DEFAULT_US_INDICES,
+                        SMA_SHOWS, SMA_STYLES, compute, days, is_us_index, market_close, new_trading_day, parse_time, vwap)
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -61,6 +63,12 @@ class LevelsSkill(Skill):
         self.sma_style = self.settings.get("SMA_STYLE", SMA_STYLES[0]).strip().lower()
         if self.sma_style not in SMA_STYLES:
             raise ValueError(f"LEVELS_SMA_STYLE={self.sma_style!r}: usa {', '.join(SMA_STYLES)}.")
+        self.sma_show = self.settings.get("SMA_SHOW", DEFAULT_SMA_SHOW).strip().lower()
+        if self.sma_show not in SMA_SHOWS:
+            raise ValueError(f"LEVELS_SMA_SHOW={self.sma_show!r}: usa {', '.join(SMA_SHOWS)}.")
+        self.vwap_style = self.settings.get("VWAP_STYLE", SMA_STYLES[0]).strip().lower()
+        if self.vwap_style not in SMA_STYLES:
+            raise ValueError(f"LEVELS_VWAP_STYLE={self.vwap_style!r}: usa {', '.join(SMA_STYLES)}.")
 
     def start_for(self, symbol: str) -> int:
         """Minutos (hora de NY) a los que empieza el día de trading de este activo."""
@@ -72,6 +80,9 @@ class LevelsSkill(Skill):
         if event.topic == "levels.sma":                      # la media se reconfigura desde su botón
             p = event.payload
             self.sma_period, self.sma_style, self.colors["sma"] = int(p["period"]), p["style"], p["color"].upper()
+            self.sma_show = p.get("show", self.sma_show)
+            self.vwap_style = p.get("vwap_style", self.vwap_style)
+            self.colors["vwap"] = p.get("vwap_color", self.colors["vwap"]).upper()
             if self._last is None:
                 return
         elif event.topic == "clock.offset":
@@ -112,9 +123,17 @@ class LevelsSkill(Skill):
                             self.days)
             day_list = days(ts, ahead, start) if self.separators else []
         sma = df["close"].rolling(self.sma_period).mean().to_numpy()
+        if available:                                        # el VWAP se reinicia cada día: con velas diarias no tiene sentido
+            volume = df["tick_volume"].to_numpy() if "tick_volume" in df else np.zeros(len(df))
+            vwap_values, vwap_breaks = vwap(df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(),
+                                            df["close"].to_numpy(), volume, ahead, start)
+        else:
+            vwap_values, vwap_breaks = np.full(len(df), np.nan), []
         self.set_caption(f"día {start // 60:02d}:{start % 60:02d}" if available else f"no en {display_label(tf)}")
         self.publish("levels.updated", {"symbol": symbol, "timeframe": tf, "lines": lines, "days": day_list,
                                         "day_start": start, "us_index": is_us_index(symbol, self.us_indices),
                                         "available": available, "estimated": estimated,
                                         "colors": self.colors, "max_tf": self.max_tf, "sma": sma,
-                                        "sma_period": self.sma_period, "sma_style": self.sma_style})
+                                        "sma_period": self.sma_period, "sma_style": self.sma_style,
+                                        "sma_show": self.sma_show, "vwap": vwap_values, "vwap_breaks": vwap_breaks,
+                                        "vwap_style": self.vwap_style})
