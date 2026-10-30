@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -89,6 +90,8 @@ class Params:
     start: int = 60                         # inicio del ORB (minutos NY desde las 00:00 del día)
     deadline: int = NY_OPEN                 # la rotura tiene que cerrar como tarde aquí (puede pasar de 1440: el día siguiente)
     minutes: int = ORB_MINUTES              # duración del ORB
+    ema: int = 0                            # filtro de tendencia: EMA de este periodo (0 = sin filtro). Largos solo con el cierre
+    ema_tf: int = BAR                       # de la rotura por encima de la EMA y cortos solo por debajo; marco de la EMA en minutos
 
     @property
     def orb_bars(self) -> tuple[int, ...]:
@@ -101,10 +104,22 @@ def hhmm(minutes: int) -> str:
 
 
 # -- datos ---------------------------------------------------------------------------------------------
+def cache_for(profile: str, want: str) -> Path:
+    """Caché de velas de un perfil y mercado (la del NAS100 de PUPrime conserva su nombre de siempre)."""
+    if (profile, want.upper()) == ("puprime", "NAS100"):
+        return CACHE
+    return ROOT / "analisis" / f"orb_m5_{profile}_{want.lower()}.pkl"
+
+
 def load(profile: str, want: str, use_cache: bool) -> tuple[str, pd.DataFrame]:
-    """Velas M5 con su spread (en precio) del perfil de MT5, desde que el histórico es intradía."""
-    if use_cache and CACHE.exists():
-        sym, df = pd.read_pickle(CACHE)
+    """Velas M5 con su spread (en precio) del perfil de MT5, desde que el histórico es intradía.
+
+    Ojo: todos los perfiles comparten el terminal de MT5, así que conectarse con otro perfil cambia la cuenta del terminal (y la
+    que ve el bot si está abierto). Con --cache no se conecta.
+    """
+    cache = cache_for(profile, want)
+    if use_cache and cache.exists():
+        sym, df = pd.read_pickle(cache)
         return sym, df
     from tradingbot.config import load_profiles, select_profile
     from tradingbot.skills.feed.mt5_client import CHUNK, Mt5Source
@@ -116,9 +131,15 @@ def load(profile: str, want: str, use_cache: bool) -> tuple[str, pd.DataFrame]:
         raise SystemExit(f"El perfil {profile} no tiene {want}")
     mt5 = source._mt5
     point = mt5.symbol_info(sym).point
+    mt5.symbol_select(sym, True)
     frames, pos = [], 0
     while True:
-        rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, pos, CHUNK)
+        rates = None
+        for attempt in range(6):                     # la primera petición puede llegar antes de que MT5 sincronice el histórico
+            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, pos, CHUNK)
+            if rates is not None and len(rates):
+                break
+            time.sleep(2)
         if rates is None or len(rates) == 0:
             break
         frames.append(pd.DataFrame(rates))
@@ -130,12 +151,36 @@ def load(profile: str, want: str, use_cache: bool) -> tuple[str, pd.DataFrame]:
     df = df.rename(columns={"time": "ts"})[["ts", "open", "high", "low", "close", "spread"]]
     df["spread"] = df["spread"].astype(float) * point
     df = df.iloc[intraday_start(df["ts"].to_numpy()):-1].reset_index(drop=True)      # la última vela sigue formándose
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    pd.to_pickle((sym, df), CACHE)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    pd.to_pickle((sym, df), cache)
     return sym, df
 
 
 # -- simulación ----------------------------------------------------------------------------------------
+_EMA_CACHE: dict = {}
+
+
+def ema_at_close(df: pd.DataFrame, period: int, tf: int) -> np.ndarray:
+    """EMA de `period` cierres en velas de `tf` minutos, vista al cierre de cada vela M5 (sin mirar al futuro): en M5 incluye la
+    propia vela; en un marco mayor, la última vela de ese marco ya cerrada (o la que cierra justo con esta vela M5)."""
+    key = (id(df), len(df), period, tf)
+    if key not in _EMA_CACHE:
+        close = df["close"].astype(float)
+        if tf == BAR:
+            out = close.ewm(span=period, adjust=False).mean().to_numpy()
+        else:
+            end = df["ts"].to_numpy() + BAR * 60                      # hora de cierre de cada vela M5
+            bucket = (end - 1) // (tf * 60)                           # vela del marco mayor a la que pertenece
+            last_in_bucket = np.r_[bucket[1:] != bucket[:-1], True]   # la última M5 de cada vela grande la cierra
+            big = pd.Series(close.to_numpy()[last_in_bucket], index=bucket[last_in_bucket])
+            ema_big = big.ewm(span=period, adjust=False).mean()
+            done = np.where(last_in_bucket, bucket, bucket - 1)       # vela grande ya cerrada al cierre de esta M5
+            out = ema_big.reindex(done).ffill().to_numpy()
+        _EMA_CACHE.clear()
+        _EMA_CACHE[key] = out
+    return _EMA_CACHE[key]
+
+
 def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
     """Una operación por ORB (uno al día) como mucho, con las reglas de `p`. Devuelve las operaciones y el embudo de días.
 
@@ -146,7 +191,8 @@ def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
     ny = df["ts"].to_numpy() - AHEAD
     h, l, c, sp = (df[k].to_numpy() for k in ("high", "low", "close", "spread"))
     need = p.minutes // BAR
-    rows, funnel = [], {"días": 0, "con ORB": 0, "con rotura": 0}
+    ema = ema_at_close(df, p.ema, p.ema_tf) if p.ema else None
+    rows, funnel = [], {"días": 0, "con ORB": 0, "con rotura": 0, "descartadas por la EMA": 0}
     for d in np.unique(ny // 86400):
         base = int(d) * 86400
         funnel["días"] += 1
@@ -168,6 +214,9 @@ def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
         hit = i1 + int(broke[0])
         long = c[hit] > hi
         if p.side != "ambos" and p.side != ("long" if long else "short"):
+            continue
+        if ema is not None and not np.isnan(ema[hit]) and ((c[hit] <= ema[hit]) if long else (c[hit] >= ema[hit])):
+            funnel["descartadas por la EMA"] += 1           # la primera rotura va contra la EMA: ese día no se opera
             continue
         entry = float(c[hit])
         stop = lo - p.buffer * width if long else hi + p.buffer * width
@@ -382,26 +431,30 @@ def orb_section(df: pd.DataFrame, p: Params) -> tuple[str, dict]:
     return "\n".join(lines), v
 
 
-def run_grid(sym: str, df: pd.DataFrame, minutes: int, window: int, buffer: float) -> Path:
+def run_grid(sym: str, df: pd.DataFrame, minutes: int, window: int, buffer: float, ema: int = 0, ema_tf: int = BAR) -> Path:
     """Los 96 ORB de `minutes` minutos: un fichero por hora (sus 4 ORB) y un RESUMEN.md con la clasificación."""
-    folder = Path(str(GRID_DIR).format(minutes))
+    tag = f"_ema{ema}" + (f"_{ema_tf}m" if ema_tf != BAR else "") if ema else ""
+    folder = Path(str(GRID_DIR).format(minutes) + tag)
     folder.mkdir(parents=True, exist_ok=True)
     ny = df["ts"].to_numpy() - AHEAD
     first, last = pd.Timestamp(int(ny[0]), unit="s"), pd.Timestamp(int(ny[-1]), unit="s")
     rules = (f"Reglas: ORB de {minutes} min; entrada al cierre de la primera vela M5 que cierra fuera del ORB, como tarde "
              f"{window // 60} h después de su final; stop en el extremo opuesto ± {buffer:.0%} del ancho; objetivo 1:1; a las "
-             f"{window // 60} h se cierra. Una operación por ORB y día. Con el spread real de MT5 (R neto). {sym} de PUPrime, del "
+             f"{window // 60} h se cierra. Una operación por ORB y día. Con el spread real de MT5 (R neto)."
+             + (f" Filtro EMA {ema} en velas de {ema_tf} min: largos solo con el cierre de la rotura por encima de la EMA y "
+                "cortos solo por debajo; si la primera rotura va contra la EMA, ese día no se opera." if ema else "") + f" {sym} de PUPrime, del "
              f"{first:%d/%m/%Y} al {last:%d/%m/%Y}, hora de Nueva York.")
     summary_rows = []
     for hour in range(24):
-        parts = [f"# ORB de {minutes} min de las {hour:02d}:00 en {sym} (M5, PUPrime)", "", rules, "",
+        parts = [f"# ORB de {minutes} min de las {hour:02d}:00 en {sym} (M5, PUPrime)"
+                 + (f", filtro EMA {ema} ({ema_tf} min)" if ema else ""), "", rules, "",
                  f"Criterios (fijados antes de ver resultados): al menos {MIN_TRADES} operaciones, R neto medio > +{MIN_MEAN} con "
                  f"t > {MIN_T}, y R neto medio positivo en las dos mitades del histórico.", ""]
         compare = []
         for quarter in range(0, 60, GRID_STEP):
             start = hour * 60 + quarter
             p = Params(buffer=buffer, start=start, minutes=minutes, deadline=start + minutes + window,
-                       exit_min=start + minutes + window)
+                       exit_min=start + minutes + window, ema=ema, ema_tf=ema_tf)
             text, v = orb_section(df, p)
             parts.append(text)
             summary_rows.append({"ORB": hhmm(start), "minutos": minutes, **v})
@@ -415,7 +468,7 @@ def run_grid(sym: str, df: pd.DataFrame, minutes: int, window: int, buffer: floa
                       "## Detalle", ""]
         (folder / f"ORB_{hour:02d}h.md").write_text("\n".join(parts) + "\n", encoding="utf-8")
     grid = pd.DataFrame(summary_rows)
-    grid.to_csv(ROOT / "analisis" / f"orbs_{minutes}m_resumen.csv", index=False)
+    grid.to_csv(ROOT / "analisis" / f"orbs_{minutes}m{tag}_resumen.csv", index=False)
     (folder / "RESUMEN.md").write_text(grid_summary(grid, minutes, rules) + "\n", encoding="utf-8")
     return folder
 
@@ -464,11 +517,13 @@ def main() -> None:
     ap.add_argument("--sesion", choices=list(SESSIONS), default="0100", help="sesión del ORB (por defecto la 01:00)")
     ap.add_argument("--rejilla", type=int, choices=(15, 30, 45, 60), help="prueba todos los ORB de esa duración (min), de 00:00 a 23:45")
     ap.add_argument("--ventana", type=int, default=GRID_WINDOW, help="rejilla: minutos que vale la rotura desde el final del ORB")
+    ap.add_argument("--ema", type=int, default=0, help="filtro de tendencia: EMA de ese periodo (0 = sin filtro)")
+    ap.add_argument("--ema-tf", type=int, default=BAR, help="marco de la EMA en minutos (5, 15, 60...)")
     ap.add_argument("--cache", action="store_true", help="reutiliza las velas guardadas en analisis/orb_nasdaq_m5.pkl")
     args = ap.parse_args()
     sym, df = load(args.perfil, args.simbolo, args.cache)
     if args.rejilla:
-        folder = run_grid(sym, df, args.rejilla, args.ventana, args.colchon)
+        folder = run_grid(sym, df, args.rejilla, args.ventana, args.colchon, args.ema, args.ema_tf)
         print(f"\nRejilla: {folder}")
         return
     _, start, deadline = SESSIONS[args.sesion]
