@@ -1,6 +1,13 @@
-"""Backtest de la estrategia ORB de la 01:00 en NAS100 (velas M5, perfil PUPrime). Solo LEE velas de MT5.
+"""Backtest de la estrategia ORB (rango de apertura de 15 minutos) en NAS100 (velas M5, perfil PUPrime). Solo LEE velas de MT5.
 
-Reglas (hora de Nueva York):
+Tres sesiones (--sesion), todas en hora de Nueva York; el ORB son sus tres primeras velas M5 y el trade vale hasta la siguiente
+referencia horaria:
+  0100        ORB 01:00-01:15; la rotura vale hasta la apertura de Nueva York (09:30), y se cierra a esa hora.
+  londres     ORB 03:00-03:15 (las 08:00 de Londres); hasta las 09:30, como la 0100. Hora fija de NY: las 2-3 semanas al año en
+              que EE. UU. y Europa cambian de hora en fechas distintas, Londres abre a las 04:00 NY.
+  nueva_york  ORB 09:30-09:45; hasta el cierre del contado (16:00).
+
+Reglas (ejemplo de la 0100):
 - ORB: máximo y mínimo de las velas M5 de las 01:00, 01:05 y 01:10 (el rango acaba a las 01:15).
 - Rotura con cuerpo: la primera vela M5 desde las 01:15 que CIERRA por encima del máximo (largo) o por debajo del mínimo (corto)
   del ORB. Una mecha sola no cuenta. Vale hasta la apertura de Nueva York: la vela tiene que cerrar como tarde a las 09:30.
@@ -13,7 +20,7 @@ Reglas (hora de Nueva York):
 - Costes: el spread real de MT5 en la vela de la entrada, una vez por operación (R neto = R bruto - spread / riesgo). Sin comisiones
   ni deslizamiento.
 
-CRITERIOS, FIJADOS ANTES DE VER RESULTADOS (variante principal: colchón 20 %, 1:1, salida a las 09:30). Se da por buena si cumple
+CRITERIOS, FIJADOS ANTES DE VER RESULTADOS (variante principal de cada sesión: colchón 20 %, 1:1, salida a su hora límite). Se da por buena si cumple
 TODOS:
   1. Al menos 300 operaciones.
   2. R neto medio > +0,05 y estadístico t > 2 en todo el histórico.
@@ -25,8 +32,10 @@ Uso (desde la raíz del proyecto):
     uv run python scripts/backtest_orb_nasdaq.py
     uv run python scripts/backtest_orb_nasdaq.py --cache            # reutiliza las velas ya descargadas
     uv run python scripts/backtest_orb_nasdaq.py --colchon 0.3
+    uv run python scripts/backtest_orb_nasdaq.py --cache --sesion londres
 
-Salida: docs/backtest_orb_nasdaq/RESULTADOS.md (resumen, se sube a git) y analisis/backtest_orb_nasdaq.csv (operaciones, ignorada).
+Salida: docs/backtest_orb_nasdaq/RESULTADOS_<sesión>.md (resumen, se sube a git) y analisis/backtest_orb_nasdaq_<sesión>.csv
+(operaciones, ignorada).
 """
 from __future__ import annotations
 
@@ -44,13 +53,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from backtest_patrones import AHEAD, intraday_start, stats                       # noqa: E402
 
-ORB_BARS = (60, 65, 70)                     # minutos desde las 00:00 NY de las velas del ORB (01:00, 01:05, 01:10)
-FIRST_SCAN = 75                             # 01:15: primera vela que puede romper
-NY_OPEN = 9 * 60 + 30                       # 09:30: la rotura tiene que cerrar como tarde aquí
+NY_OPEN = 9 * 60 + 30
+NY_CLOSE = 16 * 60
 BAR = 5
+ORB_MINUTES = 15                            # el ORB son las tres primeras velas M5 de la sesión
+# sesión -> (nombre, inicio del ORB y hora límite en minutos NY): la rotura tiene que cerrar como tarde a la hora límite, y a esa
+# hora se cierra la operación si no ha tocado ni el stop ni el objetivo
+SESSIONS = {"0100": ("01:00", 60, NY_OPEN), "londres": ("apertura de Londres", 180, NY_OPEN),
+            "nueva_york": ("apertura de Nueva York", NY_OPEN, NY_CLOSE)}
 CACHE = ROOT / "analisis" / "orb_nasdaq_m5.pkl"
-CSV = ROOT / "analisis" / "backtest_orb_nasdaq.csv"
-DOC = ROOT / "docs" / "backtest_orb_nasdaq" / "RESULTADOS.md"
+CSV = ROOT / "analisis" / "backtest_orb_nasdaq_{}.csv"
+DOC = ROOT / "docs" / "backtest_orb_nasdaq" / "RESULTADOS_{}.md"
 MIN_TRADES, MIN_MEAN, MIN_T = 300, 0.05, 2.0
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
@@ -61,6 +74,16 @@ class Params:
     rr: float = 1.0                         # objetivo en R
     exit_min: int = NY_OPEN                 # cierre por tiempo (minutos NY); las velas que cierran después no cuentan
     side: str = "ambos"                     # "ambos", "long" o "short"
+    start: int = 60                         # inicio del ORB (minutos NY)
+    deadline: int = NY_OPEN                 # la rotura tiene que cerrar como tarde aquí
+
+    @property
+    def orb_bars(self) -> tuple[int, ...]:
+        return tuple(range(self.start, self.start + ORB_MINUTES, BAR))
+
+
+def hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 # -- datos ---------------------------------------------------------------------------------------------
@@ -113,15 +136,15 @@ def trades(df: pd.DataFrame, p: Params) -> tuple[pd.DataFrame, dict]:
             continue
         funnel["días"] += 1
         m = mins[a:b]
-        orb = [a + k for k in np.flatnonzero(np.isin(m, ORB_BARS))]
-        if len(orb) != len(ORB_BARS):
+        orb = [a + k for k in np.flatnonzero(np.isin(m, p.orb_bars))]
+        if len(orb) != len(p.orb_bars):
             continue
         hi, lo = float(h[orb].max()), float(l[orb].min())
         width = hi - lo
         if width <= 0:
             continue
         funnel["con ORB"] += 1
-        scan = [a + k for k in np.flatnonzero((m >= FIRST_SCAN) & (m + BAR <= NY_OPEN))]
+        scan = [a + k for k in np.flatnonzero((m >= p.start + ORB_MINUTES) & (m + BAR <= p.deadline))]
         hit = next((i for i in scan if c[i] > hi or c[i] < lo), None)
         if hit is None:
             continue
@@ -191,9 +214,12 @@ def halves(t: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return t[t["entrada (NY)"] <= mid], t[t["entrada (NY)"] > mid]
 
 
-def report(sym: str, df: pd.DataFrame, base: Params) -> str:
+def report(sym: str, df: pd.DataFrame, base: Params, session: str) -> str:
     main, funnel = trades(df, base)
-    main.to_csv(CSV, index=False)
+    main.to_csv(str(CSV).format(session), index=False)
+    title = SESSIONS[session][0]
+    bars = ", ".join(hhmm(b) for b in base.orb_bars)
+    first_scan, limit, last_bar = hhmm(base.start + ORB_MINUTES), hhmm(base.deadline), hhmm(base.deadline - BAR)
     ny = df["ts"].to_numpy() - AHEAD
     hours = pd.Series((ny % 86400) // 3600).value_counts().reindex(range(24), fill_value=0)
     first, last = pd.Timestamp(int(ny[0]), unit="s"), pd.Timestamp(int(ny[-1]), unit="s")
@@ -208,23 +234,24 @@ def report(sym: str, df: pd.DataFrame, base: Params) -> str:
                f"{s1.get('R medio', 0):+.3f} / {s2.get('R medio', 0):+.3f} R" if s1.get("operaciones") and s2.get("operaciones") else "-")]
     passed = all(ok for _, ok, _ in checks)
 
-    out = [f"# Backtest ORB 01:00 en {sym} (M5, PUPrime)", "",
-           f"Script: `scripts/backtest_orb_nasdaq.py` → operaciones en `analisis/backtest_orb_nasdaq.csv` (no se sube a git). "
+    out = [f"# Backtest ORB {title} en {sym} (M5, PUPrime)", "",
+           f"Script: `scripts/backtest_orb_nasdaq.py --sesion {session}` → operaciones en `analisis/backtest_orb_nasdaq_{session}.csv` "
+           f"(no se sube a git). "
            f"Solo lee velas de MT5.", "",
            "## Reglas (hora de Nueva York)", "",
-           "- **ORB:** máximo y mínimo de las velas M5 de las 01:00, 01:05 y 01:10.",
-           "- **Rotura con cuerpo:** la primera vela M5 desde las 01:15 que cierra fuera del ORB, como tarde a las 09:30. "
+           f"- **ORB:** máximo y mínimo de las velas M5 de las {bars}.",
+           f"- **Rotura con cuerpo:** la primera vela M5 desde las {first_scan} que cierra fuera del ORB, como tarde a las {limit}. "
            "Una operación por día.",
            f"- **Entrada** al cierre de esa vela. **Stop** en el extremo opuesto del ORB ± {base.buffer:.0%} de su ancho. "
            f"**Objetivo** {base.rr:g}:1 (a la misma distancia que el stop).",
-           "- Sin stop ni objetivo a las 09:30: se cierra al cierre de la vela de las 09:25. Si caben stop y objetivo en una vela, "
-           "cuenta el stop.",
+           f"- Sin stop ni objetivo a las {limit}: se cierra al cierre de la vela de las {last_bar}. Si caben stop y objetivo en una "
+           "vela, cuenta el stop.",
            "- **Costes:** spread real de MT5 en la vela de la entrada (R neto = R bruto − spread / riesgo). Sin comisiones ni "
            "deslizamiento.", "",
            "## Datos", "",
            f"- {len(df):,} velas M5 de {sym} del {first:%d/%m/%Y} al {last:%d/%m/%Y} (hora de NY, servidor = NY + "
            f"{AHEAD // 3600} h).".replace(",", "."),
-           f"- Días laborables: {funnel['días']}; con las tres velas del ORB: {funnel['con ORB']}; con rotura antes de las 09:30: "
+           f"- Días laborables: {funnel['días']}; con las tres velas del ORB: {funnel['con ORB']}; con rotura antes de las {limit}: "
            f"{funnel['con rotura']} ({100 * funnel['con rotura'] / max(1, funnel['con ORB']):.0f} %).",
            f"- Comprobación del horario: velas con hora NY 17 (la pausa diaria de los índices): {int(hours[17])} de "
            f"{len(df):,}.".replace(",", "."), "",
@@ -237,7 +264,7 @@ def report(sym: str, df: pd.DataFrame, base: Params) -> str:
                   row("1.ª mitad", h1), row("2.ª mitad", h2)]), ""]
     if len(main):
         res = main["resultado"].value_counts()
-        out += [f"Cómo terminan: objetivo {int(res.get('objetivo', 0))}, stop {int(res.get('stop', 0))}, a las 09:30 "
+        out += [f"Cómo terminan: objetivo {int(res.get('objetivo', 0))}, stop {int(res.get('stop', 0))}, a las {limit} "
                 f"{int(res.get('tiempo', 0))}. Coste medio {main['coste (R)'].mean():.3f} R (mediano "
                 f"{main['coste (R)'].median():.3f} R); riesgo medio {main['riesgo %'].mean():.2f} % del precio; ancho medio del "
                 f"ORB {main['ancho ORB %'].mean():.2f} %.", "",
@@ -259,8 +286,11 @@ def report(sym: str, df: pd.DataFrame, base: Params) -> str:
         sens.append(row(f"colchón {buf:.0%}" + (" (principal)" if buf == base.buffer else ""), trades(df, replace(base, buffer=buf))[0]))
     for rr in (1.5, 2.0):
         sens.append(row(f"objetivo {rr:g}:1", trades(df, replace(base, rr=rr))[0]))
-    for minute, name in ((12 * 60, "salida a las 12:00"), (16 * 60, "salida a las 16:00")):
-        sens.append(row(name, trades(df, replace(base, exit_min=minute))[0]))
+    for minute in (12 * 60, 14 * 60, NY_CLOSE):
+        if minute > base.deadline:                  # salir más tarde que la hora límite (la rotura sigue valiendo hasta ella)
+            sens.append(row(f"salida a las {hhmm(minute)}", trades(df, replace(base, exit_min=minute))[0]))
+    if base.deadline > 12 * 60:                     # Nueva York: salir antes, a mediodía
+        sens.append(row("rotura y salida hasta las 12:00", trades(df, replace(base, deadline=12 * 60, exit_min=12 * 60))[0]))
     out += [table(sens), ""]
 
     # el colchón se elige con la 1.ª mitad y se mide en la 2.ª
@@ -283,14 +313,17 @@ def main() -> None:
     ap.add_argument("--perfil", default="puprime")
     ap.add_argument("--simbolo", default="NAS100")
     ap.add_argument("--colchon", type=float, default=0.2, help="colchón del stop en anchos del ORB (0,2 = 20 %%)")
+    ap.add_argument("--sesion", choices=list(SESSIONS), default="0100", help="sesión del ORB (por defecto la 01:00)")
     ap.add_argument("--cache", action="store_true", help="reutiliza las velas guardadas en analisis/orb_nasdaq_m5.pkl")
     args = ap.parse_args()
     sym, df = load(args.perfil, args.simbolo, args.cache)
-    text = report(sym, df, Params(buffer=args.colchon))
-    DOC.parent.mkdir(parents=True, exist_ok=True)
-    DOC.write_text(text + "\n", encoding="utf-8")
+    _, start, deadline = SESSIONS[args.sesion]
+    text = report(sym, df, Params(buffer=args.colchon, start=start, deadline=deadline, exit_min=deadline), args.sesion)
+    doc = Path(str(DOC).format(args.sesion))
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(text + "\n", encoding="utf-8")
     print(text)
-    print(f"\nInforme: {DOC}\nOperaciones: {CSV}")
+    print(f"\nInforme: {doc}\nOperaciones: {str(CSV).format(args.sesion)}")
 
 
 if __name__ == "__main__":

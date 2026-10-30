@@ -1,10 +1,10 @@
 # Backtest ORB 01:00 en NAS100.s (M5, PUPrime)
 
-Script: `scripts/backtest_orb_nasdaq.py` → operaciones en `analisis/backtest_orb_nasdaq.csv` (no se sube a git). Solo lee velas de MT5.
+Script: `scripts/backtest_orb_nasdaq.py --sesion 0100` → operaciones en `analisis/backtest_orb_nasdaq_0100.csv` (no se sube a git). Solo lee velas de MT5.
 
 ## Reglas (hora de Nueva York)
 
-- **ORB:** máximo y mínimo de las velas M5 de las 01:00, 01:05 y 01:10.
+- **ORB:** máximo y mínimo de las velas M5 de las 01:00, 01:05, 01:10.
 - **Rotura con cuerpo:** la primera vela M5 desde las 01:15 que cierra fuera del ORB, como tarde a las 09:30. Una operación por día.
 - **Entrada** al cierre de esa vela. **Stop** en el extremo opuesto del ORB ± 20% de su ancho. **Objetivo** 1:1 (a la misma distancia que el stop).
 - Sin stop ni objetivo a las 09:30: se cierra al cierre de la vela de las 09:25. Si caben stop y objetivo en una vela, cuenta el stop.
@@ -97,6 +97,7 @@ Cambiando una cosa cada vez sobre la variante principal.
 | objetivo 1.5:1 | 2097 | 42.0 % | -0.055 | -115.1 | 0.91 | -184.4 | -2.05 |
 | objetivo 2:1 | 2097 | 36.0 % | -0.040 | -84.3 | 0.94 | -163.8 | -1.30 |
 | salida a las 12:00 | 2097 | 51.1 % | -0.077 | -160.5 | 0.86 | -186.5 | -3.50 |
+| salida a las 14:00 | 2097 | 51.1 % | -0.076 | -159.7 | 0.86 | -185.9 | -3.48 |
 | salida a las 16:00 | 2097 | 51.1 % | -0.076 | -159.4 | 0.86 | -185.8 | -3.47 |
 
 ## Colchón elegido con la 1.ª mitad
