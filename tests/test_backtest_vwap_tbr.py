@@ -59,7 +59,7 @@ def run(monkeypatch, days):
 
 
 def test_las_operaciones_son_coherentes(monkeypatch):
-    module, trades, info = run(monkeypatch, 150)
+    module, trades, info = run(monkeypatch, 300)
     primary = trades[trades["variante"] == module.PRIMARY]
     assert len(primary) > 20 and info["TBR evaluadas"] > 100
     assert set(trades["variante"]) <= {v.name for v in module.VARIANTS} and module.CONTROL in set(trades["variante"])
@@ -78,7 +78,7 @@ def test_sin_sesgo_de_futuro_en_un_paseo_aleatorio_el_r_bruto_es_cero(monkeypatc
     module, trades, _ = run(monkeypatch, 6000)
     for name in (module.PRIMARY, module.CONTROL):
         r = trades[trades["variante"] == name]["R bruto"]
-        assert len(r) > 800
+        assert len(r) > 500
         se = r.std(ddof=1) / np.sqrt(len(r))
         assert abs(r.mean()) < 3.5 * se, f"{name}: R bruto medio {r.mean():+.3f} (error típico {se:.3f})"
     assert (trades["R neto"] <= trades["R bruto"]).all()                        # los costes solo restan

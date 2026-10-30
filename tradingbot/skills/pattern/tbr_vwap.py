@@ -5,10 +5,13 @@ reglas) y es la misma que mide `scripts/backtest_vwap_tbr.py`. Es una HIPÓTESIS
 busca el perfil de estrategia, o PATTERN_TYPES=tbr_vwap) y solo simula, como todo el bot con SETUP_SEND_ORDERS=false.
 
 Entrada a mercado al cierre de la vela M15 del retest (el bot solo ve velas cerradas); stop y objetivo según `Params`; una operación
-como mucho por TBR. Ajustes (bloque PATTERN de tradingbot.env): TBR_VWAP_TF, TBR_VWAP_LOOKBACK, TBR_VWAP_STOP_FRAC, TBR_VWAP_TARGET,
+como mucho por TBR. Confluencia: el VWAP debe estar a menos de TBR_VWAP_CONFLUENCE rangos del 50 % de la TBR. La TBR debe haber cerrado: solo se busca
+desde su cierre (`first_bar`), cuando su High, Low y 50 % ya son definitivos. Ajustes (bloque PATTERN de tradingbot.env): TBR_VWAP_TF, TBR_VWAP_CONFLUENCE, TBR_VWAP_LOOKBACK, TBR_VWAP_STOP_FRAC, TBR_VWAP_TARGET,
 TBR_VWAP_MIN_RR.
 """
 from __future__ import annotations
+
+from dataclasses import replace
 
 import numpy as np
 
@@ -24,6 +27,7 @@ from types import SimpleNamespace
 KEY = "tbr_vwap"
 TITLE = "TBR con VWAP"
 DEFAULT_TF = "15m"
+DEFAULT_CONFLUENCE = 0.10          # |VWAP - 50 %| <= 10 % del rango de la TBR (off: sin confluencia)
 
 
 @register_pattern(KEY)
@@ -42,6 +46,14 @@ class TbrVwap(Pattern):
                                  min_rr=float(get("TBR_VWAP_MIN_RR", Params.min_rr)))
         except ValueError as exc:
             raise ValueError(f"PATTERN_TBR_VWAP_*: valor no numérico ({exc}).") from None
+        raw = str(get("TBR_VWAP_CONFLUENCE", DEFAULT_CONFLUENCE)).strip().lower()      # el VWAP debe estar cerca del 50 % de la TBR
+        try:
+            conf = None if raw in ("", "0", "off", "no", "false", "none") else float(raw)
+        except ValueError:
+            raise ValueError(f"PATTERN_TBR_VWAP_CONFLUENCE={raw!r}: un número (fracción del rango) u off.") from None
+        if conf is not None and conf <= 0:
+            raise ValueError("PATTERN_TBR_VWAP_CONFLUENCE debe ser mayor que 0 (o off).")
+        self.params = replace(self.params, confluence=conf)
         if self.params.lookback < 0 or self.params.stop_frac <= 0 or self.params.min_rr < 0:
             raise ValueError("PATTERN_TBR_VWAP_*: LOOKBACK >= 0, STOP_FRAC > 0 y MIN_RR >= 0.")
 

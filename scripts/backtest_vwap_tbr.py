@@ -61,10 +61,10 @@ class Variant:
 
 
 VARIANTS = (
-    Variant(PRIMARY),
+    Variant(PRIMARY, Params(confluence=0.10)),                       # como el bot: VWAP a menos del 10 % del rango del 50 % de la TBR
     Variant(CONTROL, anchor="mid"),
     Variant("pendiente del VWAP a favor (8 velas)", Params(slope_bars=8)),
-    Variant("confluencia VWAP - 50 % (10 % del rango)", Params(confluence=0.10)),
+    Variant("sin confluencia (el VWAP en cualquier punto del rango)", Params()),
     Variant("rango de la TBR >= 80 % de la mediana", min_rel_range=0.8),
     Variant("stop a 0,15 rangos del VWAP", Params(stop_frac=0.15)),
     Variant("stop a 0,5 rangos del VWAP", Params(stop_frac=0.5)),

@@ -61,3 +61,40 @@ def test_ajustes_no_validos():
         TbrVwap(S(TBR_VWAP_STOP_FRAC="0"))
     with pytest.raises(ValueError):
         TbrVwap(S(TBR_VWAP_MIN_RR="x"))
+
+
+# -- escenarios de confluencia y retest (los mismos que se dibujan) -------------------------------------------------------------
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from tbr_vwap_scenarios import FIRST, SCENARIOS  # noqa: E402
+
+
+class Conf:
+    def __init__(self, value): self.value = value
+    def get(self, key, default=None): return {"TBR_VWAP_CONFLUENCE": self.value}.get(key, default)
+
+
+@pytest.mark.parametrize("key,title,rows,expected,why", SCENARIOS, ids=[s[0] for s in SCENARIOS])
+def test_escenarios(key, title, rows, expected, why):
+    hits = TbrVwap(Conf("0.10")).detect(ctx_for(rows, first_bar=FIRST))
+    assert [h.direction for h in hits] == ([expected] if expected else []), why
+
+
+def test_la_tbr_debe_haber_cerrado_para_buscar_el_setup():
+    """Escenario C: el retest ocurre dentro de la TBR. Con el mismo precio, si se da por cerrada antes (first_bar menor) saldría señal:
+    lo que lo evita es exigir que la TBR haya cerrado, porque hasta entonces ni el High, Low ni el 50 % son definitivos."""
+    rows = next(s[2] for s in SCENARIOS if s[0] == "C")
+    assert TbrVwap(Conf("0.10")).detect(ctx_for(rows, first_bar=FIRST)) == []
+    assert len(TbrVwap(Conf("0.10")).detect(ctx_for(rows, first_bar=3))) == 1
+
+
+def test_la_confluencia_con_el_50_por_ciento_es_parte_de_la_estrategia_y_se_puede_quitar():
+    rows = next(s[2] for s in SCENARIOS if s[0] == "D")
+    assert TbrVwap().params.confluence == 0.10                                    # por defecto: activa
+    assert TbrVwap(Conf("0.10")).detect(ctx_for(rows, first_bar=FIRST)) == []
+    assert len(TbrVwap(Conf("off")).detect(ctx_for(rows, first_bar=FIRST))) == 1   # sin confluencia sí entraría
+    assert len(TbrVwap(Conf("0.40")).detect(ctx_for(rows, first_bar=FIRST))) == 1  # o con una tolerancia mayor
+    with pytest.raises(ValueError):
+        TbrVwap(Conf("-1"))
