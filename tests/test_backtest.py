@@ -84,7 +84,7 @@ def test_cifras_y_seleccion_por_anios_y_horas(tmp_path):
     bot = g.view("Ambos", BOT_FILTER)
     assert g.period == "2018-2026" and bot.main.stats()["n"] == 3 and bot.main.stats()["total"] == 3.0
     assert [(z, len(o)) for z, o in bot.zones] == [("Asia", 1), ("London", 1), ("NY Open", 1)]
-    assert [(d, len(o)) for d, o in bot.days][:2] == [("lunes", 2), ("martes", 1)]
+    assert [(d, len(o)) for d, o in bot.days][:2] == [(0, 2), (1, 1)]                     # lunes y martes
     assert g.view("Ambos", "sin filtro de sesgo").main.stats()["n"] == 5
     assert g.view("Reversión", "en contra del sesgo").main.stats()["total"] == -1.0
     # años: la selección filtra todo menos su propio histograma
@@ -97,6 +97,14 @@ def test_cifras_y_seleccion_por_anios_y_horas(tmp_path):
     assert len(g.view("Ambos", BOT_FILTER, years={2020}, hours={10}).main) == 0
     assert [(m, g, len(o)) for m, g, o in load(path).compare(BOT_FILTER, years={2021})] == [
         ("NAS100.r", "Índices americanos", 1), ("DJ30.r", "Índices americanos", 0)]
+    # meses y días: igual, cada uno filtra todo menos su histograma (las del bot: 1 mar-lun, 4 may-mar, 5 ene-lun)
+    may = g.view("Ambos", BOT_FILTER, months={5})
+    assert (len(may.main), may.main.stats()["total"]) == (1, 2.0) and [m for m, _ in may.months] == [1, 3, 5]
+    monday = g.view("Ambos", BOT_FILTER, days={0})
+    assert (len(monday.main), monday.main.stats()["total"]) == (2, 1.0) and [(d, len(o)) for d, o in monday.days][:2] == [(0, 2), (1, 1)]
+    assert len(g.view("Ambos", BOT_FILTER, months={3}, days={1}).main) == 0
+    assert len(g.view("Ambos", BOT_FILTER, months={3}, days={0}).main) == 1
+    assert [(m, len(o)) for m, _g, o in load(path).compare(BOT_FILTER, days={1})] == [("NAS100.r", 1), ("DJ30.r", 0)]
     path.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError):
         load(path)
@@ -142,8 +150,18 @@ def test_ventana_backtest_con_el_resumen_real():
     bot_hour = dlg.blocks["mean"].value.text()
     dlg.by_hour.click(5)
     assert dlg.blocks["mean"].value.text() != bot_hour and "sustituye" in dlg.selection_label.text()
+    dlg.by_hour.click(5)                                                           # quita la hora
+    dlg.by_weekday.click(1)                                                        # y el martes sustituye al lunes del bot
+    assert dlg.blocks["mean"].value.text() != bot_hour and "El día sustituye" in dlg.selection_label.text()
+    dlg.by_month.click(1)
+    assert dlg.months == {1} and dlg.blocks["n"].value.text() != "-"
     dlg.set_group("puprime:indices")
-    assert not dlg.hours                                                           # otro grupo: selección limpia
+    assert not dlg.hours and not dlg.days and not dlg.months                       # otro grupo: selección limpia
+    total = dlg.blocks["n"].value.text()
+    dlg.by_month.click(dlg.by_month.keys[0])
+    dlg.by_weekday.click(dlg.by_weekday.keys[0])
+    assert dlg.blocks["n"].value.text() != total and dlg.compare.rows and "no cambia" in dlg.funnel.note.text()
+    dlg.clear_selection()
     dlg.set_backtest(None, "falta el fichero")
     assert dlg.empty.text() == "falta el fichero" and dlg.scroll.isHidden()
 
@@ -169,6 +187,18 @@ def test_ventana_backtest_con_datos_minimos():
     assert dlg.hours == {3} and dlg.blocks["n"].value.text() == "1"
     dlg.by_hour.click(3)                                                             # y otro clic en la misma la quita
     assert dlg.hours == set() and dlg.blocks["n"].value.text() == "3"
+    assert dlg.by_month.keys == [1, 3, 5] and dlg.by_weekday.keys == [0, 1]         # solo los días con operaciones
+    dlg.by_month.click(5)                                                            # mayo
+    assert dlg.months == {5} and dlg.blocks["n"].value.text() == "1" and dlg.blocks["total"].value.text() == "+2 R"
+    dlg.by_weekday.click(0)                                                          # y lunes: la de mayo es martes
+    assert dlg.days == {0} and dlg.blocks["n"].value.text() == "-"
+    dlg.by_weekday.click(1)                                                          # martes sustituye a lunes
+    assert dlg.days == {1} and dlg.blocks["n"].value.text() == "1"
+    assert "mes <b>may</b>" in dlg.selection_label.text() and "día <b>martes</b>" in dlg.selection_label.text()
+    dlg.by_month.cleared.emit()                                                      # «Quitar» del histograma de meses
+    assert dlg.months == set() and dlg.days == {1} and dlg.blocks["n"].value.text() == "1"
+    dlg.clear_selection()
+    assert dlg.days == set() and dlg.blocks["n"].value.text() == "3" and dlg.selection_bar.isHidden()
 
 
 def _profile_group(profile, name, key="indices"):
