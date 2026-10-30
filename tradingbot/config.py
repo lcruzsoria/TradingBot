@@ -78,7 +78,9 @@ class Mt5Profile:
         return f"{self.display} - {self.login} @ {self.server}"
 
 
-STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr")}   # skills que un perfil de estrategia no usa (solo opera la suya)
+STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",)}   # skills que un perfil de estrategia no usa (solo opera la suya)
+
+STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",)}      # patrones que busca un perfil de estrategia (y solo esos)
 
 
 def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:

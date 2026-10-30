@@ -25,9 +25,12 @@ WEEKDAYS = ("LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DO
 # Valores por defecto (tradingbot.env, bloque LEVELS)
 DEFAULT_DAYS = 10
 DEFAULT_MAX_TF_MINUTES = 720          # hasta H12: con velas diarias "el día" es una sola vela
-DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86", "SMA": "#00ACC1"}
+DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86", "SMA": "#00ACC1",
+                  "VWAP": "#E040FB"}
 DEFAULT_SMA_PERIOD = 30                # velas del timeframe que se está viendo
 SMA_STYLES = ("normal", "discontinuo", "punteado")
+SMA_SHOWS = ("sma", "vwap", "ambos")   # qué dibuja el botón SMA: la media, el VWAP o los dos
+DEFAULT_SMA_SHOW = "sma"
 DEFAULT_MARKET_CLOSE = "17:00"        # cierre de los futuros de índices (diario) y de Forex (semanal), hora de NY
 DEFAULT_DAY_START = "17:00"           # inicio del día (y TDO) en hora de NY: forex, metales, cripto...
 DEFAULT_INDEX_DAY_START = "18:00"     # ...y en los índices americanos
@@ -115,6 +118,29 @@ def compute(ts, open_, high, low, server_ahead: int, start_minutes: int,
             out.append(Line("pdh", float(high[p0:p1].max()), x0, x1))
             out.append(Line("pdl", float(low[p0:p1].min()), x0, x1))
     return out
+
+
+def vwap(ts, high, low, close, volume, server_ahead: int, start_minutes: int) -> tuple[np.ndarray, list[int]]:
+    """VWAP de cada vela, con reinicio en cada día de trading (el mismo día que usan TDO, PDH / PDL y los separadores).
+
+    Precio típico (máximo + mínimo + cierre) / 3 ponderado por el volumen (tick volume del broker), acumulado desde la
+    primera vela del día. Sin volumen acumulado (todo 0 o sin datos) no hay VWAP: NaN. Devuelve (valores, índices de
+    las velas donde empieza un día nuevo, salvo la primera): el gráfico corta ahí la línea, como TradingView.
+    """
+    n = len(ts)
+    out = np.full(n, np.nan)
+    if n == 0:
+        return out, []
+    typical = (np.asarray(high, dtype=float) + np.asarray(low, dtype=float) + np.asarray(close, dtype=float)) / 3
+    vol = np.nan_to_num(np.asarray(volume, dtype=float), nan=0.0)
+    day_of = trading_day(ts, server_ahead, start_minutes)
+    starts = np.r_[0, np.flatnonzero(np.diff(day_of)) + 1]
+    ends = np.r_[starts[1:], n]
+    for i0, i1 in zip(starts, ends):
+        cum_vol = np.cumsum(vol[i0:i1])
+        cum_pv = np.cumsum((typical * vol)[i0:i1])
+        out[i0:i1] = np.divide(cum_pv, cum_vol, out=np.full(i1 - i0, np.nan), where=cum_vol > 0)
+    return out, [int(i) for i in starts[1:]]
 
 
 def _date(day: int) -> date:

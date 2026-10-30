@@ -18,11 +18,12 @@ from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
+from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
 from . import theme
 from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
-from .sma_dialog import SmaDialog
+from .sma_dialog import SHOW_NAMES, SmaDialog
 from .bridge import UiBridge
 from .chart import ChartView
 from .errors import explain_error
@@ -312,7 +313,8 @@ class MainWindow(QMainWindow):
             btn.setVisible(levels_skill is not None)
             btn.setChecked(levels_skill is not None and levels_skill.settings.get_bool(key, False))
             self.level_btns[group] = btn
-        # SMA: media móvil de los cierres del timeframe visible; clic derecho para configurarla
+        # SMA: media móvil de los cierres del timeframe visible y VWAP del día; clic derecho para configurarlos
+        # (en la ventana se elige si el botón dibuja la SMA, el VWAP o los dos)
         self.sma_btn = QPushButton("SMA")
         self.sma_btn.setProperty("chip", "true")
         self.sma_btn.setCheckable(True)
@@ -325,10 +327,12 @@ class MainWindow(QMainWindow):
         self.sma_cfg_btn.setIconSize(QSize(16, 16))
         self.sma_cfg_btn.setProperty("chip", "true")
         self.sma_cfg_btn.setFixedWidth(30)
-        self.sma_cfg_btn.setToolTip("Configurar la SMA: periodos, color de la línea y trazo")
+        self.sma_cfg_btn.setToolTip("Configurar la SMA y el VWAP: cuál se muestra (uno, otro o los dos), periodos, colores y trazos")
         self.sma_cfg_btn.setVisible(levels_skill is not None)
         self.sma_cfg_btn.clicked.connect(self.open_sma_config)
-        self._sma_cfg = (30, "#00ACC1", "normal")
+        show = levels_skill.settings.get("SMA_SHOW", DEFAULT_SMA_SHOW).strip().lower() if levels_skill is not None else DEFAULT_SMA_SHOW
+        self._sma_cfg = (30, "#00ACC1", "normal", show if show in SMA_SHOWS else DEFAULT_SMA_SHOW,
+                         DEFAULT_COLORS["VWAP"], "normal")        # (periodos, color, trazo, qué mostrar, color y trazo del VWAP)
         # Fibonacci de los patrones (0, 0,5 y 1 del tramo): lo dibuja la skill Pattern
         pattern_skill = self.manager.skills.get("pattern")
         self.fibo_btn = QPushButton("Fibo")
@@ -421,6 +425,7 @@ class MainWindow(QMainWindow):
         self.pos_btn.toggled.connect(self.chart.show_positions)
         self.chart.show_fibs(self.fibo_btn.isChecked())
         self.fibo_btn.toggled.connect(self.chart.show_fibs)
+        self.chart.set_ma_show(self._sma_cfg[3])
         self.chart.show_sma(self.sma_btn.isChecked())
         self.sma_btn.toggled.connect(self.chart.show_sma)
         self._refresh_sma_tip()
@@ -525,28 +530,40 @@ class MainWindow(QMainWindow):
             self.bus.publish("bias.recalc", {}, source="ui")
 
     def _refresh_sma_tip(self) -> None:
-        period, color, style = self._sma_cfg
-        self.sma_btn.setToolTip(f"Media móvil simple de {period} periodos ({style}, {color}) sobre las velas del timeframe visible.\n"
-                                "Pulsa la rueda (o clic derecho en el botón) para cambiar los periodos, el color y el trazo.")
+        period, color, style, show, vwap_color, vwap_style = self._sma_cfg
+        self.sma_btn.setText({"sma": "SMA", "vwap": "VWAP", "ambos": "SMA+VWAP"}[show])
+        parts = []
+        if show in ("sma", "ambos"):
+            parts.append(f"SMA: media móvil simple de {period} periodos ({style}, {color}) sobre las velas del timeframe visible.")
+        if show in ("vwap", "ambos"):
+            parts.append(f"VWAP: precio medio ponderado por volumen ({vwap_style}, {vwap_color}), reiniciado cada día de trading; "
+                         "solo con velas intradía y volumen.")
+        self.sma_btn.setToolTip("\n".join(parts) + "\nPulsa la rueda (o clic derecho en el botón) para elegir qué se muestra "
+                                "(SMA, VWAP o los dos) y cambiar periodos, colores y trazos.")
 
     def open_sma_config(self) -> None:
-        """Ventana de la SMA: periodos, color y trazo; se aplica al momento y se guarda en tradingbot.env."""
+        """Ventana del botón: SMA, VWAP o los dos, con sus colores y trazos; se aplica al momento y se guarda en tradingbot.env."""
         dialog = SmaDialog(self, *self._sma_cfg)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         self._apply_sma(*dialog.values())
 
-    def _apply_sma(self, period: int, color: str, style: str) -> None:
-        self._sma_cfg = (period, color, style)
+    def _apply_sma(self, period: int, color: str, style: str, show: str = DEFAULT_SMA_SHOW,
+                   vwap_color: str = DEFAULT_COLORS["VWAP"], vwap_style: str = "normal") -> None:
+        self._sma_cfg = (period, color, style, show, vwap_color, vwap_style)
         try:
-            for key, value in (("SMA_PERIOD", str(period)), ("SMA_COLOR", color), ("SMA_STYLE", style)):
+            for key, value in (("SMA_PERIOD", str(period)), ("SMA_COLOR", color), ("SMA_STYLE", style), ("SMA_SHOW", show),
+                               ("VWAP_COLOR", vwap_color), ("VWAP_STYLE", vwap_style)):
                 envconfig.set_value(envconfig.ENV_FILE, f"LEVELS_{key}", value)
             saved = f"guardada en {envconfig.ENV_FILE.name}"
         except OSError as exc:
             saved = f"no se pudo guardar ({exc})"
+        self.chart.set_ma_show(show)
         self._refresh_sma_tip()
-        self.log(f"levels: SMA de {period} periodos, {style}, {color} ({saved})", tone="info")
-        self.bus.publish("levels.sma", {"period": period, "color": color, "style": style}, source="ui")
+        self.log(f"levels: {SHOW_NAMES[show]} - SMA de {period} periodos, {style}, {color}; VWAP {vwap_style}, {vwap_color} ({saved})",
+                 tone="info")
+        self.bus.publish("levels.sma", {"period": period, "color": color, "style": style, "show": show,
+                                        "vwap_color": vwap_color, "vwap_style": vwap_style}, source="ui")
 
     # -- utilidades -----------------------------------------------------------------------------
     def _sync_top_heights(self) -> None:
@@ -1061,8 +1078,12 @@ class MainWindow(QMainWindow):
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return
         self.chart.set_day_levels(p["lines"], p["days"], p["colors"])
-        self._sma_cfg = (p["sma_period"], p["colors"]["sma"], p["sma_style"])
+        vwap_color, vwap_style = p["colors"].get("vwap", DEFAULT_COLORS["VWAP"]), p.get("vwap_style", "normal")
+        self._sma_cfg = (p["sma_period"], p["colors"]["sma"], p["sma_style"], p.get("sma_show", self._sma_cfg[3]),
+                         vwap_color, vwap_style)
+        self.chart.set_ma_show(self._sma_cfg[3])
         self.chart.set_sma(p["sma"], p["colors"]["sma"], p["sma_style"])
+        self.chart.set_vwap(p.get("vwap"), p.get("vwap_breaks", ()), vwap_color, vwap_style)
         self._refresh_sma_tip()
         for btn in self.level_btns.values():
             btn.setEnabled(p["available"])

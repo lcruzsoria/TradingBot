@@ -12,7 +12,7 @@ import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.levels import daylevels as levels
-from tradingbot.skills.levels.daylevels import compute, days, is_us_index, parse_time
+from tradingbot.skills.levels.daylevels import compute, days, is_us_index, parse_time, vwap
 
 AHEAD = 7 * 3600                                       # servidor = NY + 7 h
 DAY0 = int(datetime(2026, 10, 6, tzinfo=timezone.utc).timestamp())   # martes 6 oct, 00:00 del servidor
@@ -84,7 +84,7 @@ def run_skill(env_text, timeframe="1h", symbol="EURUSD"):
     manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), [{"type": "levels"}])
     manager.start()
     ts, o, h, l = hourly(3)
-    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": o})
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": o, "tick_volume": np.ones(len(ts))})
     bus.publish("candles.loaded", {"symbol": symbol, "timeframe": timeframe, "df": df}, source="feed")
     deadline = time.time() + 3
     while not events and time.time() < deadline:
@@ -185,7 +185,90 @@ def test_el_boton_sma_dibuja_y_configura_la_media(tmp_path, monkeypatch):
     win._apply_sma(50, "#00FF00", "punteado")
     saved = envconfig.parse(env_file.read_text(encoding="utf-8"))
     assert saved["LEVELS_SMA_PERIOD"] == "50" and saved["LEVELS_SMA_COLOR"] == "#00FF00" and saved["LEVELS_SMA_STYLE"] == "punteado"
-    assert published[-1].payload == {"period": 50, "color": "#00FF00", "style": "punteado"}
+    assert published[-1].payload == {"period": 50, "color": "#00FF00", "style": "punteado", "show": "sma",
+                                     "vwap_color": "#E040FB", "vwap_style": "normal"}
+
+
+def test_vwap_se_reinicia_cada_dia_y_pondera_por_volumen():
+    ts, o, h, l = hourly(3)
+    typical = (h + l + o) / 3                                  # el cierre es la apertura en estos datos
+    values, breaks = vwap(ts, h, l, o, np.ones(len(ts)), AHEAD, FOREX)
+    assert breaks == [24, 48]                                  # velas donde empieza un día nuevo
+    assert values[0] == typical[0] and values[23] == pytest.approx(typical[:24].mean())
+    assert values[24] == typical[24] and values[47] == pytest.approx(typical[24:48].mean())     # reinicio del día
+    volume = np.zeros(len(ts))
+    volume[0], volume[1] = 1, 3
+    values, _ = vwap(ts, h, l, o, volume, AHEAD, FOREX)
+    assert values[1] == pytest.approx((typical[0] + 3 * typical[1]) / 4)                        # pesa el volumen
+    assert values[2] == values[1] and np.isnan(values[24])                                     # sin volumen nuevo / sin volumen en el día
+    empty, no_breaks = vwap(np.array([], dtype=np.int64), [], [], [], [], AHEAD, FOREX)
+    assert len(empty) == 0 and no_breaks == []
+
+
+def test_la_skill_publica_el_vwap_y_se_configura_con_el_env():
+    _, events = run_skill("LEVELS_SMA_SHOW=ambos\nLEVELS_VWAP_COLOR=#ff00ff\nLEVELS_VWAP_STYLE=punteado\n")
+    p = events[-1].payload
+    assert p["sma_show"] == "ambos" and p["colors"]["vwap"] == "#FF00FF" and p["vwap_style"] == "punteado"
+    assert len(p["vwap"]) == 72 and p["vwap_breaks"] == [24, 48] and not np.isnan(p["vwap"]).any()
+    _, events = run_skill("")
+    assert events[-1].payload["sma_show"] == "sma" and events[-1].payload["vwap_style"] == "normal"     # por defecto
+    assert events[-1].payload["colors"]["vwap"] == "#E040FB"
+    _, events = run_skill("", timeframe="1d")
+    assert np.isnan(events[-1].payload["vwap"]).all()                                    # con velas diarias no hay VWAP
+    skill, events = run_skill("LEVELS_SMA_SHOW=nada\n")
+    assert skill.state.value == "error" and "LEVELS_SMA_SHOW" in skill.note
+    skill, events = run_skill("LEVELS_VWAP_STYLE=rayas\n")
+    assert skill.state.value == "error" and "LEVELS_VWAP_STYLE" in skill.note
+
+
+def test_el_boton_sma_elige_sma_vwap_o_los_dos(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import envconfig, settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.ui.main_window import MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    env_file = tmp_path / "tradingbot.env"
+    env_file.write_text("LEVELS_SMA_PERIOD=30\n", encoding="utf-8")
+    monkeypatch.setattr(envconfig, "ENV_FILE", env_file)
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
+    bus, published = EventBus(), []
+    bus.subscribe("t", "levels.sma", published.append)
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig(parse(""))), [{"type": "levels"}]), cfg, "t")
+    ts, o, h, l = hourly(3)
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": o, "time": pd.to_datetime(ts, unit="s")})
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "1h", "seconds": 0.1})
+    values, breaks = vwap(ts, h, l, o, np.ones(len(ts)), AHEAD, FOREX)
+    win._on_day_levels({"symbol": "EURUSD", "timeframe": "1h", "lines": [], "days": [], "day_start": FOREX, "available": True,
+                        "estimated": False, "max_tf": 720, "sma": df["close"].rolling(5).mean().to_numpy(), "sma_period": 5,
+                        "sma_style": "normal", "sma_show": "sma", "vwap": values, "vwap_breaks": breaks, "vwap_style": "normal",
+                        "colors": {"sma": "#00ACC1", "vwap": "#E040FB", "separator": "#787B86"}})
+    win.sma_btn.setChecked(True)
+    assert win.sma_btn.text() == "SMA" and win.chart.sma_drawn and not win.chart.vwap_drawn      # por defecto, solo la SMA
+    win._apply_sma(5, "#00FF00", "normal", "vwap", "#FF00FF", "punteado")
+    assert win.sma_btn.text() == "VWAP" and win.chart.vwap_drawn and not win.chart.sma_drawn
+    curve_x, _ = win.chart._vwap_item.getData()
+    assert np.isnan(curve_x).sum() == 2                                      # un hueco en cada reinicio de día
+    win._apply_sma(5, "#00FF00", "normal", "ambos", "#FF00FF", "punteado")
+    assert win.sma_btn.text() == "SMA+VWAP" and win.chart.sma_drawn and win.chart.vwap_drawn
+    saved = envconfig.parse(env_file.read_text(encoding="utf-8"))
+    assert saved["LEVELS_SMA_SHOW"] == "ambos" and saved["LEVELS_VWAP_COLOR"] == "#FF00FF" and saved["LEVELS_VWAP_STYLE"] == "punteado"
+    assert published[-1].payload == {"period": 5, "color": "#00FF00", "style": "normal", "show": "ambos",
+                                     "vwap_color": "#FF00FF", "vwap_style": "punteado"}
+    win.sma_btn.setChecked(False)                                            # apagado: no dibuja ninguno
+    assert not win.chart.sma_drawn and not win.chart.vwap_drawn
+
+
+def test_la_ventana_del_boton_elige_que_se_muestra():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.ui.sma_dialog import SmaDialog
+    QApplication.instance() or QApplication([])
+    dialog = SmaDialog(None, 20, "#00ACC1", "normal", "vwap", "#E040FB", "punteado")
+    assert dialog.values() == (20, "#00ACC1", "normal", "vwap", "#E040FB", "punteado")
+    assert not dialog.period_spin.isEnabled() and dialog.vwap_color_btn.isEnabled()      # solo el VWAP
+    dialog.show_box.setCurrentIndex(dialog.show_box.findData("ambos"))
+    assert dialog.period_spin.isEnabled() and dialog.vwap_style_box.isEnabled() and dialog.values()[3] == "ambos"
 
 
 def test_cierre_de_mercados_futuros_de_indices_a_diario_y_forex_el_viernes():
@@ -276,14 +359,14 @@ def test_el_boton_de_ajustes_de_la_sma_abre_su_ventana_y_aplica_los_cambios(tmp_
     class FakeDialog:
         DialogCode = main_window.SmaDialog.DialogCode
 
-        def __init__(self, parent, period, color, style):
-            opened.append((period, color, style))
+        def __init__(self, parent, *cfg):
+            opened.append(cfg)
 
         def exec(self):
             return self.DialogCode.Accepted
 
         def values(self):
-            return 12, "#112233", "discontinuo"
+            return 12, "#112233", "discontinuo", "ambos", "#445566", "punteado"
 
     monkeypatch.setattr(main_window, "SmaDialog", FakeDialog)
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "1h", "watchlist": ["EURUSD"]}}
@@ -292,7 +375,8 @@ def test_el_boton_de_ajustes_de_la_sma_abre_su_ventana_y_aplica_los_cambios(tmp_
     win = main_window.MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig(parse(""))), [{"type": "levels"}]), cfg, "t")
     assert not win.sma_cfg_btn.icon().isNull() and win.sma_cfg_btn.isVisibleTo(win)    # rueda dibujada, sin depender de la fuente
     win.sma_cfg_btn.click()                                           # el botón de ajustes
-    assert opened == [(30, "#00ACC1", "normal")]
-    assert published[-1].payload == {"period": 12, "color": "#112233", "style": "discontinuo"}
+    assert opened == [(30, "#00ACC1", "normal", "sma", "#E040FB", "normal")]
+    assert published[-1].payload == {"period": 12, "color": "#112233", "style": "discontinuo", "show": "ambos",
+                                     "vwap_color": "#445566", "vwap_style": "punteado"}
     win.sma_btn.customContextMenuRequested.emit(win.sma_btn.rect().center())   # y el clic derecho
-    assert opened[-1] == (12, "#112233", "discontinuo") and len(opened) == 2
+    assert opened[-1] == (12, "#112233", "discontinuo", "ambos", "#445566", "punteado") and len(opened) == 2

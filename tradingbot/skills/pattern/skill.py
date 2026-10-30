@@ -9,6 +9,7 @@ from ...clock import server_minus_ny
 from ...core import Event, Skill, background_of, register_skill
 from ...envconfig import EnvConfig
 from ...timeframes import display_label, minutes
+from ...config import STRATEGY_PATTERNS
 from ..feed.datasource import aggregate_candles
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from ..tbr.zones import zones_from_settings
@@ -88,7 +89,8 @@ class PatternSkill(Skill):
         if unknown:
             raise ValueError(f"PATTERN_TYPES={', '.join(wanted)}: patrón desconocido {', '.join(unknown)}. "
                              f"Disponibles: {', '.join(PATTERN_REGISTRY) or 'ninguno todavía'}.")
-        self.types = wanted or [key for key, cls in PATTERN_REGISTRY.items() if cls.default_on]   # vacío: todos los definidos (salvo los aún por validar)
+        own = STRATEGY_PATTERNS.get((self.services.app_cfg["app"].get("strategy") or "") if self.services.app_cfg else "")
+        self.types = list(own) if own else wanted or [key for key, cls in PATTERN_REGISTRY.items() if cls.default_on]   # un perfil de estrategia solo busca el suyo   # vacío: todos los definidos (salvo los aún por validar)
         self.patterns = {key: PATTERN_REGISTRY[key](self.settings) for key in self.types}   # valida sus ajustes propios
 
     def _load_until(self, order: list[str]) -> dict[str, str]:
@@ -283,7 +285,8 @@ class PatternSkill(Skill):
             ctx = PatternContext(c["symbol"], ptf, minutes(ptf), ts, df["open"].to_numpy(), df["high"].to_numpy(),
                                  df["low"].to_numpy(), df["close"].to_numpy(), tbr, first, end, closed,
                                  window.next_zone if window else "", window.next_hours if window else "", ahead, start,
-                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]), self.be_r, peers)
+                                 window.limit_verb if window else "empezara", self._day_end(c["symbol"]), self.be_r, peers,
+                                 df["tick_volume"].to_numpy(dtype=float) if "tick_volume" in df.columns else None)
             try:
                 results += [(tbr, h) for h in pattern.detect(ctx)]
                 figures += pattern.figures(ctx)

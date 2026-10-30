@@ -47,6 +47,7 @@ operaciones de todos.
   Lo ya anotado no se repite. El barrido llega hasta `FEED_SWEEP_DAYS` días atrás (y el gráfico, hasta `TBR_DAYS`).
 - Bias calcula el sesgo de cada mercado del barrido con sus propios TDO y Midnight (ajustes `LEVELS_DAY_START`,
   `LEVELS_INDEX_DAY_START` y `LEVELS_US_INDICES`) y Cortex valida cada patrón con el sesgo **de su mercado**.
+- **Perfil «TBR con VWAP» (`tbrvwap`).** Estrategia en estudio, asociada a la cuenta MetaQuotes con 75.000 USD simulados: con la TBR ya definida en M15, retest del VWAP del día dentro de su rango y continuación hasta el extremo (patrón `tbr_vwap`, `tradingbot/skills/pattern/tbr_vwap.py`; entrada al cierre de la vela del retest, una operación por TBR, sin depender del sesgo). Se activa en el fichero de cuentas (`.env` de MT5) con `MT5_TBRVWAP_BASE=metaquotes`, `MT5_TBRVWAP_STRATEGY=tbrvwap`, `MT5_TBRVWAP_NAME=TBR con VWAP` y `MT5_TBRVWAP_CAPITAL=75000`; los mercados salen de `TBRVWAP_SYMBOLS`. Es una hipótesis sin validar: `uv run python scripts/backtest_vwap_tbr.py` la mide con criterios fijados de antemano. Solo simula (`SETUP_SEND_ORDERS=false`).
 - **Cierre por tiempo.** Un trade de patrón abierto se cierra solo al fin del día de trading (17:00 NY en forex y metales, `LEVELS_DAY_START`; 18:00 en los índices USA, `LEVELS_INDEX_DAY_START`), y como tope 24 h tras la entrada. Los de Calendario cierran a `CALENDARIO_EXIT_HOUR`.
 - **Mercado cerrado.** Si el mercado cierra con una operación abierta (más de 2 h sin velas: fin de semana o festivo; el parón diario de 1 h no cuenta), se cierra al precio de cierre de su última vela.
 - **Posiciones.** Con `CORTEX_POSITION_SCOPE=mercado` (por defecto) cada mercado opera independiente de los demás, pero
@@ -201,6 +202,12 @@ americanos y 17:00 NY en el resto, con los activos de tu lista de Quotes que cor
 timeframe que se está viendo. Con el botón de la **rueda dentada** de al lado (o clic derecho en el botón) se abre su ventana: periodos, color de la línea y trazo
 (normal, discontinuo o punteado); se aplica al momento y se guarda en el bloque LEVELS de `tradingbot.env`.
 
+**VWAP** (mismo botón): precio medio ponderado por volumen, con el precio típico (máximo + mínimo + cierre) / 3 y el tick volume
+del broker. Se reinicia al empezar cada día de trading (18:00 NY en los índices americanos, 17:00 en el resto, igual que TDO y
+PDH / PDL) y la línea se corta en cada reinicio. En la ventana del botón eliges qué se dibuja: **SMA**, **VWAP** o **SMA y VWAP**
+(el botón pasa a llamarse SMA, VWAP o SMA+VWAP), y el color y el trazo del VWAP. Solo con velas intradía y con volumen: con velas
+diarias o semanales no se dibuja.
+
 Estos niveles sustituyen a las líneas fijas *Máx. previo*, *Mín. previo* y *Apertura* que antes pintaba el Bias
 (el Bias sigue usando el día del servidor del broker en sus reglas).
 
@@ -283,6 +290,8 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | `LEVELS_US_INDICES` | `NAS100, SP500, DJ30, US30, US100, US500, USTEC, US2000, SPX500, NDX100` | Inicios de nombre que cuentan como índice americano (sin distinguir mayúsculas; `NAS100` vale para `NAS100.r`). |
 | `LEVELS_SHOW_SMA` | `false` | Botón SMA activado al arrancar. |
 | `LEVELS_SMA_PERIOD` / `_SMA_COLOR` / `_SMA_STYLE` | `30` / `#00ACC1` / `normal` | Periodos, color `#RRGGBB` y trazo (`normal`, `discontinuo`, `punteado`) de la SMA. |
+| `LEVELS_SMA_SHOW` | `sma` | Qué dibuja el botón SMA: `sma`, `vwap` o `ambos`. |
+| `LEVELS_VWAP_COLOR` / `_VWAP_STYLE` | `#E040FB` / `normal` | Color `#RRGGBB` y trazo (`normal`, `discontinuo`, `punteado`) del VWAP. |
 | `LEVELS_MARKET_CLOSE` | `17:00` | Hora de NY del cierre de mercados: el Registro avisa cuando cierran los futuros de índices USA (cada día laborable) y Forex (cierre semanal, el viernes). |
 | `LEVELS_SEPARATORS` | `true` | Líneas verticales punteadas entre días, con su nombre centrado. |
 | `LEVELS_DAYS` | `10` | Días de trading hacia atrás que llevan niveles. |
