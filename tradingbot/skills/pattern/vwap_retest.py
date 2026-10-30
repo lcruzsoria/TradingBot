@@ -10,8 +10,8 @@ Ejemplo largo (el corto es el espejo exacto). Trabaja con velas M15 y con el VWA
 2. El VWAP está dentro del rango de la TBR (Low <= VWAP <= High).
 3. Retest con rechazo: las `lookback` velas anteriores cerraron por encima del VWAP (el precio venía de arriba), y esta vela lo
    toca con su mínimo y cierra otra vez por encima.
-4. Entrada a mercado en la apertura de la vela siguiente (una orden límite en el VWAP sufre selección adversa: ver
-   docs/analisis_setups/CAMBIOS.md, v1 frente a v2).
+4. Entrada a mercado al cierre de la vela del retest (el bot solo ve velas cerradas; una orden límite en el VWAP sufre
+   selección adversa: ver docs/analisis_setups/CAMBIOS.md, v1 frente a v2). La posición vive desde la vela siguiente.
 5. Stop: el más lejano entre el mínimo de la vela del retest y `stop_frac` rangos por debajo del VWAP. Objetivo: el High de la
    TBR (más `target` rangos, si se pide). Solo se opera si el objetivo está al menos a `min_rr` veces el riesgo.
 6. Filtros opcionales para el estudio: pendiente del VWAP a favor (`slope_bars`) y confluencia con el 50 % de la TBR
@@ -40,20 +40,20 @@ class Params:
 class Signal:
     direction: str                     # "long" o "short"
     bar: int                           # vela del retest (la señal se confirma en su cierre)
-    entry_bar: int                     # vela de la entrada (la siguiente)
-    entry: float                       # apertura de la vela de la entrada
+    entry_bar: int                     # primera vela con la posición viva (la siguiente al retest)
+    entry: float                       # cierre de la vela del retest
     stop: float
     target: float
     vwap: float                        # VWAP en la vela del retest
 
 
 def _scan_long(o, h, l, c, vwap, high, low, first, end, p: Params):
-    """Primera señal larga en las velas `first..end` (la entrada es la vela siguiente, que también debe estar en el plazo)."""
+    """Primera señal larga en las velas `first..end` (se entra al cierre de la vela de la señal)."""
     rng = high - low
     mid = (high + low) / 2
     if rng <= 0:
         return None
-    for t in range(max(first, p.lookback, p.slope_bars), end):
+    for t in range(max(first, p.lookback, p.slope_bars), end + 1):
         if h[first:t + 1].max() >= high or l[first:t + 1].min() <= low:
             return None                                          # el rango dejó de estar intacto: se acabó la TBR
         v = vwap[t]
@@ -67,7 +67,7 @@ def _scan_long(o, h, l, c, vwap, high, low, first, end, p: Params):
             continue
         if p.confluence is not None and abs(v - mid) > p.confluence * rng:
             continue
-        entry = float(o[t + 1])
+        entry = float(c[t])
         stop = min(float(l[t]), v - p.stop_frac * rng)
         target = high + p.target * rng
         risk = entry - stop
@@ -84,7 +84,7 @@ def find_signal(o, h, l, c, vwap, high: float, low: float, first: int, end: int,
     """
     o, h, l, c, vwap = (np.asarray(a, dtype=float) for a in (o, h, l, c, vwap))
     end = min(end, len(c) - 1)
-    if first > end - 1:
+    if first > end:
         return None
     long_ = _scan_long(o, h, l, c, vwap, high, low, first, end, params)
     short = _scan_long(-o, -l, -h, -c, -vwap, -low, -high, first, end, params)

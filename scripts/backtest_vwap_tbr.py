@@ -115,7 +115,9 @@ def run_symbol(source, sym: str, order, zones, be_r, max_hold):
             sig = find_signal(o[sl], h[sl], l[sl], c[sl], anchor, s.high, s.low, first - lo, end - lo, var.params)
             if sig is None:
                 continue
-            t = lo + sig.entry_bar
+            t = lo + sig.entry_bar                        # la posición vive desde la vela siguiente al retest (entrada a su cierre)
+            if t >= n:
+                continue
             risk = abs(sig.entry - sig.stop)
             res, bars, r_gross, mae, mfe = simulate(h, l, c, t, sig.direction, sig.entry, sig.stop, sig.target, max_hold, be_r)
             cost = float(spread[t]) / risk

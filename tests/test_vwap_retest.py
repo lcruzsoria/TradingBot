@@ -5,7 +5,7 @@ import pytest
 from tradingbot.skills.pattern.vwap_retest import Params, find_signal
 
 # TBR: Low 100, High 110 (50 % = 105). VWAP fijo en 104. Velas tras el cierre de la TBR:
-#   0 y 1: por encima del VWAP sin tocarlo; 2: retest (mínima 103,5 <= 104) que cierra en 105; 3: entrada (abre en 105,2).
+#   0 y 1: por encima del VWAP sin tocarlo; 2: retest (mínima 103,5 <= 104) que cierra en 105 (entrada); 3 y 4: la posición vive.
 #          (open, high, low, close)
 LONG = [(107.0, 108.0, 106.5, 107.5),
         (107.5, 108.0, 106.0, 107.0),
@@ -29,7 +29,7 @@ def signal(rows=LONG, vwap=VWAP, high=HIGH, low=LOW, params=Params(), first=0):
 def test_largo_retest_del_vwap_con_objetivo_en_el_high():
     s = signal()
     assert (s.direction, s.bar, s.entry_bar) == ("long", 2, 3)
-    assert s.entry == 105.2                         # apertura de la vela siguiente al retest
+    assert s.entry == 105.0                         # cierre de la vela del retest
     assert s.stop == 101.5                          # el más lejano: 104 - 0,25 x 10 (el mínimo del retest, 103,5, queda más cerca)
     assert s.target == 110.0 and s.vwap == 104.0
 
@@ -38,7 +38,7 @@ def test_el_corto_es_el_espejo_exacto():
     mirror = [(210 - o, 210 - l, 210 - h, 210 - c) for o, h, l, c in LONG]      # p -> 210 - p: High 110 -> Low 100
     s = signal(mirror, vwap=210 - VWAP)
     assert (s.direction, s.bar, s.entry_bar) == ("short", 2, 3)
-    assert s.entry == pytest.approx(210 - 105.2) and s.stop == pytest.approx(210 - 101.5) and s.target == pytest.approx(100.0)
+    assert s.entry == pytest.approx(210 - 105.0) and s.stop == pytest.approx(210 - 101.5) and s.target == pytest.approx(100.0)
 
 
 def test_el_stop_es_el_minimo_del_retest_si_queda_mas_lejos():
@@ -72,9 +72,9 @@ def test_sin_senal_si_no_venia_de_arriba_o_no_cierra_por_encima():
 
 def test_el_objetivo_debe_estar_al_menos_a_min_rr():
     rows = list(LONG)
-    rows[3] = (109.5, 109.8, 109.0, 109.5)           # la entrada abre casi en el objetivo: 0,5 de recorrido para 8 de riesgo
+    rows[2] = (107.0, 109.9, 103.5, 109.5)           # el retest cierra casi en el objetivo: 0,5 de recorrido para 8 de riesgo
     assert signal(rows) is None
-    assert signal(params=Params(min_rr=1.5)) is None  # 4,8 de recorrido para 3,7 de riesgo = 1,3 R
+    assert signal(params=Params(min_rr=1.5)) is None  # 5 de recorrido para 3,5 de riesgo = 1,43 R
     assert signal(params=Params(min_rr=1.2)) is not None
 
 
@@ -95,5 +95,5 @@ def test_solo_busca_desde_el_cierre_de_la_tbr_y_dentro_del_plazo():
     assert signal(first=3) is None                               # la señal estaría en la vela 2, anterior al inicio
     o, h, l, c = arrays(LONG)
     v = np.full(len(c), VWAP)
-    assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 2) is None   # la vela de la entrada (3) queda fuera del plazo
-    assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 3) is not None
+    assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 1) is None   # la vela de la señal (2) queda fuera del plazo
+    assert find_signal(o, h, l, c, v, HIGH, LOW, 0, 2) is not None
