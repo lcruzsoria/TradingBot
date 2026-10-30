@@ -79,8 +79,7 @@ puede estar en M15 o en un timeframe menor que lo divida (M1, M3, M5 se agrupan 
    sigue buscando más adelante en el precio (no se dibuja ni se opera nada).
 3. **Fibonacci del tramo** (botón **Fibo** del gráfico, activo por defecto): del swing high (0) al swing low (1), con el **0,5**
    como punto medio. El tramo queda fijo y dibuja el stop y el objetivo configurados (`PATTERN_STOP_LEVEL` / `PATTERN_TARGET_LEVEL`).
-4. **Entrada:** la primera vela que retrocede hasta el 0,5 (su mínimo lo toca), **la que confirma el swing del 1 incluida** (los swings
-   fijan el 0 y el 1; la entrada solo pide tocar el 0,5), y
+4. **Entrada:** la primera vela **posterior a la que confirma el swing del 1** que retrocede hasta el 0,5 (su mínimo lo toca) y
    abre por encima de él (viene del lado del 0; en la rotura bajista, al revés). No hace falta que el precio rompa antes el 0.
    Si antes de tener el fibo definido (el 0 y el swing del 1 confirmado) el precio toca el extremo contrario de la TBR, el patrón se
    invalida (NO GO «I»). Si pierde el 1 antes de entrar, también se invalida (NO GO «I»); si el plazo de la TBR termina sin retroceso al 0,5, vence
@@ -108,8 +107,8 @@ Ejemplo bajista; el alcista es el espejo exacto. También trabaja siempre con ve
    una vela cierra por encima del High, el patrón se invalida.
 3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): el **1** es la mecha pivote y el **0** el primer pivote bajo confirmado que
    genera a continuación (queda fijo: uno posterior más bajo no lo sustituye); 0,5 y -0,5 como en Continuación.
-4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí, a partir de la que confirma el pivote del 0 —incluida—: el pivote fija
-   el 0, pero la entrada solo pide tocar el 0,5, y abriendo por encima del 0,5 en el largo, por debajo en el corto), **stop** en la mecha pivote (el 1) y **objetivo** en el -0,5: **2R**.
+4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí, después de la vela que confirma el pivote del 0 —no se puede
+   entrar en el propio swing que aún se está formando— y abriendo por encima del 0,5 en el largo, por debajo en el corto), **stop** en la mecha pivote (el 1) y **objetivo** en el -0,5: **2R**.
    Si el precio supera la mecha pivote antes de la entrada, el patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5,
    vence. Ambos patrones pueden dar señal en la misma TBR: Cortex las valida con el sesgo.
 
