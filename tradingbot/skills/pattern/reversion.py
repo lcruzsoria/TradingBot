@@ -8,8 +8,7 @@ Ejemplo bajista (el alcista es el espejo exacto, con el Low):
    vela cierra por encima del High, el patrón se invalida (pasa a ser continuación).
 3. Fibonacci: el 1 es la mecha pivote y el 0 es el primer pivote bajo confirmado que genera a continuación (queda fijo: uno
    posterior más bajo no lo sustituye). El 0,5 es el punto medio.
-4. Entrada: la primera vela que revierte hasta el 0,5 (su máximo lo toca), la que confirma el pivote del 0 incluida: el pivote fija el
-   0, pero la entrada solo pide tocar el 0,5. Stop en el 1 (la mecha pivote) y objetivo en el -0,5
+4. Entrada: la primera vela que revierte hasta el 0,5 (su máximo lo toca). Stop en el 1 (la mecha pivote) y objetivo en el -0,5
    (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R. Si el precio supera la mecha pivote antes de la entrada, se
    invalida; si termina el plazo de la TBR sin reversión al 0,5, vence.
 5. Rotura con cuerpo: si, ya confirmada la mecha pivote, una vela CIERRA por encima del High tomado antes de la entrada, la reversión se

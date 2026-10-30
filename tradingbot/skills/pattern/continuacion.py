@@ -12,8 +12,8 @@ Ejemplo alcista (el bajista es el espejo exacto, con el Low):
    solo existe cuando el swing que lo marca ya está formado (confirmado): sin él, no hay entrada.
    Casos: A. Ideal si ese swing del stop está dentro del rango de la TBR; B. Flexible si queda fuera (el primer swing tras la rotura).
    Los dos pueden disparar a Cortex y el forwardtest anota de cuál se trata.
-4. Entrada: la primera vela, la que confirma el swing del 1 incluida, que retrocede hasta el 0,5 (su mínimo lo toca) viniendo de
-   arriba (abre por encima del 0,5): los swings fijan el 0 y el 1, pero la entrada solo pide tocar el 0,5. No hace falta que el precio rompa antes el 0. Si pierde el 1 antes de eso, el patrón se invalida;
+4. Entrada: la primera vela posterior a la que confirma el swing del 1 que retrocede hasta el 0,5 (su mínimo lo toca) viniendo de
+   arriba (abre por encima del 0,5). No hace falta que el precio rompa antes el 0. Si pierde el 1 antes de eso, el patrón se invalida;
    si termina el plazo de la TBR sin entrada, vence.
    Si antes de tener el fibo definido (el 0 y el swing del 1 confirmado) el precio toca el extremo contrario de la TBR (el Low en una
    alcista), el setup se invalida (NO GO «I»).
@@ -78,28 +78,29 @@ class Leg:
 def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None, opp: float | None = None) -> Leg:
     """Recorre las velas `brk + 1 .. end` buscando el swing high (0), el swing low posterior (1) y la entrada en el 0,5.
 
-    Los swings (de `k` velas a cada lado) fijan el 0 y el 1; la entrada solo pide que el precio toque el 0,5, así que puede ser la propia
-    vela que confirma el swing low (no hace falta que la entrada sea también un swing). Si se dan las aperturas `O`, debe abrir por
-    encima del 0,5 (viene del lado del 0, no cruza el nivel de largo).
+    La entrada solo puede ser una vela posterior a la que confirma el swing low (hasta que cierra no se sabe que el 1 existe) y, si se
+    dan las aperturas `O`, que abra por encima del 0,5 (viene del lado del 0, no cruza el nivel de largo).
 
     Si antes de confirmar el swing del 1 una vela toca `opp` (el extremo contrario de la TBR), el setup se invalida (`breach`, sin fibo)."""
     zero, zero_idx, origin, origin_idx = None, -1, None, -1
     for t in range(brk + 1, end + 1):
         if origin is None and opp is not None and L[t] <= opp:           # tocó el extremo contrario de la TBR sin tener el fibo definido
             return Leg(zero, zero_idx, None, -1, False, None, t)
-        p = t - k
-        if origin is None and p >= max(brk, k):
-            if H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
-                if zero is None or H[p] > zero:
-                    zero, zero_idx = float(H[p]), p                         # un swing high más alto sustituye al 0
-            if zero is not None and p > zero_idx and L[p] < L[p - k:p].min() and L[p] < L[p + 1:p + k + 1].min():
-                origin, origin_idx = float(L[p]), p                         # el swing low se confirma en la vela t
         if origin is not None:
             if L[t] < origin:                                               # perdió el 1 (el stop) antes de la entrada
                 return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
             half = (zero + origin) / 2
-            if L[t] <= half and (O is None or O[t] > half):                 # basta con tocar el 0,5, también en la vela que confirma
+            if t > origin_idx + k and L[t] <= half and (O is None or O[t] > half):
                 return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None)
+            continue
+        p = t - k
+        if p >= max(brk, k):
+            if origin is None and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
+                if zero is None or H[p] > zero:
+                    zero, zero_idx = float(H[p]), p                         # un swing high más alto sustituye al 0
+            if zero is not None and p > zero_idx and L[p] < L[p - k:p].min() and L[p] < L[p + 1:p + k + 1].min():
+                if origin is None or L[p] < origin:
+                    origin, origin_idx = float(L[p]), p
     return Leg(zero, zero_idx, origin, origin_idx, origin is not None, None, None)
 
 
