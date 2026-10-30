@@ -1,13 +1,14 @@
 """Backtest de las estrategias en una ventana flotante, con el mismo estilo que Forwardtest.
 
 Arriba se eligen el grupo (índices, forex, oro, cripto o Calendario), el patrón y el filtro (lo que opera el bot, a favor del
-sesgo o sin filtro); debajo, el veredicto, las cifras clave, la curva de R acumulado, las barras por año y por hora, y los
-«libros»: comparativa entre mercados, por mercado, zona, lado, filtro, día, mitades, sensibilidad, mejoras, embudo y metodología.
+sesgo o sin filtro); debajo, el veredicto, las cifras clave, la curva de R acumulado, las barras por año, mes, día de la semana y
+hora, y los «libros»: comparativa entre mercados, por mercado, zona, lado, filtro, día, mitades, sensibilidad, mejoras, embudo y
+metodología.
 
-Las barras por año y por hora se pulsan: cada histograma marca un solo año (u hora); un clic en otra barra la sustituye y en la
-misma la quita, y todo lo demás se recalcula solo con esas operaciones. Cada histograma aplica el filtro del otro, pero no el
-suyo, para que se pueda cambiar de barra viéndolas todas. Los datos los carga la
-skill Stats; las cifras se calculan en `skills/stats/backtest.py` a partir de cada operación.
+Las barras se pulsan: cada histograma marca una sola barra (un año, un mes, un día o una hora); un clic en otra la sustituye y en
+la misma la quita, y todo lo demás se recalcula solo con esas operaciones. Cada histograma aplica el filtro de los demás, pero no
+el suyo, para que se pueda cambiar de barra viéndolas todas. Los datos los carga la skill Stats; las cifras se calculan en
+`skills/stats/backtest.py` a partir de cada operación.
 """
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
-from ..skills.stats.backtest import BOT_FILTER, MAIN_FILTERS, PATTERNS, Backtest, Group, Ops, summarize, verdict
+from ..skills.stats.backtest import (BOT_FILTER, DAYS, MAIN_FILTERS, MONTHS, PATTERNS, Backtest, Group, Ops, summarize,
+                                     verdict)
 from . import theme
 from .fmt import miles
 from .stats_dialog import Book, Tile
@@ -221,8 +223,10 @@ class BacktestDialog(QDialog):
         self.profile_key = ""
         self.pattern = PATTERNS[0]
         self.filter = MAIN_FILTERS[0]
-        self.years: set[int] = set()                 # años y horas elegidos en los histogramas (vacío: todos)
+        self.years: set[int] = set()                 # año, mes, día y hora elegidos en los histogramas (vacío: todos)
         self.hours: set[int] = set()
+        self.months: set[int] = set()                # 1 enero ... 12 diciembre
+        self.days: set[int] = set()                  # 0 lunes ... 6 domingo
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
@@ -329,11 +333,17 @@ class BacktestDialog(QDialog):
         lay.addWidget(curve_card)
 
         self.by_year = BarCard("Por año", "R total de cada año · pulsa para filtrar")
+        self.by_month = BarCard("Por mes", "R medio por operación, mes de la entrada · pulsa para filtrar")
+        self.by_weekday = BarCard("Por día de la semana", "R medio por operación, día de la entrada (NY) · pulsa para filtrar")
         self.by_hour = BarCard("Por hora de entrada", "R medio por operación, hora de Nueva York · pulsa para filtrar")
         self.by_year.toggled.connect(self.toggle_year)
+        self.by_month.toggled.connect(self.toggle_month)
+        self.by_weekday.toggled.connect(self.toggle_day)
         self.by_hour.toggled.connect(self.toggle_hour)
-        self.by_year.cleared.connect(lambda: self._set_selection(set(), self.hours))
-        self.by_hour.cleared.connect(lambda: self._set_selection(self.years, set()))
+        self.by_year.cleared.connect(lambda: self._set_selection(years=set()))
+        self.by_month.cleared.connect(lambda: self._set_selection(months=set()))
+        self.by_weekday.cleared.connect(lambda: self._set_selection(days=set()))
+        self.by_hour.cleared.connect(lambda: self._set_selection(hours=set()))
         self.compare = Book("Comparativa entre mercados", "", ("Mercado", "Desde", "Ops", "Acierto", "R bruto",
                                                                "R neto", "R total", "PF", "t"),
                             highlights=("Mejor mercado", "Peor mercado", "Coste medio del grupo"))
@@ -342,7 +352,7 @@ class BacktestDialog(QDialog):
         self.by_zone = Book("Por zona (TBR)", "la TBR donde se dio la entrada", ("Zona",) + METRIC_HEADERS)
         self.by_side = Book("Por lado", "largos contra cortos", ("Lado",) + METRIC_HEADERS)
         self.by_filter = Book("Por filtro", "el mismo patrón con cada filtro del backtest", ("Filtro",) + METRIC_HEADERS)
-        self.by_day = Book("Por día de la semana", "día de la entrada", ("Día",) + METRIC_HEADERS)
+        self.by_day = Book("Días de la semana · detalle", "día de la entrada", ("Día",) + METRIC_HEADERS)
         self.halves = Book("Robustez", "el histórico partido en dos por la mediana de las fechas", ("Mitad",) + METRIC_HEADERS)
         self.sensitivity = Book("Sensibilidad", "otros objetivos y tiempos máximos con las mismas entradas",
                                 ("Variante",) + METRIC_HEADERS)
@@ -353,7 +363,7 @@ class BacktestDialog(QDialog):
         self.outcomes = Book("Cómo terminan", "", ("Patrón", "Objetivo", "Stop", "Breakeven", "Tiempo", "MAE", "MFE",
                                                    "Velas", "Riesgo %", "Coste"))
         self.data_book = Book("Datos", "velas M15 de MT5 usadas", ("Mercado", "Velas", "Desde", "Hasta", "TBR"))
-        for book in (self.by_year, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter,
+        for book in (self.by_year, self.by_month, self.by_weekday, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter,
                      self.by_day, self.halves, self.sensitivity, self.outcomes, self.improvements, self.funnel, self.data_book):
             lay.addWidget(book)
         self.method = Book("Metodología", "cómo se hizo", ())
@@ -541,7 +551,7 @@ class BacktestDialog(QDialog):
 
     def set_group(self, key: str) -> None:
         if key != self.group_key:                       # otro grupo, otros años y horas: la selección no vale
-            self.years, self.hours = set(), set()
+            self.years, self.hours, self.months, self.days = set(), set(), set(), set()
         self.group_key = key
         g = self.group
         if g is not None and g.profile != self.profile_key:
@@ -564,10 +574,16 @@ class BacktestDialog(QDialog):
 
     def toggle_year(self, year: int) -> None:
         """Clic en una barra del año: queda solo ese año (sustituye al que hubiera) o, si ya estaba marcado, se quita."""
-        self._set_selection(self._single(self.years, year), self.hours)
+        self._set_selection(years=self._single(self.years, year))
 
     def toggle_hour(self, hour: int) -> None:
-        self._set_selection(self.years, self._single(self.hours, hour))
+        self._set_selection(hours=self._single(self.hours, hour))
+
+    def toggle_month(self, month: int) -> None:
+        self._set_selection(months=self._single(self.months, month))
+
+    def toggle_day(self, day: int) -> None:
+        self._set_selection(days=self._single(self.days, day))
 
     @staticmethod
     def _single(current: set, key) -> set:
@@ -575,11 +591,18 @@ class BacktestDialog(QDialog):
         return set() if int(key) in current else {int(key)}
 
     def clear_selection(self) -> None:
-        self._set_selection(set(), set())
+        self._set_selection(years=set(), hours=set(), months=set(), days=set())
 
-    def _set_selection(self, years: set, hours: set) -> None:
-        self.years, self.hours = set(years), set(hours)
+    def _set_selection(self, **chosen: set) -> None:
+        """Cambia la selección de los histogramas que se pasen (years, hours, months, days) y lo recalcula todo."""
+        for name, keys in chosen.items():
+            setattr(self, name, set(keys))
         self.refresh()
+
+    @property
+    def _filtered(self) -> bool:
+        """Si hay algún año, mes, día u hora elegido en los histogramas."""
+        return bool(self.years or self.hours or self.months or self.days)
 
     @property
     def group(self) -> Group | None:
@@ -616,7 +639,7 @@ class BacktestDialog(QDialog):
         self.subtitle.setText(g.description)
         self.generated.setText(f"{g.period} · actualizado {g.updated}" if g.updated else g.period)
 
-        view = g.view(self.pattern, self.filter, self.years, self.hours)
+        view = g.view(self.pattern, self.filter, self.years, self.hours, self.days, self.months)
         self._paint_selection(g)
         self._paint_head(g, view.main)
         self._paint_curve(view.main)
@@ -627,7 +650,7 @@ class BacktestDialog(QDialog):
         self._fill_ops(self.by_side, view.sides, lambda k: _colored(SIDE_NAMES.get(k, str(k)), theme.BULL if k == 0 else theme.BEAR))
         self._fill_ops(self.by_filter, view.filters,
                        lambda k: f"<b>{g.all_filters.get(k, k)}</b>" if k == self.filter else g.all_filters.get(k, k))
-        self._fill_ops(self.by_day, view.days, lambda k: k.capitalize())
+        self._fill_ops(self.by_day, view.days, lambda k: DAYS[k].capitalize())
         self._fill_ops(self.halves, view.halves)
         self._fill_rows(self.sensitivity, [(label, summarize(_clean(net))) for label, net in view.sensitivity])
         self._fill_outcomes(view.outcomes)
@@ -642,7 +665,7 @@ class BacktestDialog(QDialog):
         self.compare.setVisible(not cal)
         self.by_day.note.setText("día de la entrada, misma hora, stop y RR (control)" if cal else "día de la entrada")
         self.by_side.note.setText("los cortos son el control" if cal else "largos contra cortos")
-        static = STATIC_NOTE if self.years or self.hours else ""
+        static = STATIC_NOTE if self._filtered else ""
         self.improvements.note.setText("siempre con las reglas del bot; stop k veces el original" + static)
         self.funnel.note.setText("de las TBR evaluadas a las entradas" + static)
         self.data_book.note.setText("velas M15 de MT5 usadas" + static)
@@ -651,12 +674,18 @@ class BacktestDialog(QDialog):
         parts = []
         if self.years:
             parts.append("años <b>" + ", ".join(str(y) for y in sorted(self.years)) + "</b>")
+        if self.months:
+            parts.append("mes <b>" + ", ".join(MONTHS[m - 1] for m in sorted(self.months)) + "</b>")
+        if self.days:
+            parts.append("día <b>" + ", ".join(DAYS[d] for d in sorted(self.days)) + "</b>")
         if self.hours:
-            parts.append("horas de entrada <b>" + ", ".join(f"{h:02d}:00" for h in sorted(self.hours)) + "</b> (NY)")
+            parts.append("hora de entrada <b>" + ", ".join(f"{h:02d}:00" for h in sorted(self.hours)) + "</b> (NY)")
         self.selection_bar.setVisible(bool(parts))
         if parts:
-            extra = " La hora sustituye a la de la configuración del bot." if g.is_calendar and self.hours else ""
-            self.selection_label.setText(f"Filtrando por {' y '.join(parts)}: todas las cifras de abajo se recalculan solo con "
+            replaced = [w for w, on in (("la hora", self.hours), ("el día", self.days)) if on]
+            extra = (f" {' y '.join(replaced).capitalize()} sustituye{'n' if len(replaced) > 1 else ''} a "
+                     f"{'los' if len(replaced) > 1 else 'lo'} de la configuración del bot." if g.is_calendar and replaced else "")
+            self.selection_label.setText(f"Filtrando por {', '.join(parts[:-1]) + ' y ' + parts[-1] if len(parts) > 1 else parts[0]}: todas las cifras de abajo se recalculan solo con "
                                          f"esas operaciones.{extra}")
 
     def _paint_bars(self, g: Group, view) -> None:
@@ -668,6 +697,15 @@ class BacktestDialog(QDialog):
         self.by_hour.set_bars([h for h, _ in hours], [f"{h:02d}" for h, _ in hours], [s.get("mean") for _, s in hours],
                               [f"{h:02d}:00 NY: {s['n']} ops · media {_r(s.get('mean'))} · {s['total']:+.1f} R" for h, s in hours],
                               self.hours, g.raw.get("hora") if g.is_calendar else None)
+        months = [(m, o.stats()) for m, o in view.months]
+        self.by_month.set_bars([m for m, _ in months], [MONTHS[m - 1] for m, _ in months], [s.get("mean") for _, s in months],
+                               [f"{MONTHS[m - 1]}: {s['n']} ops · media {_r(s.get('mean'))} · {s['total']:+.1f} R" for m, s in months],
+                               self.months)
+        days = [(d, o.stats()) for d, o in view.days if o.stats().get("n")]
+        cal_days = g.raw.get("dias") or []
+        self.by_weekday.set_bars([d for d, _ in days], [DAYS[d][:3] for d, _ in days], [s.get("mean") for _, s in days],
+                                 [f"{DAYS[d]}: {s['n']} ops · media {_r(s.get('mean'))} · {s['total']:+.1f} R" for d, s in days],
+                                 self.days, cal_days[0] if g.is_calendar and len(cal_days) == 1 else None)
 
     def _paint_head(self, g: Group, main: Ops) -> None:
         b = self.blocks
@@ -686,12 +724,12 @@ class BacktestDialog(QDialog):
         per_100 = f"{(r.get('mean') or 0) * 100:+.1f} R cada 100 operaciones"
         filt = g.all_filters.get(self.filter, self.filter)
         where = f"{self.pattern}, {filt if g.is_calendar else filt.lower()}" + ("" if g.is_calendar else f", {g.name.lower()}")
-        if self.years or self.hours:
+        if self._filtered:
             where += " (filtrado)"
         self.verdict.setText(f"<b style='color:{color}'>{text}</b>  ·  {where}: {per_100} (t {_num(r.get('t'), 2, sign=True)})")
         markets = len(set(main["m"].tolist()))
         b["n"].set_value(miles(int(r["n"])), f"{markets} mercado{'s' if markets != 1 else ''}" +
-                         (" · selección" if self.years or self.hours else f" · {g.period}"))
+                         (" · selección" if self._filtered else f" · {g.period}"))
         wr = r.get("wr")
         b["wr"].set_value("-" if wr is None else f"{wr:.1f} %",
                           "con R neto positivo" if g.is_calendar else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R",
@@ -762,13 +800,13 @@ class BacktestDialog(QDialog):
         since = {m.get("mercado"): str(m.get("desde (NY)") or "")[:4] for grp in self.backtest.groups_of(g.profile)
                  for m in grp.markets}
         rows = []
-        for market, group_name, ops in self.backtest.compare(self.filter, self.years, self.hours, g.profile):
+        for market, group_name, ops in self.backtest.compare(self.filter, self.years, self.hours, g.profile, self.days, self.months):
             s = ops.stats()
             gross = float((ops["r"] + ops["k"]).mean()) if len(ops) else None
             rows.append((market, group_name, s, gross))
         rows.sort(key=lambda x: -(x[2].get("mean") if x[2].get("n") else -9))
         self.compare.note.setText(f"{g.all_filters.get(self.filter, self.filter).lower()}, ambos patrones · en negrita, "
-                                  f"{g.name.lower()}" + (" · filtrado" if self.years or self.hours else ""))
+                                  f"{g.name.lower()}" + (" · filtrado" if self._filtered else ""))
         out = []
         for market, group_name, s, gross in rows:
             mine = group_name == g.name
@@ -793,7 +831,8 @@ class BacktestDialog(QDialog):
                 self.compare.set_highlight(i, "-", "", color)
             else:
                 self.compare.set_highlight(i, _short_market(pick[0]), f"{_r(pick[2]['mean'])} · {pick[1]}", color)
-        mine = [o for _m, grp, o in self.backtest.compare(self.filter, self.years, self.hours, g.profile) if grp == g.name and len(o)]
+        mine = [o for _m, grp, o in self.backtest.compare(self.filter, self.years, self.hours, g.profile, self.days,
+                                                                          self.months) if grp == g.name and len(o)]
         if mine:
             k = np.concatenate([o["k"] for o in mine])
             gross = float(np.concatenate([o["r"] + o["k"] for o in mine]).mean())
@@ -802,7 +841,7 @@ class BacktestDialog(QDialog):
             self.compare.set_highlight(2, "-", "", theme.WARN)
 
     def _fill_outcomes(self, outcomes: list[tuple[str, Ops]]) -> None:
-        self.outcomes.note.setText("las operaciones elegidas" + (" (filtradas)" if self.years or self.hours else ""))
+        self.outcomes.note.setText("las operaciones elegidas" + (" (filtradas)" if self._filtered else ""))
         rows = []
         for pattern, ops in outcomes:
             n = len(ops)

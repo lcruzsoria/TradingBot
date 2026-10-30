@@ -1,8 +1,8 @@
 """Backtests de las estrategias (patrones Continuación y Reversión por grupo de mercados, y Calendario), para la ventana Backtest.
 
 Lee `backtest.json.gz` (lo genera `scripts/exportar_backtest.py` a partir de los Excel y el pkl de `analisis/`), que guarda cada
-operación del backtest. Todas las cifras se calculan aquí a partir de ellas, así que la ventana puede quedarse con solo unos
-años o unas horas de entrada (al pulsar los histogramas) y recalcular todo lo demás. Solo las hojas que necesitan volver a
+operación del backtest. Todas las cifras se calculan aquí a partir de ellas, así que la ventana puede quedarse con solo un
+año, un mes, un día de la semana o una hora de entrada (al pulsar los histogramas) y recalcular todo lo demás. Solo las hojas que necesitan volver a
 simular (mejoras de stop y RR, embudo de las TBR) llegan ya hechas y no se filtran.
 """
 from __future__ import annotations
@@ -29,6 +29,7 @@ MAIN_FILTERS = tuple(FILTERS)[:3]                   # los que se eligen arriba; 
 BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
 INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
 # Sensibilidad de los patrones: columna de cada operación -> variante
@@ -113,6 +114,11 @@ class Ops:
         """0 lunes ... 6 domingo (el 1-1-1970 fue jueves)."""
         return (self.cols["e"] // 1440 + 3) % 7
 
+    @cached_property
+    def month(self) -> np.ndarray:
+        """Mes de la entrada, 1 enero ... 12 diciembre."""
+        return self.cols["e"].astype("datetime64[m]").astype("datetime64[M]").astype(np.int64) % 12 + 1
+
     def stats(self, col: str = "r") -> dict:
         return summarize(self.cols[col])
 
@@ -137,15 +143,19 @@ class Ops:
 
 @dataclass
 class View:
-    """Todo lo que pinta la ventana para una elección (patrón, filtro, años y horas). Cada lista: [(nombre, operaciones)]."""
+    """Todo lo que pinta la ventana para una elección (patrón, filtro, año, mes, día y hora). Cada lista: [(clave, operaciones)].
+
+    Cada histograma (años, meses, días, horas) lleva los filtros de los demás pero no el suyo, para poder elegir otra barra.
+    """
     main: Ops
     years: list                     # sin el filtro de años (para poder elegir otros)
     hours: list                     # sin el filtro de horas
+    months: list                    # sin el filtro de meses (1-12)
     markets: list
     zones: list
     sides: list
     filters: list                   # [(clave del filtro, operaciones)]
-    days: list
+    days: list                      # sin el filtro de días (0 lunes ... 6 domingo)
     halves: list
     sensitivity: list               # [(variante, R neto por operación)]
     outcomes: list                  # [(patrón, operaciones)]
@@ -236,57 +246,68 @@ class Group:
             mask &= ops.names("p") == pattern
         return mask
 
-    def view(self, pattern: str, filt: str, years=(), hours=()) -> View:
-        return self._calendar_view(filt, years, hours) if self.is_calendar else self._pattern_view(pattern, filt, years, hours)
+    def view(self, pattern: str, filt: str, years=(), hours=(), days=(), months=()) -> View:
+        if self.is_calendar:
+            return self._calendar_view(filt, years, hours, days, months)
+        return self._pattern_view(pattern, filt, years, hours, days, months)
 
-    def _pattern_view(self, pattern: str, filt: str, years, hours) -> View:
+    @staticmethod
+    def _split(ops: Ops, mask, key: str, order: list | None = None) -> list:
+        chosen = ops.take(mask)
+        return chosen.split(getattr(chosen, key), order)
+
+    def _pattern_view(self, pattern: str, filt: str, years, hours, days, months) -> View:
         ops = self.ops
-        in_years, in_hours = self._in(ops.year, years), self._in(ops.hour, hours)
+        y, h = self._in(ops.year, years), self._in(ops.hour, hours)
+        d, mo = self._in(ops.weekday, days), self._in(ops.month, months)
+        chosen = y & h & d & mo
         base = self.filter_mask(pattern, filt)
-        main = ops.take(base & in_years & in_hours)
-        median = float(np.median(ops["e"][in_years & in_hours])) if (in_years & in_hours).any() else None
+        main = ops.take(base & chosen)
+        median = float(np.median(ops["e"][chosen])) if chosen.any() else None
         sens = [(label, main[col]) for col, label in SENSITIVITY if col in main.cols] + [("2R sin costes (R bruto)", main["r"] + main["k"])]
         pats = PATTERNS[1:] if pattern == "Ambos" else (pattern,)
         return View(
             main=main,
-            years=ops.take(base & in_hours).split(ops.take(base & in_hours).year),
-            hours=ops.take(base & in_years).split(ops.take(base & in_years).hour),
+            years=self._split(ops, base & h & d & mo, "year"),
+            hours=self._split(ops, base & y & d & mo, "hour"),
+            months=self._split(ops, base & y & h & d, "month"),
             markets=main.split(main.names("m")),
             zones=main.split(main.names("z"), ["Asia", "London", "NY Open"]),
             sides=main.split(main["d"], [0, 1]),
-            filters=[(f, ops.take(self.filter_mask(pattern, f) & in_years & in_hours)) for f in self.all_filters],
-            days=[(DAYS[d], o) for d, o in main.split(main.weekday, list(range(5)))],
+            filters=[(f, ops.take(self.filter_mask(pattern, f) & chosen)) for f in self.all_filters],
+            days=self._split(ops, base & y & h & mo, "weekday", list(range(5))),
             halves=main.halves(median),
             sensitivity=sens,
             outcomes=[(p, main.take(main.names("p") == p)) for p in pats])
 
-    def _calendar_view(self, filt: str, years, hours) -> View:
+    def _calendar_view(self, filt: str, years, hours, days, months) -> View:
         """Calendario: la operación del bot es largo, en los días y a la hora configurados. Los controles (los cortos, los
-        demás días, las demás horas) salen de las mismas velas; al elegir una hora en el histograma, cambia la del bot."""
+        demás días, las demás horas) salen de las mismas velas; al elegir una hora o un día en su histograma, cambia la del
+        bot."""
         ops, cfg = self.ops, self.raw
         scope = self.filter_mask("", filt)
-        in_years = self._in(ops.year, years)
+        in_years, in_months = self._in(ops.year, years), self._in(ops.month, months)
         hour_set = set(hours) or {cfg["hora"]}
-        on_days = np.isin(ops.weekday, cfg["dias"])
+        on_days = np.isin(ops.weekday, list(set(days) or set(cfg["dias"])))
         long = ops["d"] == 0
         at_hour = np.isin(ops.hour, list(hour_set))
-        main_mask = scope & on_days & long & at_hour & in_years
+        main_mask = scope & on_days & long & at_hour & in_years & in_months
         main = ops.take(main_mask)
         # rejilla de stop y RR: columnas g0, g1... con el R neto de la misma entrada con otro stop / RR (largos en sus días)
         sens = [(label, main[f"g{i}"]) for i, label in enumerate(cfg.get("rejilla") or [])]
         sens.append((f"stop {cfg['stop']:g} % · RR {cfg['rr']:g} sin costes (R bruto)", main["r"] + main["k"]))
-        hours_ops = ops.take(scope & on_days & long & in_years)
-        years_ops = ops.take(scope & on_days & long & at_hour)
+        sides = ops.take(scope & on_days & at_hour & in_years & in_months)
         return View(
             main=main,
-            years=years_ops.split(years_ops.year),
-            hours=hours_ops.split(hours_ops.hour),
+            years=self._split(ops, scope & on_days & long & at_hour & in_months, "year"),
+            hours=self._split(ops, scope & on_days & long & in_years & in_months, "hour"),
+            months=self._split(ops, scope & on_days & long & at_hour & in_years, "month"),
             markets=main.split(main.names("m")),
             zones=[],
-            sides=ops.take(scope & on_days & at_hour & in_years).split(ops.take(scope & on_days & at_hour & in_years)["d"], [0, 1]),
-            filters=[(f, ops.take(self.filter_mask("", f) & on_days & long & at_hour & in_years)) for f in self.all_filters],
-            days=[(DAYS[d], o) for d, o in ops.take(scope & long & at_hour & in_years).split(
-                ops.take(scope & long & at_hour & in_years).weekday, list(range(5)))],
+            sides=sides.split(sides["d"], [0, 1]),
+            filters=[(f, ops.take(self.filter_mask("", f) & on_days & long & at_hour & in_years & in_months))
+                     for f in self.all_filters],
+            days=self._split(ops, scope & long & at_hour & in_years & in_months, "weekday", list(range(5))),
             halves=main.halves(),
             sensitivity=sens,
             outcomes=[("Calendario", main)])
@@ -313,15 +334,16 @@ class Backtest:
     def groups_of(self, profile: str) -> list[Group]:
         return [g for g in self.groups if g.profile == profile]
 
-    def compare(self, filt: str, years=(), hours=(), profile: str | None = None) -> list[tuple[str, str, Ops]]:
-        """(mercado, grupo, operaciones) de todos los mercados de los patrones (los del `profile` si se da), con ese filtro y los
-        años y horas elegidos."""
+    def compare(self, filt: str, years=(), hours=(), profile: str | None = None, days=(), months=()) -> list[tuple[str, str, Ops]]:
+        """(mercado, grupo, operaciones) de todos los mercados de los patrones (los del `profile` si se da), con ese filtro y el
+        año, la hora, el día y el mes elegidos."""
         out = []
         for g in self.groups:
             if g.is_calendar or (profile is not None and g.profile != profile):
                 continue
             ops = g.ops
-            sel = g.filter_mask("Ambos", filt) & g._in(ops.year, years) & g._in(ops.hour, hours)
+            sel = (g.filter_mask("Ambos", filt) & g._in(ops.year, years) & g._in(ops.hour, hours)
+                   & g._in(ops.weekday, days) & g._in(ops.month, months))
             chosen = ops.take(sel)
             names = ops.names("m")
             for m in dict.fromkeys(names.tolist()):
