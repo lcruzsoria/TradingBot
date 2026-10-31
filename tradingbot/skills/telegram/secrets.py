@@ -1,4 +1,4 @@
-"""Secretos de la skill Móvil (token de Telegram, chat, clave del panel): nunca en tradingbot.env, que está en el repositorio.
+"""Secretos de la skill Telegram (token de Telegram, chat, clave del panel): nunca en tradingbot.env, que está en el repositorio.
 
 Se buscan primero en las variables de entorno y, si no están, en el fichero de cuentas, fuera del repo (el mismo de MT5,
 C:\\Users\\claude\\mt5\\.env, o el que se pase con --env).

@@ -54,7 +54,7 @@ slot = 4
 
 [[skills]]
 type = "setup"
-slot = "aux1"
+slot = "aux4"
 
 [[skills]]
 type = "calendario"
@@ -69,5 +69,5 @@ type = "stats"
 slot = "aux3"
 
 [[skills]]
-type = "movil"
-slot = "aux4"
+type = "telegram"
+slot = "aux1"

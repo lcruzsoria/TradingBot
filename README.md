@@ -525,9 +525,9 @@ la línea entre sus hexágonos se ilumina. Pulsa un hexágono para ver qué escu
 | `setup` | aux1 | El ejecutor: solo escucha a Cortex (`setup.order` -> `setup.executed`; las velas que Cortex le reenvía como `setup.candles` sirven para seguir las posiciones simuladas con hora de entrada y cierre, p. ej. Calendario: stop, objetivo, stop a breakeven y cierre por tiempo -> `setup.closed`, que se anota en el Registro; al terminar su vela de 3 h (índices) o 4 h (resto) se consolida en el saldo virtual del perfil, `setup.consolidated`, publicado como `setup.account` para la cabecera); por ahora en modo simulación. Las posiciones abiertas se guardan en `data/perfiles/<perfil>/abiertas.json` (JSON legible con la orden completa de cada una): se pueden consultar y, al reiniciar, Setup las sigue y Cortex sabe qué mercados están ocupados. Lee el bloque SETUP. |
 | `quotes` | 5 | Cotizaciones de la watchlist y cifras de la cuenta cada `QUOTES_INTERVAL` segundos (`quotes.updated`). |
 | `stats` | aux3 | Forwardtest y backtest: anota los GO / NO GO de Cortex y las operaciones simuladas de Setup (`cortex.decision` + `setup.executed` + `setup.closed` -> `stats.session`) en un diario mensual por perfil (`data/perfiles/<perfil>/forwardtest`) y carga el resumen del backtest (`stats.backtest`); la interfaz le pide `stats.reset` (nueva etapa) y `stats.reload`. Alimenta los botones Forwardtest y Backtest del área Stats. Lee el bloque STATS. |
-| `movil` | aux4 | El bot en el móvil: avisos por **Telegram** cuando Setup abre una operación y cuando cierra (TP, SL, BE o tiempo, con su R) y, con `TELEGRAM_NOTIFY`, cada GO / NO GO de Cortex; y un **panel web** de solo lectura (abiertas con su R en vivo, cierres, resultado del día, sesgo de cada mercado y decisiones de Cortex) que se abre en el navegador del móvil. Solo avisa de lo que pasa en directo. Escucha `candles.loaded`, `quotes.updated`, `bias.updated`, `cortex.decision`, `setup.executed` y `setup.closed`; no publica nada. Lee los bloques TELEGRAM y PANEL; sus secretos van en el fichero de cuentas (ver «El bot en el móvil»). |
+| `telegram` | aux4 | El bot en el móvil: avisos por **Telegram** cuando Setup abre una operación y cuando cierra (TP, SL, BE o tiempo, con su R) y, con `TELEGRAM_NOTIFY`, cada GO / NO GO de Cortex; y un **panel web** de solo lectura (abiertas con su R en vivo, cierres, resultado del día, sesgo de cada mercado y decisiones de Cortex) que se abre en el navegador del móvil. Solo avisa de lo que pasa en directo. Escucha `candles.loaded`, `quotes.updated`, `bias.updated`, `cortex.decision`, `setup.executed` y `setup.closed`; no publica nada. Lee los bloques TELEGRAM y PANEL; sus secretos van en el fichero de cuentas (ver «El bot en el móvil»). |
 
-El anillo está completo; los satélites los ocupan Setup (`aux1`), Calendario (`aux2`), Stats (`aux3`) y Móvil (`aux4`).
+El anillo está completo; los satélites los ocupan Setup (`aux4`), Calendario (`aux2`), Stats (`aux3`) y Telegram (`aux1`).
 Estados: gris azulado en espera, azul activa, brillante trabajando, rojo con error (las demás siguen funcionando).
 
 Flujo actual: `ui -> feed.load -> feed -> candles.loaded -> bias + tbr + levels + pattern + cortex -> bias.updated -> cortex`;
@@ -541,7 +541,7 @@ controles del GO / NO GO, niveles y zonas TBR...). Una traza que no cambia no se
 
 Pulsa **Long** o **Short** en la tarjeta del Bias para ver a Cortex contestar con `trade.verdict`.
 
-### El bot en el móvil (skill Móvil)
+### El bot en el móvil (skill Telegram)
 
 Avisos por Telegram y un panel web, sin instalar nada más: el bot sigue en el PC y el móvil solo mira. Los secretos (token,
 chat y clave del panel) **no** van en `tradingbot.env`, que está en el repositorio, sino en el fichero de cuentas, fuera del

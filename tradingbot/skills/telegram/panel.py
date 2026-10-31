@@ -241,7 +241,7 @@ class PanelServer:
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)
         self.httpd.daemon_threads = True
-        self.thread = threading.Thread(target=self.httpd.serve_forever, name="panel-movil", daemon=True)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, name="panel-telegram", daemon=True)
 
     @property
     def port(self) -> int:

@@ -1,4 +1,4 @@
-"""Skill Móvil: el bot en el móvil (satélite aux4).
+"""Skill Telegram: el bot en el móvil (satélite aux1).
 
 - skill.py      la skill: avisos por Telegram y panel web
 - telegram.py   la API de bots de Telegram

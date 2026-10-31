@@ -1,4 +1,4 @@
-"""Skill Móvil: avisos por Telegram (sin conectar con Telegram: el envío se intercepta) y panel web de solo lectura."""
+"""Skill Telegram: avisos por Telegram (sin conectar con Telegram: el envío se intercepta) y panel web de solo lectura."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -34,7 +34,7 @@ def fake_updates(token, offset=None):
 
 @pytest.fixture
 def sent(monkeypatch):
-    from tradingbot.skills.movil import telegram as client
+    from tradingbot.skills.telegram import telegram as client
     out = []
     INBOX.clear()
     monkeypatch.setattr(client, "send_message", lambda token, chat, text: out.append((token, chat, text)))
@@ -51,7 +51,7 @@ def run_skill(env_text, app=None):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus = EventBus()
-    manager = SkillManager(bus, Services(None, None, {"app": dict(app or {})}, EnvConfig(parse(env_text))), [{"type": "movil"}])
+    manager = SkillManager(bus, Services(None, None, {"app": dict(app or {})}, EnvConfig(parse(env_text))), [{"type": "telegram"}])
     manager.start()
     time.sleep(0.2)
     return manager, bus
@@ -62,7 +62,7 @@ def settle(manager, bus, *events):
         bus.publish(topic, payload, source=source)
     time.sleep(0.4)
     manager.stop()
-    return manager.skills["movil"]
+    return manager.skills["telegram"]
 
 
 def candles(symbol="EURUSD", last=1000):
@@ -102,7 +102,7 @@ def test_el_cierre_de_una_abierta_antes_de_reiniciar_si_se_avisa(sent):
 
 def test_el_aviso_de_calendario_lleva_su_estrategia_y_no_zona_tbr():
     from tradingbot.skills.cortex.order import build_calendar_order
-    from tradingbot.skills.movil import messages
+    from tradingbot.skills.telegram import messages
     signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 29171.5, "stop": 29025.64,
               "target": 29463.22, "day": date(2026, 10, 26), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
     bias = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=4.0)
@@ -113,7 +113,7 @@ def test_el_aviso_de_calendario_lleva_su_estrategia_y_no_zona_tbr():
 
 def test_el_sesgo_lleva_la_eficiencia_cuando_el_filtro_de_lateralidad_la_midio():
     from tradingbot.skills.cortex.order import build_calendar_order
-    from tradingbot.skills.movil import messages
+    from tradingbot.skills.telegram import messages
     signal = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "long", "price": 100.0, "stop": 99.0, "target": 102.0,
               "day": date(2026, 10, 28), "entry_ts": 1000, "close_ts": 2000, "close_at": "10:00 NY"}
     lateral = SimpleNamespace(bias=SimpleNamespace(value="No Bias"), score=-4.0, lateral=True, efficiency=0.0834)
@@ -154,7 +154,7 @@ def test_sin_token_o_con_un_aviso_desconocido_la_skill_avisa_del_error(monkeypat
 
 
 def test_el_token_se_lee_del_fichero_de_cuentas(monkeypatch, tmp_path):
-    from tradingbot.skills.movil import telegram as client
+    from tradingbot.skills.telegram import telegram as client
     monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     env = tmp_path / ".env"
@@ -183,14 +183,14 @@ def test_el_panel_sirve_la_pagina_y_el_estado_con_su_clave(monkeypatch, tmp_path
     data = tmp_path / "perfil"
     store.save([ORDER], data / "abiertas.json")
     (data / "forwardtest").mkdir(parents=True)
-    from tradingbot.skills.movil import panel
+    from tradingbot.skills.telegram import panel
     month = panel.journal.month_of(panel.datetime.now(panel.NY))
     yesterday = (panel.datetime.now(panel.NY).date() - timedelta(days=1)).isoformat()      # una TBR de ayer (Asia) cerrada hoy cuenta hoy
     close = {"t": "close", "at": panel.datetime.now().isoformat(timespec="seconds"),
              "order": {**store.order_to_json(ORDER), "tbr_day": yesterday}, "closed": TP.__dict__}
     (data / "forwardtest" / f"{month}.jsonl").write_text(json.dumps(close) + "\nbasura\n", encoding="utf-8")
     manager, bus = run_skill("PANEL_ENABLED=true\nPANEL_PORT=0\n", {"data_dir": str(data), "profile_name": "puprime"})
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     port = skill.server.port
     bus.publish("quotes.updated", {"quotes": {"EURUSD": SimpleNamespace(bid=1.0945)}, "account": None}, source="quotes")
     bus.publish(*candles()[:2], source="feed")
@@ -218,7 +218,7 @@ def test_hoy_cuenta_por_dia_de_cierre_y_no_por_el_de_la_tbr(tmp_path):
     """Una operación con la TBR Asia de ayer que cierra hoy es de hoy (el fallo: «Hoy» salía vacío con dos TP notificados)."""
     import json
     from datetime import datetime
-    from tradingbot.skills.movil import messages, panel
+    from tradingbot.skills.telegram import messages, panel
     from tradingbot.skills.setup import store
     data = tmp_path / "perfil"
     (data / "forwardtest").mkdir(parents=True)
@@ -252,7 +252,7 @@ def test_los_comandos_de_telegram_contestan_con_lo_del_panel_solo_a_tu_chat(sent
     INBOX.append(message(1, "/estado"))                                                # con el bot parado: no se contesta
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", {"data_dir": str(tmp_path / "perfil"),
                                                                                        "profile_name": "puprime"})
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     bus.publish("quotes.updated", {"quotes": {"EURUSD": SimpleNamespace(bid=1.0945)}, "account": None}, source="quotes")
     bus.publish("bias.updated", {"symbol": "EURUSD", "timeframe": "15m", "result": SimpleNamespace(
         bias=SimpleNamespace(value="Bearish"), score=-3.0, lateral=False)}, source="bias")
@@ -277,7 +277,7 @@ def test_un_comando_por_cuenta_manda_la_tarjeta_de_su_forwardtest(sent, monkeypa
     from datetime import datetime
     from PySide6.QtWidgets import QApplication
     from tradingbot import config
-    from tradingbot.skills.movil import card, panel, telegram as client
+    from tradingbot.skills.telegram import card, panel, telegram as client
     from tradingbot.skills.setup import store
     QApplication.instance() or QApplication([])
     month = panel.journal.month_of(datetime.now())
@@ -295,7 +295,7 @@ def test_un_comando_por_cuenta_manda_la_tarjeta_de_su_forwardtest(sent, monkeypa
     app = {"profile_name": "puprime", "data_dir": str(config.profile_dir("puprime")),
            "profiles": [("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"), ("panel", "Choca con un comando"), ("Raro-1", "x")]}
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", app)
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     INBOX.extend([message(1, "/puprime"), message(2, "/metaquotes@mi_bot"), message(3, "/ayuda")])
     skill.tick()
     manager.stop()
@@ -308,7 +308,7 @@ def test_un_comando_por_cuenta_manda_la_tarjeta_de_su_forwardtest(sent, monkeypa
 
 def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
     from PySide6.QtWidgets import QApplication
-    from tradingbot.skills.movil import card, messages, panel
+    from tradingbot.skills.telegram import card, messages, panel
     QApplication.instance() or QApplication([])
     snap = panel.PanelState({"app": {"profile_name": "puprime"}}).snapshot("metaquotes")
     png = card.render_operations(snap)
@@ -317,10 +317,10 @@ def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
 
 
 def test_sin_comandos_no_se_pregunta_a_telegram(sent, monkeypatch):
-    from tradingbot.skills.movil import telegram as client
+    from tradingbot.skills.telegram import telegram as client
     monkeypatch.setattr(client, "get_updates", lambda *a: pytest.fail("no debería preguntar"))
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\nTELEGRAM_COMMANDS=false\n")
-    manager.skills["movil"].tick()
+    manager.skills["telegram"].tick()
     manager.stop()
     assert sent == []
 
@@ -332,7 +332,7 @@ def test_panel_manda_la_imagen_del_panel_con_los_datos(sent, tmp_path):
     store.save([ORDER], tmp_path / "perfil" / "abiertas.json")
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", {"data_dir": str(tmp_path / "perfil"),
                                                                                        "profile_name": "puprime"})
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     INBOX.append(message(1, "/panel"))
     skill.tick()
     manager.stop()
@@ -343,24 +343,24 @@ def test_panel_manda_la_imagen_del_panel_con_los_datos(sent, tmp_path):
 def test_captura_pide_la_ventana_a_la_interfaz_y_manda_lo_que_devuelve(sent):
     pedidas = []
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n")
-    bus.subscribe("ui", "movil.capture.request", pedidas.append)
-    skill = manager.skills["movil"]
+    bus.subscribe("ui", "telegram.capture.request", pedidas.append)
+    skill = manager.skills["telegram"]
     INBOX.append(message(1, "/captura"))
     skill.tick()
     assert len(pedidas) == 1 and PHOTOS == []                                          # espera a que la ventana conteste
-    bus.publish("movil.capture", {"request_id": "tg", "png": b"\x89PNG-ventana"}, source="ui")
+    bus.publish("telegram.capture", {"request_id": "tg", "png": b"\x89PNG-ventana"}, source="ui")
     time.sleep(0.4)
-    bus.publish("movil.capture", {"request_id": "otra", "png": b"\x89PNG-no-pedida"}, source="ui")      # sin pedirla: se ignora
+    bus.publish("telegram.capture", {"request_id": "otra", "png": b"\x89PNG-no-pedida"}, source="ui")      # sin pedirla: se ignora
     time.sleep(0.3)
     manager.stop()
     assert [p[1] for p in PHOTOS] == [b"\x89PNG-ventana"]
 
 
 def test_captura_sin_respuesta_de_la_ventana_avisa(sent, monkeypatch):
-    from tradingbot.skills.movil import skill as movil
-    monkeypatch.setattr(movil, "CAPTURE_TIMEOUT", 0.0)
+    from tradingbot.skills.telegram import skill as telegram_skill
+    monkeypatch.setattr(telegram_skill, "CAPTURE_TIMEOUT", 0.0)
     manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n")
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     INBOX.append(message(1, "/captura"))
     skill.tick()
     time.sleep(0.05)
@@ -380,13 +380,13 @@ def test_la_ventana_contesta_a_la_peticion_de_captura(tmp_path, monkeypatch):
     cfg = {"app": {"symbol": "EURUSD", "timeframe": "15m", "watchlist": ["EURUSD"]}}
     win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), []), cfg, "t")
     got = []
-    win.bus.subscribe("t", "movil.capture", got.append)
+    win.bus.subscribe("t", "telegram.capture", got.append)
     win._on_capture_request({"request_id": "tg"})
     assert got[0].payload["request_id"] == "tg" and got[0].payload["png"][:4] == b"\x89PNG" and len(got[0].payload["png"]) > 5000
 
 
 def test_la_subida_de_la_imagen_es_un_multipart_valido():
-    from tradingbot.skills.movil import telegram as client
+    from tradingbot.skills.telegram import telegram as client
     body, kind = client.multipart({"chat_id": "42", "caption": "hola"}, "photo", "x.png", b"\x89PNG-datos", "image/png")
     boundary = kind.split("boundary=")[1]
     end = ("--" + boundary + "--" + chr(13) + chr(10)).encode()
@@ -435,7 +435,7 @@ def dibujar_skill(tmp_path):
 
 def test_el_dibujo_del_setup_es_una_imagen_con_el_tramo_del_tp_segun_el_resultado():
     from PySide6.QtWidgets import QApplication
-    from tradingbot.skills.movil import setup_chart
+    from tradingbot.skills.telegram import setup_chart
     from tradingbot.skills.setup import store
     QApplication.instance() or QApplication([])
     df = chart_candles()[1]["df"]
@@ -451,7 +451,7 @@ def test_dibujar_manda_los_setups_de_hoy_y_no_los_de_dias_anteriores(sent, tmp_p
     QApplication.instance() or QApplication([])
     write_diary(tmp_path / "perfil", (OLD, TP), (DRAWN, CLOSED_SL))
     manager, bus = dibujar_skill(tmp_path)
-    skill = manager.skills["movil"]
+    skill = manager.skills["telegram"]
     bus.publish(*chart_candles()[:2], source="feed")
     time.sleep(0.4)
     INBOX.extend([message(1, "/dibujar"), message(2, "/dibujar xau"), message(3, "/dibujar 5"), message(4, "/dibujar 1")])
@@ -467,7 +467,7 @@ def test_dibujar_sin_setups_hoy_lo_dice(sent, tmp_path):
     write_diary(tmp_path / "perfil", (OLD, TP))
     manager, bus = dibujar_skill(tmp_path)
     INBOX.append(message(1, "/dibujar"))
-    manager.skills["movil"].tick()
+    manager.skills["telegram"].tick()
     manager.stop()
     assert PHOTOS == [] and sent[-1][2] == "Hoy no se ha ejecutado ningún setup."
 
@@ -476,6 +476,6 @@ def test_dibujar_sin_velas_cargadas_lo_dice(sent, tmp_path):
     write_diary(tmp_path / "perfil", (DRAWN, None))
     manager, bus = dibujar_skill(tmp_path)
     INBOX.append(message(1, "/dibujar"))
-    manager.skills["movil"].tick()
+    manager.skills["telegram"].tick()
     manager.stop()
     assert PHOTOS == [] and "Aún no tengo las velas de EURUSD" in sent[-1][2]

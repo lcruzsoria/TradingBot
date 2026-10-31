@@ -1,4 +1,4 @@
-"""Skill Móvil: el bot en el móvil. Avisos por Telegram (aperturas y cierres de Setup y, si se quiere, GO / NO GO de Cortex) y
+"""Skill Telegram: el bot en el móvil. Avisos por Telegram (aperturas y cierres de Setup y, si se quiere, GO / NO GO de Cortex) y
 un panel web de solo lectura (abiertas, cierres, sesgo y decisiones) que se abre en el navegador del móvil."""
 from __future__ import annotations
 
@@ -46,17 +46,17 @@ def _loopback(host: str) -> bool:
         return False
 
 
-@register_skill("movil")
-class MovilSkill(Skill):
-    title = "Móvil"
+@register_skill("telegram")
+class TelegramSkill(Skill):
+    title = "Telegram"
     description = ("El bot en el móvil. Telegram: avisa cuando Setup abre una operación y cuando cierra (TP, SL, BE o tiempo, "
                    "con su R) y, si se activa, de cada GO / NO GO de Cortex; solo lo que pasa en directo, no el repaso al "
                    "arrancar. Panel: una página web de solo lectura con las abiertas, los cierres, el sesgo y las decisiones, "
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
-                  "movil.capture", "clock.offset")
-    publishes = ("movil.capture.request",)
-    slot = "aux4"
+                  "telegram.capture", "clock.offset")
+    publishes = ("telegram.capture.request",)
+    slot = "aux1"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
 
     def on_start(self) -> None:
@@ -174,7 +174,7 @@ class MovilSkill(Skill):
             return
         if command == "captura":                             # la ventana la dibuja la interfaz (hilo de Qt): se le pide
             self._capture_asked = time.monotonic()
-            self.publish("movil.capture.request", {"request_id": "tg"})
+            self.publish("telegram.capture.request", {"request_id": "tg"})
             return
         reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot())
         self._send(reply if reply is not None else messages.help_text(tuple(self.accounts.items())))
@@ -261,7 +261,7 @@ class MovilSkill(Skill):
             raise ValueError(self.error)
         p = event.payload
         topic = event.topic
-        if topic == "movil.capture":                         # la captura que pidió /captura, ya dibujada por la interfaz
+        if topic == "telegram.capture":                         # la captura que pidió /captura, ya dibujada por la interfaz
             if self.telegram and self._capture_asked is not None:
                 self._capture_asked = None
                 if p.get("png"):

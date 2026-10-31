@@ -30,7 +30,7 @@ class SetupSkill(Skill):
                    "data/perfiles/<perfil>/: se pueden consultar y siguen ahí al reiniciar el bot.")
     subscribes = ("setup.order", "setup.candles", "feed.connected", "clock.offset")
     publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated")
-    slot = "aux1"
+    slot = "aux4"
     interval = CONSOLIDATE_CHECK_SECONDS
 
     def on_start(self) -> None:
