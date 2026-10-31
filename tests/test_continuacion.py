@@ -370,3 +370,44 @@ def test_tocar_el_extremo_contrario_de_la_tbr_sin_fibo_definido_invalida_el_setu
 def test_tocar_el_extremo_contrario_con_el_fibo_ya_definido_no_cambia_nada():
     hits, _ = analyze(ctx_for(ROWS), 1)                                  # el 1 (103) se confirma antes de cualquier toque
     assert hits[0].status == DETECTED
+
+
+def test_el_setup_sin_entrada_lleva_una_etiqueta_discreta_que_explica_al_pasar_el_raton_por_que_no_hubo_trade(tmp_path, monkeypatch):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.pattern.patterns import Figure
+    from tradingbot.ui.chart import NO_GO_PILL_OPACITY
+    from tradingbot.ui.main_window import NO_TRADE_WHY, MainWindow
+    import tradingbot.skills  # noqa: F401
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "EURUSD", "timeframe": "5m", "watchlist": ["EURUSD"]}}
+    win = MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "pattern"}]), cfg, "t")
+    df = m5_from_m15(ROWS)
+    df["time"] = pd.to_datetime(df["ts"], unit="s")
+    win._on_candles({"df": df, "symbol": "EURUSD", "timeframe": "5m", "seconds": 0.1})
+    day = DAY.isoformat()
+    fig = Figure("fib", "continuacion", "NY Open", "long", ny(DAY, 10, 30), ny(DAY, 13, 15), {"-0,5": 116.5, "0": 110.0, "0,5": 103.5, "1": 97.0},
+                 "invalidada", "NY Open ▲", day)
+    win._on_pattern_updated({"symbol": "EURUSD", "timeframe": "5m", "tbr": None, "hits": [], "figures": [fig]})
+    chart = win.chart
+    [(fib, pill)] = chart._fib_pills
+    assert fib["tag"] == "I" and fib["why"] == NO_TRADE_WHY["I"]                          # sin el motivo de Cortex: el genérico
+    assert "NY Open ▲" in pill.toPlainText() and pill.toPlainText().strip().endswith("I") and pill.opacity() == NO_GO_PILL_OPACITY
+    win._decision_text[("EURUSD", "NY Open", day, "long")] = "I: setup invalidado antes de la entrada en la TBR NY Open (perdió el swing)"
+    win._apply_fibs()                                                                      # con el de Cortex: ese
+    assert chart._fib_pills[0][0]["why"].startswith("I: setup invalidado")
+    chart.resize(900, 500)
+    vb = chart.getPlotItem().getViewBox()
+    vb.setXRange(0, 40, padding=0)
+    vb.setYRange(90, 125, padding=0)
+    vb.updateMatrix()
+    card = chart._card
+    assert not card.isVisible()                                                            # la etiqueta sola no enseña el motivo
+    chart._mouse_moved(chart._fib_pills[0][1].sceneBoundingRect().center())
+    text = card.toPlainText()
+    assert card.isVisible() and "NO GO" in text and "invalidado" in text and "perdió el swing" in text
+    chart.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert not card.isVisible()

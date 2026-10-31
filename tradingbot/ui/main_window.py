@@ -65,6 +65,11 @@ def short_reason(reason: str) -> str:
         return f"{side} {score}"
     return reason.split(":")[0][:30]
 
+# Por qué no hubo trade en un setup sin entrada, mientras Cortex aún no ha dado su motivo completo.
+NO_TRADE_WHY = {"T": "El plazo de la TBR terminó sin que el precio llegara a la entrada (setup cortado por tiempo).",
+                "I": "El setup se invalidó antes de llegar a la entrada: el precio perdió el nivel que lo sostenía."}
+
+
 class MainWindow(QMainWindow):
     first_loaded = Signal()
 
@@ -352,6 +357,7 @@ class MainWindow(QMainWindow):
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
         self._decisions: dict = {}                              # (mercado, TBR, día, lado) -> GO / NO GO de Cortex y motivo corto
+        self._decision_text: dict = {}                          # lo mismo -> el motivo completo, para la ficha del gráfico
         # Histograma del sesgo: puntuación del Bias en cada vela, bajo el gráfico de precio
         self.hist_btn = QPushButton("Sesgo")
         self.hist_btn.setProperty("chip", "true")
@@ -732,6 +738,7 @@ class MainWindow(QMainWindow):
                 key = (o.symbol, o.tbr_zone, o.tbr_day.isoformat(), o.direction)
                 if self._decisions.get(key, ("",))[0] != "GO":
                     self._decisions[key] = ("GO", short_reason(o.reason))
+                    self._decision_text[key] = o.reason
         self._apply_fibs()
         if self.strategy == "calendario":
             self._apply_fibs()                                   # sus operaciones en directo salen en el gráfico
@@ -1185,7 +1192,9 @@ class MainWindow(QMainWindow):
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran
         used = set()                                            # y una misma sesión no puede dar dos trades
         for pos in positions:
-            real = self._decisions.get((self.charted_symbol, *pos["session"], pos["direction"]))
+            key = (self.charted_symbol, *pos["session"], pos["direction"])
+            real = self._decisions.get(key)
+            pos["why"] = self._decision_text.get(key, "")        # el motivo completo, para la ficha al pasar el ratón
             if real is not None:                                # lo que decidió Cortex (con todos los mercados): manda
                 pos["decision"], pos["reason"] = real
                 if real[0] == "GO":
@@ -1196,8 +1205,10 @@ class MainWindow(QMainWindow):
                 continue
             if pos["x0"] < busy_until:
                 pos["decision"], pos["reason"] = "NO GO", "posición abierta"
+                pos["why"] = "Ya había una posición abierta: hasta que no cierra (stop, objetivo o tiempo) no se abre otra"
             elif pos["session"] in used:
                 pos["decision"], pos["reason"] = "NO GO", "sesión ya operada"
+                pos["why"] = "Esta sesión (la TBR) ya dio su trade: no puede dar otro"
             elif pos["decision"] == "GO":
                 busy_until = pos["x1"]
                 used.add(pos["session"])
@@ -1221,6 +1232,7 @@ class MainWindow(QMainWindow):
             elif f.state in ("vencida", "invalidada"):          # sin entrada: NO GO «T» (plazo) o «I» (invalidado), atenuado
                 tag = "T" if f.state == "vencida" else "I"
                 fib["decision"], fib["reason"], fib["tag"] = "NO GO", tag, tag
+                fib["why"] = self._decision_text.get((self.charted_symbol, f.zone, f.day, f.direction)) or NO_TRADE_WHY[tag]
 
             fibs.append(fib)
         self.chart.set_fibs(fibs)
@@ -1338,6 +1350,7 @@ class MainWindow(QMainWindow):
         key = (p["symbol"], tbr.zone, tbr.day.isoformat(), hit.direction)
         if key not in self._decisions or decision.allowed:     # de una sesión, el GO si lo hubo (solo puede haber uno)
             self._decisions[key] = (decision.verdict, short_reason(decision.reason))
+            self._decision_text[key] = decision.reason
             if p["symbol"] == self.charted_symbol:
                 self._apply_fibs()
         lines += ["", f"Sesgo:    {p['bias'].value if p['bias'] else 'sin calcular'}", f"Decisión: {decision.verdict} - {decision.reason}"]
