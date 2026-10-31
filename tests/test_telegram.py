@@ -479,3 +479,20 @@ def test_dibujar_sin_velas_cargadas_lo_dice(sent, tmp_path):
     manager.skills["telegram"].tick()
     manager.stop()
     assert PHOTOS == [] and "Aún no tengo las velas de EURUSD" in sent[-1][2]
+
+
+def test_perfil_cambia_la_cuenta_que_miran_los_comandos(sent):
+    """/perfil metaquotes: /estado y /hoy pasan a ser de esa cuenta; /sesgo avisa de que solo es en directo; /perfil activo vuelve."""
+    app = {"profile_name": "puprime", "profiles": [("puprime", "PUPrime"), ("metaquotes", "MetaQuotes")]}
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n", app)
+    skill = manager.skills["telegram"]
+    asked = []
+    real = skill.board.snapshot
+    skill.board.snapshot = lambda profile=None: asked.append(profile) or real(profile)
+    INBOX.extend([message(1, "/perfil metaquotes"), message(2, "/estado"), message(3, "/sesgo"), message(4, "/perfil activo"),
+                  message(5, "/estado")])
+    skill.tick()
+    manager.stop()
+    assert asked == ["metaquotes", None]
+    assert "▶ /perfil metaquotes" in sent[0][2] and "/perfil puprime · activa en el bot" in sent[0][2]
+    assert "solo existe en directo para puprime" in sent[2][2] and "▶ /perfil puprime" in sent[3][2]

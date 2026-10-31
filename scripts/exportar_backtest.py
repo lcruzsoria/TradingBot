@@ -9,7 +9,7 @@ que la ventana funcione sin MT5 ni la carpeta `analisis/` y pueda recalcularlo t
 Comprueba que las cifras que calcula la ventana coinciden con la hoja Resumen de cada Excel (el drawdown puede variar unas
 décimas de R por el orden entre operaciones que cierran en la misma vela).
 
-Cada perfil (puprime, metaquotes) y Calendario son un «perfil» en la ventana Backtest: se elige arriba, antes de los mercados.
+Cada perfil (puprime, puprime2, metaquotes) y Calendario son un «perfil» en la ventana Backtest: se elige arriba, antes de los mercados.
 
 Uso (desde la raíz del proyecto, después de regenerar los backtests):
     uv run --with openpyxl python scripts/exportar_backtest.py
@@ -40,9 +40,10 @@ import backtest_patrones as BT                                                  
 CURRENT_NOTES = dict(BT.NOTES)                                                         # los textos de metodología al día
 
 OUT = ROOT / "tradingbot" / "skills" / "stats" / "backtest.json.gz"
-PROFILES = (("puprime", "PUPrime"), ("metaquotes", "MetaQuotes"))      # carpetas analisis/<perfil>/
+PROFILES = (("puprime", "PUPrime"), ("puprime2", "PUPrime 2"), ("metaquotes", "MetaQuotes"))      # carpetas analisis/<perfil>/
 GROUPS = (("indices", "Índices americanos", "backtest_indices.xlsx"), ("forex", "Forex", "backtest_forex.xlsx"),
           ("oro", "Oro", "backtest_oro.xlsx"), ("cripto", "Cripto", "backtest_cripto.xlsx"))
+OWN_GROUPS = {"puprime2": (("mercados", "Sus mercados", "backtest_mercados.xlsx"),)}     # perfiles con un solo backtest, el de su lista de mercados
 STATIC = {"Metodología": "metodologia", "Datos": "datos", "Mejoras (stop y RR)": "mejoras", "Embudo": "embudo"}
 # Columna del Excel -> columna corta de cada operación (decimales)
 FLOAT_COLS = {"R neto": "r", "coste (R)": "k", "R neto TP 1R": "tp1", "R neto TP 1.5R": "tp15", "R neto TP 2R": "tp2",
@@ -200,7 +201,7 @@ def main() -> None:
 
     out = {"generado": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "grupos": [], "comparativa": {}}
     for profile, profile_name in PROFILES:
-        for key, name, file in GROUPS:
+        for key, name, file in OWN_GROUPS.get(profile, GROUPS):
             path = args.analisis / profile / file
             if path.exists():
                 out["grupos"].append(pattern_group(key, name, path, profile, profile_name))

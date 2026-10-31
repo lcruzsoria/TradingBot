@@ -75,7 +75,7 @@ def started(profile: str | None = None) -> str:
 
 
 # -- respuestas a los comandos (lo mismo que enseña el panel) -------------------------------------------------------
-COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana del bot"),
+COMMANDS = (("perfil", "Cambia la cuenta que miras (/perfil puprime2)"), ("panel", "Imagen del panel"), ("captura", "Captura de la ventana del bot"),
             ("dibujar", "Dibuja los setups ejecutados hoy (/dibujar 2, /dibujar nas100)"),
             ("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
             ("hoy", "Cierres y resultado de hoy"), ("sesgo", "Sesgo de cada mercado"),

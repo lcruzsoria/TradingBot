@@ -98,6 +98,7 @@ class TelegramSkill(Skill):
         self.notify = set(notify)
         self.commands = settings.get_bool("COMMANDS", True)
         self.accounts = self._accounts()                     # un comando por cuenta: /puprime, /metaquotes...
+        self.viewing: str | None = None                      # la cuenta que miran /panel, /estado, /abiertas y /hoy (None: la activa)
         self._offset: int | None = None                      # siguiente mensaje de Telegram por leer
         self._capture_asked: float | None = None             # cuándo se pidió a la ventana una captura (/captura)
         self.token, self.chat = telegram.credentials(self.env_file)
@@ -162,10 +163,19 @@ class TelegramSkill(Skill):
         if not text.startswith("/"):
             return
         command = text[1:].split()[0].split("@")[0].lower() if len(text) > 1 else ""
-        if command == "panel":
-            self._photo(card.render(self.board.snapshot()))
+        if command == "perfil":                              # /perfil: qué cuenta se mira y cómo cambiar; /perfil activo vuelve a la del bot
+            arg = text.split()[1].lower() if len(text.split()) > 1 else ""
+            if arg == "activo" or arg == self.profile:
+                self.viewing = None
+            elif arg in self.accounts:
+                self.viewing = arg
+            self._send(self._profile_text())
             return
-        if command in self.accounts:                         # el forwardtest de esa cuenta: solo sus operaciones
+        if command == "panel":
+            self._photo(card.render(self.board.snapshot(self.viewing)))
+            return
+        if command in self.accounts:                         # el forwardtest de esa cuenta: solo sus operaciones; y pasa a ser la que se mira
+            self.viewing = None if command == self.profile else command
             snap = self.board.snapshot(command)
             self._photo(card.render_operations(snap), f"<b>Forwardtest · {command}</b> <i>{snap['updated']}</i>")
             return
@@ -176,8 +186,23 @@ class TelegramSkill(Skill):
             self._capture_asked = time.monotonic()
             self.publish("telegram.capture.request", {"request_id": "tg"})
             return
-        reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot())
+        if self.viewing and command in ("sesgo", "decisiones"):   # solo se conocen en directo, de la cuenta con la que corre el bot
+            self._send(f"El {command} solo existe en directo para {_e(self.profile)}, la cuenta activa del bot. "
+                       f"Estás mirando {_e(self.viewing)}: /perfil activo para volver.")
+            return
+        reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot(self.viewing))
         self._send(reply if reply is not None else messages.help_text(tuple(self.accounts.items())))
+
+    def _profile_text(self) -> str:
+        """Las cuentas que se pueden mirar, con la que se mira ahora marcada."""
+        now = self.viewing or self.profile
+        lines = ["<b>Perfiles</b> (los datos de /panel, /estado, /abiertas y /hoy son de la cuenta marcada)"]
+        for name, label in self.accounts.items():
+            mark = "▶ " if name == now else "• "
+            lines.append(f"{mark}/perfil {name}" + (" · activa en el bot" if name == self.profile else "") + f" · {_e(label)}")
+        if self.viewing:
+            lines.append("/perfil activo · volver a la del bot")
+        return "\n".join(lines)
 
     def _draw(self, args: list[str]) -> None:
         """Dibuja los setups ejecutados HOY (día de trading) de este perfil: todos, el n-ésimo (/dibujar 2) o los de un mercado
