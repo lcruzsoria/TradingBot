@@ -201,12 +201,18 @@ class Group:
         return self.table("datos")
 
     @property
+    def dates(self) -> tuple[str, str]:
+        """(primera, última) fecha de datos de sus mercados, «AAAA-MM-DD»; vacías si el fichero no las trae."""
+        starts = [str(m.get("desde (NY)") or "")[:10] for m in self.markets]
+        ends = [str(m.get("hasta (NY)") or "")[:10] for m in self.markets]
+        starts, ends = [s for s in starts if s], [e for e in ends if e]
+        return (min(starts), max(ends)) if starts and ends else ("", "")
+
+    @property
     def period(self) -> str:
         """«2018-2026» con el primer y el último año de datos de sus mercados."""
-        starts = [str(m.get("desde (NY)") or "")[:4] for m in self.markets]
-        ends = [str(m.get("hasta (NY)") or "")[:4] for m in self.markets]
-        starts, ends = [s for s in starts if s], [e for e in ends if e]
-        return f"{min(starts)}-{max(ends)}" if starts and ends else "-"
+        start, end = self.dates
+        return f"{start[:4]}-{end[:4]}" if start else "-"
 
     @property
     def updated(self) -> str:
@@ -333,6 +339,11 @@ class Backtest:
 
     def groups_of(self, profile: str) -> list[Group]:
         return [g for g in self.groups if g.profile == profile]
+
+    def profile_dates(self, profile: str) -> tuple[str, str]:
+        """(primera, última) fecha de datos de todos los mercados del perfil; vacías si no las hay."""
+        spans = [g.dates for g in self.groups_of(profile) if g.dates[0]]
+        return (min(s for s, _ in spans), max(e for _, e in spans)) if spans else ("", "")
 
     def compare(self, filt: str, years=(), hours=(), profile: str | None = None, days=(), months=()) -> list[tuple[str, str, Ops]]:
         """(mercado, grupo, operaciones) de todos los mercados de los patrones (los del `profile` si se da), con ese filtro y el
