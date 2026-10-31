@@ -82,7 +82,7 @@ def test_cifras_y_seleccion_por_anios_y_horas(tmp_path):
     s = summarize([2.0, -1.0, -1.0, 2.0])
     assert (s["n"], s["wr"], s["total"], s["pf"], s["dd"], s["streak"]) == (4, 50.0, 2.0, 2.0, -2.0, 2)
     bot = g.view("Ambos", BOT_FILTER)
-    assert g.period == "2018-2026" and bot.main.stats()["n"] == 3 and bot.main.stats()["total"] == 3.0
+    assert g.period == "2018-2026" and g.dates[0] == "2018-09-10" and bot.main.stats()["n"] == 3 and bot.main.stats()["total"] == 3.0
     assert [(z, len(o)) for z, o in bot.zones] == [("Asia", 1), ("London", 1), ("NY Open", 1)]
     assert [(d, len(o)) for d, o in bot.days][:2] == [(0, 2), (1, 1)]                     # lunes y martes
     assert g.view("Ambos", "sin filtro de sesgo").main.stats()["n"] == 5
@@ -123,6 +123,11 @@ def test_ventana_backtest_con_el_resumen_real():
     dlg = BacktestDialog(None, bt)
     assert dlg.group_key == "puprime:indices" and dlg.profile_key == "puprime" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values
+    for key, name in bt.profiles:                                                  # periodo de datos de todos los perfiles
+        start, end = bt.profile_dates(key)
+        assert start and end and name in dlg.periods.text() and f"{end[8:10]}/{end[5:7]}/{end[:4]}" in dlg.periods.text()
+    assert dlg.periods.text().count("<b>") == 1 and "Índices americanos desde 08/04/2020" in dlg.periods.text()
+    assert "–" in dlg.generated.text()
     for g in bt.groups:                                                            # todas las combinaciones se pintan
         dlg.set_group(g.key)
         assert list(dlg.pattern_btns) == g.patterns and list(dlg.filter_btns) == list(g.filters)

@@ -83,6 +83,11 @@ def _unit(v, digits: int, unit: str = "") -> str:
     return "-" if v is None else f"{v:.{digits}f}{unit}"
 
 
+def _date(iso: str) -> str:
+    """«2018-09-13» -> «13/09/2018»."""
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(iso) >= 10 else iso
+
+
 def _count(v) -> str:
     return "-" if v is None else miles(int(v))
 
@@ -253,6 +258,10 @@ class BacktestDialog(QDialog):
         self.profile_btn_group = QButtonGroup(self)
         self.profile_label_row = self._labelled("Perfil", self.profile_row)
         outer.addLayout(self.profile_label_row)
+        self.periods = QLabel("")                    # desde cuándo hay datos en cada perfil
+        self.periods.setObjectName("Tiny")
+        self.periods.setWordWrap(True)
+        outer.addLayout(self._labelled("Datos", self._wrap(self.periods)))
         self.group_row = QHBoxLayout()
         self.group_row.setSpacing(6)
         self.group_btns: dict[str, QPushButton] = {}
@@ -420,6 +429,12 @@ class BacktestDialog(QDialog):
         out.addWidget(label)
         out.addLayout(row, 1)
         return out
+
+    @staticmethod
+    def _wrap(widget: QWidget) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(widget, 1)
+        return row
 
     def _chips(self, row: QHBoxLayout, keys, slot, current, names: dict | None = None) -> dict[str, QPushButton]:
         """Rehace los chips de `row` (uno por clave, exclusivos)."""
@@ -620,6 +635,7 @@ class BacktestDialog(QDialog):
             self.empty.setText(self.error or "No hay resultados de backtest cargados.\nGenéralos con "
                                              "scripts/exportar_backtest.py y pulsa Recargar.")
             self.generated.setText("")
+            self.periods.setText("")
             return
         for key, btn in self.profile_btns.items():
             btn.setChecked(key == self.profile_key)
@@ -637,7 +653,10 @@ class BacktestDialog(QDialog):
         for key, btn in self.filter_btns.items():
             btn.setChecked(key == self.filter)
         self.subtitle.setText(g.description)
-        self.generated.setText(f"{g.period} · actualizado {g.updated}" if g.updated else g.period)
+        start, end = g.dates
+        span = f"{_date(start)} – {_date(end)}" if start else g.period
+        self.generated.setText(f"{span} · actualizado {g.updated}" if g.updated else span)
+        self.periods.setText(self._periods_text())
 
         view = g.view(self.pattern, self.filter, self.years, self.hours, self.days, self.months)
         self._paint_selection(g)
@@ -669,6 +688,19 @@ class BacktestDialog(QDialog):
         self.improvements.note.setText("siempre con las reglas del bot; stop k veces el original" + static)
         self.funnel.note.setText("de las TBR evaluadas a las entradas" + static)
         self.data_book.note.setText("velas M15 de MT5 usadas" + static)
+
+    def _periods_text(self) -> str:
+        """Desde cuándo hay datos en cada grupo de mercados, una línea por perfil; el grupo elegido, en negrita."""
+        lines = []
+        for key, name in self.backtest.profiles:
+            parts = []
+            for g in self.backtest.groups_of(key):
+                start, _ = g.dates
+                text = f"{g.name} desde {_date(start)}" if start else f"{g.name} sin fechas"
+                parts.append(f"<b>{text}</b>" if g.key == self.group_key else text)
+            _, end = self.backtest.profile_dates(key)
+            lines.append(f"{name}: " + " · ".join(parts) + (f" — hasta {_date(end)}" if end else ""))
+        return "<br>".join(lines)
 
     def _paint_selection(self, g: Group) -> None:
         parts = []
