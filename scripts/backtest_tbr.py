@@ -2,7 +2,7 @@
 
 ESTRATEGIA (la del usuario) Y CRITERIOS, FIJADOS ANTES DE VER LOS RESULTADOS:
 - TBR: máximo y mínimo de las velas M15 de 18:00 a 20:00 NY (el inicio del día de trading). Solo vale si su ancho está entre 100 y
-  300 pips del NAS100 = de 10 a 30 puntos (1 pip = 0,1). Fuera de ese ancho no se opera ese día.
+  300 puntos del NAS100. Fuera de ese ancho no se opera ese día.
 - Rotura con cuerpo: la primera vela M15 que cierra por encima del máximo (largo) o por debajo del mínimo (corto) del TBR y del
   mismo lado de la EMA 20 de los cierres M15. Las roturas contra la EMA se ignoran y se sigue esperando. La rotura tiene que cerrar
   como tarde a las 00:00 NY; si no, se cancela el día. Una operación por día.
@@ -48,8 +48,8 @@ MIN_OPS, MIN_MEAN, MIN_T, MIN_T_OTHER, MIN_OTHER = 100, 0.05, 2.0, 1.65, 2
 
 @dataclass(frozen=True)
 class Rule:
-    min_width: float = 10.0                             # ancho del TBR en puntos del NAS100 (100 pips)
-    max_width: float = 30.0                             # (300 pips); 0 = sin filtro de ancho
+    min_width: float = 100.0                            # ancho del TBR en puntos del NAS100
+    max_width: float = 300.0                            # 0 = sin filtro de ancho
     ema: int = 20                                       # 0 = sin filtro EMA
     against: str = "esperar"                            # rotura contra la EMA: "esperar" a otra o "anular" el día
     rr: float = 2.0
@@ -193,8 +193,8 @@ def main() -> None:
     out = ["# Backtest: TBR de 18:00 a 20:00 NY con EMA 20 (M15)", "",
            "Script: `scripts/backtest_tbr.py`. Solo lee velas M15 ya descargadas.", "",
            "## Estrategia y criterios (fijados antes de ver los resultados)", "",
-           "- **TBR:** máximo y mínimo de las velas M15 de 18:00 a 20:00 NY. Solo se opera si mide entre 100 y 300 pips del NAS100 "
-           "(de 10 a 30 puntos).",
+           "- **TBR:** máximo y mínimo de las velas M15 de 18:00 a 20:00 NY. Solo se opera si mide entre 100 y 300 puntos del "
+           "NAS100.",
            "- **Rotura con cuerpo:** la primera vela M15 que cierra fuera del TBR y del mismo lado de la EMA 20 (las roturas contra "
            "la EMA se ignoran y se sigue esperando). Tiene que cerrar como tarde a las 00:00 NY; si no, se cancela el día. Una "
            "operación por día.",
@@ -215,7 +215,8 @@ def main() -> None:
            f"**{'Pasa' if passed else 'No pasa'}.**", "",
            "## Ancho del TBR en el NAS100 de PUPrime", "",
            f"{len(w)} días. Mediana {w.median():.1f} puntos; percentil 10 {w.quantile(.1):.1f}, percentil 90 {w.quantile(.9):.1f}. "
-           f"Entre 10 y 30 puntos: {100 * ((w >= 10) & (w <= 30)).mean():.1f} % de los días. Mediana por año: "
+           f"Entre {base.min_width:.0f} y {base.max_width:.0f} puntos: "
+           f"{100 * ((w >= base.min_width) & (w <= base.max_width)).mean():.1f} % de los días. Mediana por año: "
            + ", ".join(f"{y} {v:.0f}" for y, v in w.groupby(widths["fecha"].dt.year).median().items()) + ".", "",
            "Embudo: " + ", ".join(f"{k} {v}" for k, v in funnel.items()) + ".", "",
            "## Resultados (R neto, con spread)", "",
