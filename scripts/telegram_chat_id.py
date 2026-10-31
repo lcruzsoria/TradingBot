@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 def main() -> int:
     from tradingbot.config import DEFAULT_ENV_FILE
-    from tradingbot.skills.movil import telegram as client
+    from tradingbot.skills.telegram import telegram as client
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--env", type=Path, default=DEFAULT_ENV_FILE, help=f"fichero de cuentas (por defecto {DEFAULT_ENV_FILE})")
