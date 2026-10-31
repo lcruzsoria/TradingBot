@@ -50,6 +50,7 @@ MIN_OPS, MIN_MEAN, MIN_T, MIN_T_OTHER, MIN_OTHER = 100, 0.05, 2.0, 1.65, 2
 class Rule:
     min_width: float = 100.0                            # ancho del TBR en puntos del NAS100
     max_width: float = 300.0                            # 0 = sin filtro de ancho
+    unit: str = "puntos"                                # "puntos" del NAS100 o "pct" del precio (cierre de las 20:00)
     ema: int = 20                                       # 0 = sin filtro EMA
     against: str = "esperar"                            # rotura contra la EMA: "esperar" a otra o "anular" el día
     rr: float = 2.0
@@ -86,7 +87,10 @@ def trades(d: pd.DataFrame, rule: Rule, scale: pd.Series | None = None) -> tuple
     rows, n = [], len(d)
     for dy, r in rng.iterrows():
         width = r["hi"] - r["lo"]
-        eq = width * (scale.get(dy, np.nan) if scale is not None else 1.0)
+        if rule.unit == "pct":
+            eq = 100 * width / r["cierre"]
+        else:
+            eq = width * (scale.get(dy, np.nan) if scale is not None else 1.0)
         if rule.max_width and not (rule.min_width <= eq <= rule.max_width):
             continue
         funnel["ancho válido"] += 1
