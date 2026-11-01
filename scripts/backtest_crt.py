@@ -376,8 +376,10 @@ def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rul
     return pd.DataFrame(rows)
 
 
-def by_period(t: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    return t[t["entrada (NY)"] < TRAIN_END], t[t["entrada (NY)"] >= TRAIN_END]
+def by_period(t: pd.DataFrame, cut: pd.Timestamp = TRAIN_END) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not len(t):
+        return t, t
+    return t[t["entrada (NY)"] < cut], t[t["entrada (NY)"] >= cut]
 
 
 def val(x: dict) -> str:
@@ -392,21 +394,25 @@ def main() -> None:
     ap.add_argument("--descargar", action="store_true", help="descarga las velas M5 y M3 de MT5 y termina")
     ap.add_argument("--mercado", choices=sorted(MARKETS), default="indices",
                     help="indices (NAS100, HTF H3) o forex (EURUSD/GBPUSD, HTF H4)")
+    ap.add_argument("--ltf", type=int, nargs="+", choices=(1, 3, 5), default=list(LTFS),
+                    help="timeframes de entrada (iFVG, CISD y entrada). Con M1 el histórico de MT5 solo llega a 2024: el criterio (2) "
+                         "usa dos mitades por fecha")
     ap.add_argument("--esperar-c2", action="store_true", help="espera al cierre de C2 dentro del rango de C1 (sin look-ahead) y "
                                                                 "busca el CISD hasta el final de C3")
     args = ap.parse_args()
     mk = configure(args.mercado)
+    ltfs = tuple(args.ltf)
     htf, unit, unit_name = mk["htf"], mk["unit"], mk["unit_name"]
     if args.descargar:
         for profile, want in DATASETS:
-            for tf in (5, 3):
+            for tf in ltfs:
                 try:
                     download(profile, want, tf)
                 except Exception as err:                       # noqa: BLE001
                     print(f"  fallo {profile} {want} M{tf}: {err}", flush=True)
         return
     base_rule = Rule(wait_c2=args.esperar_c2)
-    suffix = mk["suffix"] + ("_esperar_c2" if args.esperar_c2 else "")
+    suffix = mk["suffix"] + ("_m1" if ltfs == (1,) else "") + ("_esperar_c2" if args.esperar_c2 else "")
     doc = DOC.with_name(f"RESULTADOS{suffix}.md")
 
     def key(profile: str, want: str) -> str:
@@ -414,16 +420,23 @@ def main() -> None:
 
     raw = {}
     for profile, want in DATASETS:
-        for tf in (5, 3):
+        for tf in sorted({5, *ltfs}):
             sym, df = pd.read_pickle(cache_path(profile, want, tf))
             raw[(key(profile, want), tf)] = (f"{sym} ({profile})", df)
     P, C = key(*DATASETS[0]), key(*DATASETS[1])
+    first = pd.Timestamp(int(raw[(P, min(ltfs))][1]["ts"].iloc[0]) - AHEAD, unit="s")
+    last = pd.Timestamp(int(raw[(P, min(ltfs))][1]["ts"].iloc[-1]) - AHEAD, unit="s")
+    if first < TRAIN_END - pd.Timedelta(days=730):
+        cut, lab1, lab2 = TRAIN_END, "hasta 2022", "2023 en adelante"
+    else:                                                   # histórico corto (M1): dos mitades por fecha
+        cut = first + (last - first) / 2
+        lab1, lab2 = f"1.ª mitad (hasta {cut:%Y-%m})", f"2.ª mitad (desde {cut:%Y-%m})"
 
     results, funnels, setups_by = {}, {}, {}
     for profile, want in DATASETS:
         k = key(profile, want)
         base = raw[(k, 5)][1]
-        for tf in LTFS:
+        for tf in ltfs:
             st, fn = find_setups(base, raw[(k, tf)][1], tf, base_rule)
             setups_by[(k, tf)], funnels[(k, tf)] = st, fn
             for v in VARIANTS:
@@ -434,11 +447,11 @@ def main() -> None:
             print(f"{k} M{tf}: {len(st)} setups", flush=True)
 
     verdict, summ = [], {}
-    for tf in LTFS:
+    for tf in ltfs:
         for v, vname in VARIANTS.items():
             t, ctrl = results[(P, tf, v)], results[(C, tf, v)]
             s, c = summary(t), summary(ctrl)
-            p1, p2 = by_period(t)
+            p1, p2 = by_period(t, cut)
             s1, s2 = summary(p1), summary(p2)
             ok1 = s.get("operaciones", 0) >= MIN_OPS and s["R medio"] > MIN_MEAN and s["estadístico t"] > MIN_T
             ok2 = bool(s1.get("operaciones")) and bool(s2.get("operaciones")) and s1["R medio"] > 0 and s2["R medio"] > 0
@@ -449,7 +462,7 @@ def main() -> None:
                             "**Pasa**" if ok1 and ok2 and ok3 else "No pasa"])
     n_pass = sum(all(x) for x in summ.values())
 
-    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15/M30/H1 → M5/M3" + (
+    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15/M30/H1 → {'/'.join(f'M{x}' for x in ltfs)}" + (
                " · esperando al cierre de C2" if args.esperar_c2 else ""), "",
            *(["**Variante sin look-ahead:** C2 tiene que haber cerrado dentro del rango de C1 (cierre real del HTF) y el CISD y la "
               "entrada se buscan desde el cierre de C2 hasta el final de C3. Si el precio supera el extremo del sweep en C3, el setup "
@@ -457,16 +470,16 @@ def main() -> None:
            *(["**Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; "
               "las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.", ""]
              if args.mercado == "forex" else []),
-           "Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5. Las reglas y definiciones operativas están "
+           "Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5. Las reglas y definiciones operativas están "
            "en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.", "",
            f"- **Se da por buena (cada combinación LTF × entrada) si:** (1) {mk['primary']}, todo el histórico: ≥ {MIN_OPS} "
-           f"operaciones y R neto > +{MIN_MEAN} con t > {MIN_T}; (2) R neto positivo hasta 2022 y en 2023 en adelante; (3) R neto "
+           f"operaciones y R neto > +{MIN_MEAN} con t > {MIN_T}; (2) R neto positivo en los dos periodos ({lab1}; {lab2}); (3) R neto "
            f"> 0 en el control ({mk['control']}).",
-           "- Son 6 combinaciones, así que algún t alto por azar es esperable: se mira la consistencia, no un solo número.", "",
+           f"- Son {3 * len(ltfs)} combinaciones, así que algún t alto por azar es esperable: se mira la consistencia, no un solo número.", "",
            "## Veredicto", "",
-           table(verdict, ["Combinación", mk["primary"], "(1)", "hasta 2022 / 2023-", "(2)", f"Control: {mk['control']}", "(3)",
+           table(verdict, ["Combinación", mk["primary"], "(1)", f"{lab1} / {lab2}", "(2)", f"Control: {mk['control']}", "(3)",
                            "Resultado"]),
-           "", f"**{n_pass} de 6 combinaciones pasan.**", "",
+           "", f"**{n_pass} de {3 * len(ltfs)} combinaciones pasan.**", "",
            "## Datos", ""]
     for (k, tf), (name, df) in raw.items():
         a, z = pd.Timestamp(int(df["ts"].iloc[0]) - AHEAD, unit="s"), pd.Timestamp(int(df["ts"].iloc[-1]) - AHEAD, unit="s")
@@ -477,26 +490,26 @@ def main() -> None:
         frows.append([f"{raw[(k, tf)][0]} M{tf}"] + [fn[x] for x in fn] + [len(setups_by[(k, tf)])])
     out += [table(frows, ["Mercado", *list(next(iter(funnels.values())).keys()), "setups finales"]), ""]
     out += [f"## Resultados en {mk['primary']} (R neto, con spread)", ""]
-    for tf in LTFS:
+    for tf in ltfs:
         rows = []
         for v, vname in VARIANTS.items():
             t = results[(P, tf, v)]
-            p1, p2 = by_period(t)
-            rows += [row(f"M{tf} · {v}. {vname}", t), row("  hasta 2022", p1), row("  2023 en adelante", p2),
+            p1, p2 = by_period(t, cut)
+            rows += [row(f"M{tf} · {v}. {vname}", t), row(f"  {lab1}", p1), row(f"  {lab2}", p2),
                      row("  sin costes (R bruto)", t, "R bruto")]
             if len(t):
                 rows += [row("  largos", t[t["dirección"] == "long"]), row("  cortos", t[t["dirección"] == "short"])]
         out += [table(rows), ""]
     out += [f"## Control: {mk['control']}", ""]
     rows = []
-    for tf in LTFS:
+    for tf in ltfs:
         for v, vname in VARIANTS.items():
             t = results[(C, tf, v)]
-            p1, p2 = by_period(t)
-            rows += [row(f"M{tf} · {v}. {vname}", t), row("  hasta 2022", p1), row("  2023 en adelante", p2)]
+            p1, p2 = by_period(t, cut)
+            rows += [row(f"M{tf} · {v}. {vname}", t), row(f"  {lab1}", p1), row(f"  {lab2}", p2)]
     out += [table(rows), "", f"## Cómo terminan y riesgo ({mk['primary']})", ""]
     rows = []
-    for tf in LTFS:
+    for tf in ltfs:
         for v, vname in VARIANTS.items():
             t = results[(P, tf, v)]
             if not len(t):
@@ -507,7 +520,7 @@ def main() -> None:
                          f"{(t['coste (R)'] > 0.2).mean() * 100:.0f} %"])
     out += [table(rows, ["Combinación", "Cierres", f"Riesgo mediano ({unit_name})", "p10", "p90", "Coste medio (R)",
                          "Coste > 0,2 R"]), "", f"## Por año ({mk['primary']})", ""]
-    for tf in LTFS:
+    for tf in ltfs:
         for v, vname in VARIANTS.items():
             t = results[(P, tf, v)]
             if len(t):
@@ -522,7 +535,7 @@ def main() -> None:
                         ("tolerancia al tocar el FVG 0,05 % del precio", replace(base_rule, touch_tol=0.0005)),
                         ("exigir que C2 cierre dentro de C1 (look-ahead)", replace(base_rule, close_inside=True)),
                         ("sin BE", replace(base_rule, be_at=0.0)), ("objetivo 3R", replace(base_rule, rr=3.0))):
-        for tf in LTFS:
+        for tf in ltfs:
             if rule.lookback_days != base_rule.lookback_days or rule.touch_tol != base_rule.touch_tol:
                 st, _ = find_setups(raw[(P, 5)][1], raw[(P, tf)][1], tf, rule)
             else:
