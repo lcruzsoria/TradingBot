@@ -1,6 +1,6 @@
 """Timeframes disponibles en la interfaz.
 
-Claves internas: 1m 3m 5m 15m 1h 3h 4h 7h 12h 1d 1w. En pantalla se ven como M1 M3 M5 M15 H1 H3 H4 H7 H12 1D 1W.
+Claves internas: 1m 3m 5m 15m 30m 1h 3h 4h 7h 12h 1d 1w. En pantalla se ven como M1 M3 M5 M15 M30 H1 H3 H4 H7 H12 1D 1W.
 
 MT5 no tiene H7 (solo H1, H2, H3, H4, H6, H8 y H12), así que 7h se construye agrupando velas de 1h
 (ver DERIVED y datasource.aggregate_candles).
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 # clave -> minutos que dura la vela
 TIMEFRAMES: dict[str, int] = {
-    "1m": 1, "3m": 3, "5m": 5, "15m": 15,
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
     "1h": 60, "3h": 180, "4h": 240, "7h": 420, "12h": 720,
     "1d": 1440, "1w": 10080,
 }
@@ -17,7 +17,7 @@ DEFAULT_TIMEFRAME = "15m"
 
 # clave -> constante del módulo MetaTrader5
 NATIVE: dict[str, str] = {
-    "1m": "TIMEFRAME_M1", "3m": "TIMEFRAME_M3", "5m": "TIMEFRAME_M5", "15m": "TIMEFRAME_M15",
+    "1m": "TIMEFRAME_M1", "3m": "TIMEFRAME_M3", "5m": "TIMEFRAME_M5", "15m": "TIMEFRAME_M15", "30m": "TIMEFRAME_M30",
     "1h": "TIMEFRAME_H1", "3h": "TIMEFRAME_H3", "4h": "TIMEFRAME_H4", "12h": "TIMEFRAME_H12",
     "1d": "TIMEFRAME_D1", "1w": "TIMEFRAME_W1",
 }

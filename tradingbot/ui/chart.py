@@ -901,6 +901,7 @@ class ChartView(pg.PlotWidget):
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                     + crt_row("FVG en MTF", " · ".join(data.get("mtf") or ["-"]))
+                    + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
                     + crt_row("iFVG + CISD (LTF)", f"M{data.get('ltf', '-')}")
                     + crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}")
                     + crt_row("Resultado", word + " (objetivo 2R)")
@@ -1074,6 +1075,16 @@ class ChartView(pg.PlotWidget):
             box.setPen(pen)
             add(box, -3)
             tag(left, fvg["top"], "iFVG invertido", violet)
+        amber = "#FFA726"
+        for zone in crt.get("fvgs") or []:                      # el FVG de MTF que toca el extremo del sweep (paso 2), en cada TF
+            left, right = float(zone["x0"]), float(zone["x1"]) + 1
+            box = QGraphicsRectItem(QRectF(left, zone["bottom"], max(right - left, 0.5), max(zone["top"] - zone["bottom"], 1e-9)))
+            box.setBrush(_alpha(amber, 30))
+            pen = QPen(QColor(amber), 1.2)
+            pen.setCosmetic(True)
+            box.setPen(pen)
+            add(box, -4)
+            tag(left, zone["top"], f"FVG {zone['name']}", amber)
         if cisd:
             line = pg.PlotCurveItem(x=np.array([float(cisd["x0"]), float(cisd["x1"]) + 1]), y=np.array([cisd["level"]] * 2),
                                     pen=pg.mkPen(violet, width=1, style=Qt.PenStyle.DotLine))

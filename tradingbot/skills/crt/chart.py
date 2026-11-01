@@ -20,6 +20,7 @@ from ..stats.backtest import CRT_ENTRIES, CRT_MTF_BITS, CRT_MTF_NAMES
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq")      # columnas del backtest para auditar la operación
+MTF_TFS = {15: "M15", 30: "M30", 60: "H1"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T"}
 LTF_ORDER = (5, 3, 1)
@@ -60,6 +61,11 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
         names = chosen.names("o")
         for i in range(len(chosen)):
             detail = {k: float(chosen[k][i]) for k in AUDIT_COLS} | {"e": int(chosen["e"][i]), "x": int(chosen["x"][i])} if audit else {}
+            if audit:
+                detail["fvg"] = {}
+                for tf in MTF_TFS:
+                    if f"f{tf}a" in group.raw["ops"] and int(chosen[f"f{tf}t"][i]) >= 0 and not np.isnan(chosen[f"f{tf}a"][i]):
+                        detail["fvg"][tf] = (float(chosen[f"f{tf}a"][i]), float(chosen[f"f{tf}b"][i]), int(chosen[f"f{tf}t"][i]))
             trades.setdefault((int(chosen["c"][i]), int(chosen["d"][i])), []).append(
                 (int(chosen["l"][i]), int(chosen["n"][i]), str(names[i]), int(chosen["t"][i]), detail))
     if not trades:
@@ -105,4 +111,6 @@ def audit_marks(d: dict, ts, ahead: int, n: int) -> dict:
     return {"pos": {"x0": x_in, "x1": max(x_out, x_in), "entry": d["pe"], "stop": d["ps"], "target": d["pt"]},
             "ifvg": {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]},
             "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"]},
-            "extreme": {"x": at(d["th"]), "price": d["ps"]}}
+            "extreme": {"x": at(d["th"]), "price": d["ps"]},
+            "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["th"]), at(t) + 1), "bottom": a, "top": b}
+                     for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}

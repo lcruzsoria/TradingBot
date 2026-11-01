@@ -138,7 +138,7 @@ añádelo primero con **Editar**. Si quitas el mercado que estás viendo, el gr�
 - Eje de tiempo (abajo): arrastrar a la izquierda muestra más velas y a la derecha menos, sin mover la vela más reciente.
 - Doble clic en un eje: vuelve a la escala automática (en el de tiempo, también a las últimas 220 velas).
 
-**Timeframes** (chips sobre el gráfico): M1, M3, M5, M15, H1, H3, H4, H7, H12, 1D y 1W. Cambiar de timeframe recarga el mercado actual.
+**Timeframes** (chips sobre el gráfico): M1, M3, M5, M15, M30, H1, H3, H4, H7, H12, 1D y 1W. Cambiar de timeframe recarga el mercado actual.
 - MT5 no tiene H7 (solo H1, H2, H3, H4, H6, H8 y H12). H7 se construye agrupando velas de 1 hora, alineadas con la
   medianoche de cada día (hora del servidor): 00-07, 07-14, 14-21 y 21-24, esta última más corta (3 horas).
 - Con velas semanales (1W) el sesgo no se recalcula, porque "el día" no existe en ese timeframe: se conserva el último.

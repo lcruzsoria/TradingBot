@@ -141,6 +141,21 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule)
     return engine.find_setups(base, ltf, ltf_min, rule, CFG)
 
 
+def mtf_zones(st: dict, sgn: int) -> dict:
+    """La zona del FVG de MTF que toca el extremo del sweep en cada timeframe (la última formada): base, techo y hora de servidor de su
+    primera vela (0 y NaN si ese timeframe no lo toca). Para dibujarlo en el gráfico."""
+    out = {}
+    for tf in engine.MTF:
+        zones = [z for z in st["zones"] if z[0] == tf]
+        if zones:
+            z = max(zones, key=lambda q: q[3])
+            lo, hi = sorted((sgn * z[1], sgn * z[2]))
+            out |= {f"FVG{tf} bajo": lo, f"FVG{tf} alto": hi, f"FVG{tf} t": int(z[3] - 3 * tf * 60)}
+        else:
+            out |= {f"FVG{tf} bajo": float("nan"), f"FVG{tf} alto": float("nan"), f"FVG{tf} t": 0}
+    return out
+
+
 def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict | None:
     """Entrada y gestión de un setup (espacio del corto) y su fila del backtest, o None si no hay entrada."""
     ep = engine.entry_point(L, st, variant, ltf_min, rule, CFG)
@@ -158,7 +173,7 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
             # para auditar el criterio en el gráfico: el iFVG invertido, el CISD y las horas de cada paso (hora de servidor)
             "iFVG bajo": min(sgn * st["z_bottom"], sgn * st["z_top"]), "iFVG alto": max(sgn * st["z_bottom"], sgn * st["z_top"]),
             "CISD": sgn * st["level"], "t iFVG": int(ts[st["kf"] - 2]), "t inversión": int(ts[st["m_inv"]]), "t CISD": int(ts[st["jc"]]),
-            "t extremo": int(ts[st["ih"]]), "t secuencia": int(ts[st["seq"][0]])}
+            "t extremo": int(ts[st["ih"]]), "t secuencia": int(ts[st["seq"][0]]), **mtf_zones(st, sgn)}
 
 
 def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rule: Rule) -> pd.DataFrame:

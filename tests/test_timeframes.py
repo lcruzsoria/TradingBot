@@ -9,8 +9,8 @@ from tradingbot.timeframes import DERIVED, NATIVE, TIMEFRAMES, base_timeframe, d
 
 
 def test_lista_de_timeframes_y_nombres_en_pantalla():
-    assert list(TIMEFRAMES) == ["1m", "3m", "5m", "15m", "1h", "3h", "4h", "7h", "12h", "1d", "1w"]
-    assert [display_label(k) for k in TIMEFRAMES] == ["M1", "M3", "M5", "M15", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
+    assert list(TIMEFRAMES) == ["1m", "3m", "5m", "15m", "30m", "1h", "3h", "4h", "7h", "12h", "1d", "1w"]
+    assert [display_label(k) for k in TIMEFRAMES] == ["M1", "M3", "M5", "M15", "M30", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
     assert minutes("7h") == 420 and minutes("1w") == 10080
     with pytest.raises(ValueError):
         minutes("2h")

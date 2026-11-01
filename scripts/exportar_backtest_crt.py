@@ -148,6 +148,9 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
             "pa": floats(t["iFVG bajo"], 5), "pb": floats(t["iFVG alto"], 5), "pc": floats(t["CISD"], 5),     # iFVG invertido y nivel del CISD
             "ti": ny_min(t["t iFVG"]), "tv": ny_min(t["t inversión"]), "tj": ny_min(t["t CISD"]), "th": ny_min(t["t extremo"]),
             "tq": ny_min(t["t secuencia"]),                                                                    # horas de cada paso
+            **{f"f{tf}{k}": v for tf in engine.MTF for k, v in (
+                ("a", floats(t[f"FVG{tf} bajo"], 5)), ("b", floats(t[f"FVG{tf} alto"], 5)),
+                ("t", [-1 if x == 0 else (int(x) - AHEAD) // 60 for x in t[f"FVG{tf} t"]]))},          # FVG de MTF: base, techo y primera vela
             "c": ((t["C2"].astype(np.int64) - AHEAD) // 60).tolist(),                       # inicio de la vela HTF del sweep (minutos NY)
             "h": near_hour(pd.to_datetime(t["entrada (NY)"])).tolist(),
             "r": floats(t["R neto"]), "k": floats(t["coste (R)"]), "rk": floats(t["riesgo %"], 3), "v": held.round().astype(int).tolist()}

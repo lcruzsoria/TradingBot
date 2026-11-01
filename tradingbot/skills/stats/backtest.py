@@ -30,13 +30,14 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq", "f15t", "f30t", "f60t"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
 # CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3), t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
 # h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no) y c (inicio de la vela H3 / H4 del
 # sweep, en minutos NY: con él el gráfico marca cada CRT). Para auditar cada operación en el gráfico: pe, ps, pt (entrada, stop y objetivo),
 # pa, pb (base y techo del iFVG invertido), pc (nivel del CISD) y las horas ti (inicio del FVG), tv (inversión), tj (CISD), th (extremo del
-# sweep) y tq (inicio de la secuencia del sweep), en minutos NY.
+# sweep) y tq (inicio de la secuencia del sweep), en minutos NY. Y la zona del FVG de MTF tocado en cada timeframe: f15a / f15b (base y
+# techo) y f15t (primera vela, minutos NY; -1 si ese timeframe no lo toca), y lo mismo con f30 y f60.
 CRT_MTF_BITS = {15: 1, 30: 2, 60: 4}
 CRT_MTF_NAMES = {0: "Todos", 15: "M15", 30: "M30", 60: "H1"}
 CRT_LTFS = (5, 3, 1)

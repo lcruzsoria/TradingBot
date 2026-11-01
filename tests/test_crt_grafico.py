@@ -16,17 +16,20 @@ from crt_scenarios import AHEAD, scenario                                       
 from tradingbot.skills.stats.backtest import Backtest, Group                        # noqa: E402
 
 C2 = int(pd.Timestamp("2026-10-13 06:00").value // 10**9 // 60)                     # inicio de C2 (minutos, hora NY)
+D1_FVG = int(pd.Timestamp("2026-10-12 12:00").value // 10**9 // 60)                 # primera vela del FVG de M15 (minutos, hora NY)
 
 
 def raw(ops: list[tuple]) -> dict:
     """Operaciones CRT en NAS100: (inicio de C2, dirección 0 largo / 1 corto, LTF, entrada, resultado, máscara de FVG de MTF)."""
-    keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq")
+    keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq",
+            "f15a", "f15b", "f15t", "f30a", "f30b", "f30t", "f60a", "f60b", "f60t")
     cols = {k: [] for k in keys}
     for c2, d, ltf, entry, out, mtf in ops:
         # el corto del escenario: entra en 103.1 a las 06:55 (C2 + 55 min), stop 108.5 (extremo de las 06:35), objetivo 92.3, iFVG 106.1-107.3
         # (de las 06:25 a la inversión de las 06:45), CISD en 103.2 a las 06:50 con la secuencia desde las 06:15
         vals = (c2, d, ltf, entry, out, mtf, 0, 2, 3, c2 + 55, c2 + 70, 1.9, 0.1, -1, 103.1, 108.5, 92.3, 106.1, 107.3, 103.2,
-                c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15)
+                c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15,
+                107.5, 110.0, D1_FVG, float("nan"), float("nan"), -1, float("nan"), float("nan"), -1)     # FVG de M15 del día 1; M30 y H1 no
         for k, v in zip(keys, vals):
             cols[k].append(v)
     return {"key": "crt:indices", "nombre": "Índices", "tipo": "crt", "perfil": "crt", "perfil_nombre": "CRT",
@@ -56,6 +59,8 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert mark["pos"] == {"x0": i("06:55"), "x1": i("07:10"), "entry": 103.1, "stop": 108.5, "target": 92.3}
     assert mark["ifvg"] == {"x0": i("06:25"), "x1": i("06:45"), "bottom": 106.1, "top": 107.3}
     assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
+    first = int(np.searchsorted(ts, int(pd.Timestamp("2026-10-12 12:00").value // 10**9) + AHEAD))
+    assert mark["fvgs"] == [{"tf": 15, "name": "M15", "x0": first, "x1": i("06:35"), "bottom": 107.5, "top": 110.0}]      # solo el M15 lo toca
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
     assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15", "M30"])
 
@@ -118,6 +123,9 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert len(violet) == 1                                                              # el iFVG invertido, pintado en el LTF
     texts = " ".join(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText"))
     assert "TP 92.3" in texts and "SL 108.5" in texts and "Entrada 103.1" in texts and "iFVG invertido" in texts and "CISD" in texts
+    assert "FVG M15" in texts and "FVG M30" not in texts
+    orange = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
+    assert len(orange) == 1                                                              # el FVG de MTF del paso 2, en naranja
     assert "C1 · H3" in texts and "C2 · H3" in texts                                     # las velas HTF se nombran debajo de su caja
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
@@ -132,6 +140,7 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert chart._card.isVisible() and "CRT bajista" in text and "TP" in text
     assert "FVG en MTF" in text and "M15" in text and "M5" in text and "Vela siguiente al CISD" in text and "13/10 06:00" in text
     assert "M3·1" in text                                                                # y los otros LTF del backtest
+    assert "FVG M15" in text and "107.500" in text and "110.000" in text                 # la zona del FVG de MTF, en la ficha
     assert "103.1" in text and "108.5" in text and "92.3" in text and "iFVG invertido" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
     chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not chart._card.isVisible()
