@@ -1,6 +1,6 @@
 # CRT (Candle Range Theory): guía de la estrategia
 
-Estado: **backtest hecho en NAS100: ninguna de las 6 combinaciones (M5/M3 × 3 entradas) pasa los criterios.** Resultados en [RESULTADOS.md](RESULTADOS.md); script en `scripts/backtest_crt.py`. La variante que espera al cierre de C2 (sin look-ahead, `--esperar-c2`) tampoco pasa: [RESULTADOS_esperar_c2.md](RESULTADOS_esperar_c2.md).
+Estado: **backtest hecho en NAS100 y forex con la regla del FVG de MTF corregida (02/11/2026): ninguna de las combinaciones pasa los criterios** (NAS100 M5/M3 y M1, EURUSD/GBPUSD M5/M3, con y sin esperar al cierre de C2). Resultados en [RESULTADOS.md](RESULTADOS.md) y los RESULTADOS_*.md; script en `scripts/backtest_crt.py`. Ejemplos dibujados paso a paso en `operacion_2025-07-30/` (corto) y `operacion_2026-09-17/` (largo).
 
 Dibujos: [reglas_crt.png](reglas_crt.png) (reglas completas) y [criterios_htf_mtf.png](criterios_htf_mtf.png) (los dos criterios previos). Las reglas de abajo son las mismas que muestran los dibujos.
 
@@ -34,7 +34,10 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade.
 
 ### Criterio 2 · FVG tocado en MTF (liquidez interna)
 - El extremo del sweep (el máximo o mínimo de C2) toca un **FVG de M15, M30 o H1 ya formado** antes del sweep.
-- FVG bajista en cortos, alcista en largos.
+- **Corto:** un FVG **bajista**, creado antes en el desarrollo del precio (en la bajada), que queda **entero por encima del máximo de C1**. Eso asegura una tendencia bajista (el FVG está más arriba que C1) y que el sweep ha tomado liquidez interna.
+- **Largo:** el espejo: un FVG **alcista** que queda entero **por debajo del mínimo de C1**.
+- Un FVG cuyo borde coincide con el extremo de C1 (formado dentro de C1) **no vale**: tiene que estar más allá. (Corrección del 02/11/2026; antes se aceptaba. Con NAS100 quita el 7 % de los setups.)
+- Dibujo de la regla: [regla_fvg_mtf.png](regla_fvg_mtf.png).
 - «Toca» significa que el extremo del sweep entra en la zona del FVG. No hace falta que la cruce entera.
 - Sin FVG tocado: no hay trade.
 
@@ -77,6 +80,7 @@ Estas son las lecturas para el código. Se congelan antes de ver resultados.
 | Secuencia del sweep | Velas consecutivas del mismo color que terminan en la vela que marca el extremo del sweep |
 | Alineación de H3 | Velas H3 agregadas de M5 y alineadas a las 18:00 NY (18, 21, 0 ... 15), no a la hora del servidor |
 | Sin mitigar | Desde que se forma el FVG de MTF hasta el inicio del sweep, ningún precio ha entrado en su zona |
+| Más allá de C1 | La base de la zona está estrictamente por encima del máximo de C1 (cortos) / el techo por debajo del mínimo (largos): `Rule.fvg_above` |
 | Antigüedad del FVG | Máximo 10 días (sensibilidad: 3 y 30) |
 | Toca | El extremo del sweep cae dentro de la zona del FVG (sensibilidad: con tolerancia del 0,05 %) |
 | Cierre dentro del rango | En vivo no se conoce hasta el final de C2: el CISD exige que el precio ya esté de nuevo dentro del rango de C1 |

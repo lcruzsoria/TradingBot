@@ -25,8 +25,8 @@
     <rect x="40" y="322" width="660" height="118" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
     <circle cx="82" cy="381" r="22" fill="#2563eb"/><text x="82" y="389" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">2</text>
     <text x="122" y="354" font-size="19" font-weight="700" fill="#0f172a">FVG tocado en MTF (M15, M30 o H1)</text>
-    <text x="122" y="380" font-size="14.5" fill="#334155">El extremo del sweep toca un FVG de MTF ya formado: además de la</text>
-    <text x="122" y="400" font-size="14.5" fill="#334155">liquidez externa se toma liquidez interna.</text>
+    <text x="122" y="380" font-size="14.5" fill="#334155">La mecha toca un FVG de MTF creado antes: bajista y por encima del</text>
+    <text x="122" y="400" font-size="14.5" fill="#334155">máximo de C1 en cortos (alcista y por debajo del mínimo en largos).</text>
     <text x="122" y="422" font-size="14.5" font-weight="600" fill="#dc2626">Sin FVG tocado: no hay trade</text>
 
     <rect x="40" y="454" width="660" height="118" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
@@ -167,7 +167,7 @@
   <rect x="40" y="1144" width="1120" height="250" rx="14" fill="#fffbeb" stroke="#fcd34d"/>
   <text x="62" y="1178" font-size="19" font-weight="700" fill="#b45309">Supuestos míos por confirmar antes de programar</text>
   <g font-size="14.5" fill="#334155">
-    <text x="62" y="1212">a) FVG tocado por el extremo del sweep: bajista en cortos, alcista en largos, y ya formado antes del sweep.</text>
+    <text x="62" y="1212">a) FVG de MTF creado antes del sweep y más allá del extremo de C1: bajista y por encima en cortos; alcista y por debajo en largos.</text>
     <text x="62" y="1240">b) El sweep de HTF debe cerrar dentro del rango de C1 (regla CRT original). Si cierra fuera, no hay patrón.</text>
     <text x="62" y="1268">c) A las 18:00 NY no se abren más entradas y lo que siga abierto se cierra. Hay que confirmarlo.</text>
     <text x="62" y="1296">d) Entrada ③: se entra a la apertura de la vela siguiente a la primera vela sin mecha.</text>

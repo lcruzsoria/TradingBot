@@ -326,13 +326,14 @@ def main() -> None:
             "Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro» usa información futura (el cierre de C2).",
             ""]
     sens = []
-    for label, rule in (("antigüedad del FVG 3 días", replace(base_rule, lookback_days=3)),
+    for label, rule in (("regla anterior: el FVG solo tiene que llegar más allá del extremo de C1", replace(base_rule, fvg_above=False)),
+                        ("antigüedad del FVG 3 días", replace(base_rule, lookback_days=3)),
                         ("antigüedad del FVG 30 días", replace(base_rule, lookback_days=30)),
                         ("tolerancia al tocar el FVG 0,05 % del precio", replace(base_rule, touch_tol=0.0005)),
                         ("exigir que C2 cierre dentro de C1 (look-ahead)", replace(base_rule, close_inside=True)),
                         ("sin BE", replace(base_rule, be_at=0.0)), ("objetivo 3R", replace(base_rule, rr=3.0))):
         for tf in ltfs:
-            if rule.lookback_days != base_rule.lookback_days or rule.touch_tol != base_rule.touch_tol:
+            if (rule.lookback_days, rule.touch_tol, rule.fvg_above) != (base_rule.lookback_days, base_rule.touch_tol, base_rule.fvg_above):
                 st, _ = find_setups(raw[(P, 5)][1], raw[(P, tf)][1], tf, rule)
             else:
                 st = setups_by[(P, tf)]

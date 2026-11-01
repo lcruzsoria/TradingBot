@@ -269,7 +269,7 @@ def main() -> None:
     for k, idx in enumerate((i3 - 2, i3 - 1, i3), 1):
         ch.text(ch.X(idx), box_y - 12 if up else box_y + 24, str(k), "#ea580c", 14, "700", "middle")
     ch.hline(crh, a, b, BLUE, "6 4", 1.4)
-    ch.text(ch.X(b) - 4, ch.Y(crh) + (16 if up else -8), f"CRH (máximo de C1) {crh:,.2f}", BLUE, 12, "700", "end")
+    ch.text(ch.X(b) - 4, ch.Y(crh) + (16 if up else -8), f"CRH ({'máximo' if up else 'mínimo'} de C1) {crh:,.2f}", BLUE, 12, "700", "end")
     ch.dot(isw, hx, RED, 7, ring=True)
     ch.text(ch.X(i3 - 2) - 6, box_y - 54 if up else box_y + 70, f"FVG {'bajista' if up else 'alcista'} M{m}: {z_bot:,.2f}–{z_top:,.2f}\n"
             f"vela 3 cerrada {fmt_ny(z[3], '%d/%m %H:%M')}, sin mitigar", "#c2410c", 13, "700")
@@ -319,19 +319,27 @@ def main() -> None:
     ch.text(ch.X(kf - 1), ch.Y(box_lo) + 26 if up else ch.Y(box_hi) - 22,
             f"FVG {'alcista' if up else 'bajista'} M5 ({fmt_ny(ts[kf], '%H:%M')})\nse convertirá en iFVG", PURPLE, 12, "700", "middle")
     cy = bars["close"][jc]
-    ty = ch.y0 + 64 if up else ch.y0 + ch.h - 90                                        # zona libre sobre (o bajo) las velas
+    near = slice(max(a, ih - 45), ih + 1)                                               # velas a la izquierda del extremo, donde va el texto
+    y_above = ch.Y(float(bars["high"][near].max())) - 62
+    y_below = ch.Y(float(bars["low"][near].min())) + 52
+    above = y_above >= ch.y0 + 56
+    ty = y_above if above else min(y_below, ch.y0 + ch.h - 50)            # zona libre sobre (o bajo) las velas
+    def label(lines: list[str], y: float, ax_to: float, ay_to: float) -> None:
+        """Texto morado con flecha; se ancla a la izquierda del extremo si cabe y, si no, al borde izquierdo del gráfico."""
+        end_x = ch.X(ih) - 36
+        wide = 6.4 * max(len(t) for t in lines)
+        x, anchor = (end_x, "end") if end_x - wide > ch.x0 + 10 else (ch.x0 + 16, "start")
+        ch.arrow(ch.X(ih) - 30 if anchor == "end" else x + min(wide, 360), y + (22 if above else -16), ax_to, ay_to, PURPLE)
+        ch.text(x, y, "\n".join(lines), PURPLE, 12, "700", anchor)
+
     if mi == jc:
-        txt = (f"{fmt_ny(ts[jc], '%H:%M')} la vela cierra {'bajo' if up else 'sobre'} la base del FVG ({base_fvg:,.2f}) → iFVG\n"
-               f"y {'bajo' if up else 'sobre'} la apertura de la secuencia ({level:,.2f}) → CISD")
-        ch.arrow(ch.X(ih) - 30, ty + (22 if up else -6), ch.X(jc) - 4, ch.Y(cy) + (-4 if up else 4), PURPLE)
-        ch.text(ch.X(ih) - 36, ty, txt, PURPLE, 12, "700", "end")
+        label([f"{fmt_ny(ts[jc], '%H:%M')} la vela cierra {'bajo' if up else 'sobre'} la base del FVG ({base_fvg:,.2f}) → iFVG",
+               f"y {'bajo' if up else 'sobre'} la apertura de la secuencia ({level:,.2f}) → CISD"], ty, ch.X(jc) - 4, ch.Y(cy) + (-4 if up else 4))
     else:
         cm = bars["close"][mi]
-        ch.arrow(ch.X(ih) - 30, ty + (22 if up else -6), ch.X(mi) - 3, ch.Y(cm) + (-4 if up else 4), PURPLE)
-        ch.text(ch.X(ih) - 36, ty, f"{fmt_ny(ts[mi], '%H:%M')} cierra {'bajo' if up else 'sobre'} la base del FVG: iFVG", PURPLE, 12, "700", "end")
-        ty2 = ty + (46 if up else -46)
-        ch.arrow(ch.X(ih) - 30, ty2 + (22 if up else -6), ch.X(jc) - 3, ch.Y(cy) + (-4 if up else 4), PURPLE)
-        ch.text(ch.X(ih) - 36, ty2, f"{fmt_ny(ts[jc], '%H:%M')} CISD: cierra {cy:,.2f}, {'bajo' if up else 'sobre'} {level:,.2f}", PURPLE, 12, "700", "end")
+        label([f"{fmt_ny(ts[mi], '%H:%M')} cierra {'bajo' if up else 'sobre'} la base del FVG: iFVG"], ty, ch.X(mi) - 3, ch.Y(cm) + (-4 if up else 4))
+        label([f"{fmt_ny(ts[jc], '%H:%M')} CISD: cierra {cy:,.2f}, {'bajo' if up else 'sobre'} {level:,.2f}"], ty + (46 if above else -46),
+              ch.X(jc) - 3, ch.Y(cy) + (-4 if up else 4))
     ch.dot(jc, cy, PURPLE, 6)
     ch.arrow(ch.X(start) + 34, ch.Y(entry) + sgn_y * -40, ch.X(start) + 3, ch.Y(entry) + sgn_y * -4, BLUE)
     ch.text(ch.X(start) + 40, ch.Y(entry) + sgn_y * -50, f"{fmt_ny(ts[start], '%H:%M')} ENTRADA 1: a mercado en la\napertura de la vela siguiente\na la del CISD ({entry:,.2f})", BLUE, 12, "700")

@@ -85,6 +85,19 @@ def test_si_el_sweep_no_llega_al_fvg_no_hay_setup():
     assert all("M15" not in x["mtf"] and "M30" not in x["mtf"] for x in st)     # (un FVG de H1 más ancho aún podría tocarse)
 
 
+def test_el_fvg_tiene_que_quedar_por_encima_del_maximo_de_c1():
+    df = scenario("en_c1")                                                       # borde inferior del FVG = máximo de C1 (107.5)
+    assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
+    assert len(engine.find_setups(df, df, 5, engine.Rule(fvg_above=False), CFG)[0]) == 1     # la regla anterior sí lo daba por bueno
+
+
+def test_largo_el_fvg_alcista_tiene_que_quedar_por_debajo_del_minimo_de_c1():
+    m = mirror(scenario("en_c1"))
+    assert engine.find_setups(m, m, 5, RULE, CFG)[0] == []
+    st = engine.find_setups(m, m, 5, engine.Rule(fvg_above=False), CFG)[0]
+    assert len(st) == 1 and st[0]["dirección"] == "long"
+
+
 def test_si_el_fvg_ya_fue_mitigado_no_cuenta():
     df = scenario()
     t = pd.Timestamp("2026-10-12 20:00").value // 10**9 + AHEAD                  # esa tarde el precio ya había entrado en el FVG

@@ -1,5 +1,7 @@
 """Motor de la estrategia CRT (variante B): sweep en el HTF, FVG tocado en MTF, iFVG en LTF, CISD y tres entradas.
 
+Criterio 2 (FVG de MTF): en un corto, un FVG BAJISTA ya formado (creado antes, en la bajada) que queda POR ENCIMA del máximo de C1
+y que el extremo del sweep toca; en un largo, un FVG alcista por debajo del mínimo de C1.
 Lo usan la skill CRT (en directo) y scripts/backtest_crt.py (histórico): es el mismo código, así lo probado es lo que se opera.
 Reglas completas en docs/estrategia_crt/GUIA.md. El largo se calcula como el corto con los precios cambiados de signo (`view`).
 """
@@ -29,6 +31,8 @@ FOREX = Cfg(240, 17 * 3600, 17 * 3600)
 @dataclass(frozen=True)
 class Rule:
     lookback_days: int = 10                              # antigüedad máxima del FVG de MTF
+    fvg_above: bool = True                               # el FVG queda entero más allá del extremo de C1 (cortos: por encima del máximo);
+                                                         # False = regla anterior: basta con que su zona llegue más allá de ese extremo
     touch_tol: float = 0.0                               # tolerancia al tocar el FVG, en fracción del precio
     leg_min: int = 120                                   # minutos hacia atrás para buscar el FVG LTF del tramo del sweep
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
@@ -115,7 +119,8 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
                 hi = int(np.searchsorted(f["formed"], t0, "right"))
                 if hi <= lo:
                     continue
-                sel = np.flatnonzero((f["top"][lo:hi] + tol_all > c1h) & (f["bottom"][lo:hi] - tol_all <= hall)) + lo
+                beyond = (f["bottom"][lo:hi] > c1h) if rule.fvg_above else (f["top"][lo:hi] + tol_all > c1h)
+                sel = np.flatnonzero(beyond & (f["bottom"][lo:hi] - tol_all <= hall)) + lo
                 for q in sel:
                     x0 = int(np.searchsorted(B["ts"], f["formed"][q], "left"))
                     x1 = int(np.searchsorted(B["ts"], t0, "left"))
