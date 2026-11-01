@@ -139,6 +139,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
             "e": minutes(t["entrada (NY)"]), "x": minutes(t["cierre (NY)"]),
             "l": t["ltf"].astype(int).tolist(), "n": t["entrada_modelo"].astype(int).tolist(),
             "t": t["FVG MTF"].map(mtf_bits).astype(int).tolist(), "q": t["objetivo_cod"].astype(int).tolist(),
+            "c": ((t["C2"].astype(np.int64) - AHEAD) // 60).tolist(),                       # inicio de la vela HTF del sweep (minutos NY)
             "h": near_hour(pd.to_datetime(t["entrada (NY)"])).tolist(),
             "r": floats(t["R neto"]), "k": floats(t["coste (R)"]), "rk": floats(t["riesgo %"], 3), "v": held.round().astype(int).tolist()}
     combos = {f"{ltf}:{e}": f"M{ltf} · {e}. {name}" for ltf in LTFS for e, name in ENTRIES.items()}

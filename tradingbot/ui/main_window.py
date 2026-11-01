@@ -19,7 +19,7 @@ from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
-from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label
+from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
 from . import theme
 from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
@@ -347,6 +347,15 @@ class MainWindow(QMainWindow):
                                  "recientes, con el patrón Continuación. La entrada es la reversión al 0,5.")
         self.fibo_btn.setVisible(pattern_skill is not None)
         self.fibo_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_FIBO", True))
+        # CRT (perfil CRT): marca en el gráfico los CRT de H3 / H4 que salieron en el backtest, donde en los demás perfiles va la SMA
+        self.crt_btn = QPushButton("CRT")
+        self.crt_btn.setProperty("chip", "true")
+        self.crt_btn.setCheckable(True)
+        self.crt_btn.setToolTip("Marca en el gráfico los CRT de H3 (H4 en forex) que salieron en el backtest: las velas C1 y C2, el "
+                                "extremo barrido y una etiqueta discreta con CRT alcista o bajista y el resultado (TP, SL o BE). Al pasar "
+                                "el ratón por encima, en qué TF de MTF estaba el FVG y en qué LTF se entró, con qué entrada.")
+        self.crt_btn.setVisible(self.strategy == "crt")
+        self.crt_btn.setChecked(True)
         self.pos_btn = QPushButton("Entradas")
         self.pos_btn.setProperty("chip", "true")
         self.pos_btn.setCheckable(True)
@@ -406,7 +415,11 @@ class MainWindow(QMainWindow):
         sma_row.setSpacing(4)
         sma_row.addWidget(self.sma_btn, 1)
         sma_row.addWidget(self.sma_cfg_btn)
-        grid.addWidget(sma_cell, 0, 0)                   # a la izquierda de TDO (así el panel no crece en altura)
+        if self.strategy == "crt":
+            grid.addWidget(self.crt_btn, 0, 0)               # CRT va donde en los demás perfiles va la SMA
+            grid.addWidget(sma_cell, 0, 3)                   # y la SMA pasa al hueco de Fibo, que este perfil no usa
+        else:
+            grid.addWidget(sma_cell, 0, 0)               # a la izquierda de TDO (así el panel no crece en altura)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
@@ -431,6 +444,8 @@ class MainWindow(QMainWindow):
         self.pos_btn.toggled.connect(self.chart.show_positions)
         self.chart.show_fibs(self.fibo_btn.isChecked())
         self.fibo_btn.toggled.connect(self.chart.show_fibs)
+        self.chart.show_crts(self.crt_btn.isChecked())
+        self.crt_btn.toggled.connect(self.chart.show_crts)
         self.chart.set_ma_show(self._sma_cfg[3])
         self.chart.show_sma(self.sma_btn.isChecked())
         self.sma_btn.toggled.connect(self.chart.show_sma)
@@ -754,6 +769,7 @@ class MainWindow(QMainWindow):
             self.log(f"stats: backtest cargado ({', '.join(g.name for g in self.backtest.groups)})")
         if self.strategy == "calendario":
             self._apply_fibs()                                   # las entradas del gráfico salen de este backtest
+        self._apply_crts()                                       # y los CRT del perfil CRT
         if self.backtest_dialog is not None:
             self.backtest_dialog.set_backtest(self.backtest, self.backtest_error)
 
@@ -856,6 +872,7 @@ class MainWindow(QMainWindow):
             self._fibs, self._positions = [], []                 # otro activo: se olvidan los dibujos anteriores
         self._fib_symbol = symbol
         self._apply_fibs()
+        self._apply_crts()
         self.chart.set_ny_shift(self.ny_shift)
         self.chart_panel.title.setText(f"{symbol}  {display_label(tf)}")
         self._update_chart_stats()
@@ -1237,6 +1254,22 @@ class MainWindow(QMainWindow):
             fibs.append(fib)
         self.chart.set_fibs(fibs)
         self.chart.set_positions(sorted(shown + self._calendar_positions(), key=lambda p: p["x0"]))
+
+    def _apply_crts(self) -> None:
+        """Perfil CRT: marca los CRT del backtest que caen dentro de las velas cargadas (el LTF y la entrada que se enseñan de cada uno
+        son el timeframe del gráfico, si es M5, M3 o M1, y CRT_ENTRY)."""
+        if self.strategy != "crt":
+            return
+        df = self.candles
+        if df is None or not len(df) or self.backtest is None:
+            self.chart.set_crts([])
+            return
+        from ..skills.crt.chart import crt_marks
+        tf = minutes(self.current_tf())
+        skill = self.manager.skills.get("crt")
+        ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
+        self.chart.set_crts(crt_marks(self.backtest, self.charted_symbol, ts, high, low, self.ny_shift, tf if tf in (5, 3, 1) else 5,
+                                      int(getattr(skill, "entry", 1))) if tf <= 60 else [])
 
     def _calendar_positions(self) -> list[dict]:
         """Perfil Calendario: todas las entradas del backtest dentro de las velas cargadas y, encima, las del forwardtest."""

@@ -106,6 +106,33 @@ class NoTradePill(_StripePill):
         self.setZValue(8)
 
 
+CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) en verde, bajista (corto) en rojo
+CRT_PILL_OPACITY = 0.85
+CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo"}
+
+
+class CrtPill(_StripePill):
+    """Etiqueta discreta de un CRT: ▲ / ▼, «CRT alcista» o «CRT bajista» y, al final, el resultado (TP, SL, BE o T). El borde va del color del
+    resultado. Va por fuera de la mecha del sweep de C2: encima en los bajistas y debajo en los alcistas. Al pasar el ratón, la ficha
+    cuenta en qué TF de MTF estaba el FVG y en qué LTF se entró (y con qué modelo de entrada)."""
+
+    def __init__(self, crt: dict) -> None:
+        result, color = RESULTS.get(str(crt["state"]), (str(crt["state"]), None))
+        long = crt["direction"] == "long"
+        outside = -PILL_GAP if long else 1 + PILL_GAP
+        super().__init__(anchor=(0, outside), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
+                         border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
+        tone = CRT_COLORS[crt["direction"]]
+        self._bar = QColor(tone)
+        self.result = result
+        self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<b style="color:{tone}">{"▲" if long else "▼"}</b>&nbsp;'
+                     f'<span style="color:{theme.TEXT}">CRT {"alcista" if long else "bajista"}</span>'
+                     f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
+                     f'<b style="color:{RESULT_TEXT.get(result, color or theme.MUTED)}">{result}</b></span>')
+        self.setZValue(8)
+        self.setOpacity(CRT_PILL_OPACITY)
+
+
 def _fib_color(name: str, target: str = "-0,5") -> str:
     """Color de cada nivel del fibo: el 0,5 (la entrada) en ámbar, el objetivo (PATTERN_TARGET_LEVEL) en rojo, el resto apagado."""
     return "#BA7517" if name == "0,5" else "#E24B4A" if name == (target or "-0,5") else theme.MUTED
@@ -367,7 +394,11 @@ class ChartView(pg.PlotWidget):
         self._fib_visible = True
         self._fib_items: list = []
         self._fib_pills: list = []                # (fibo, etiqueta) de cada setup sin entrada (T / I)
-        self._hover: tuple[str, int] | None = None    # ("pos" o "fib", índice) bajo el ratón
+        self._crts: list[dict] = []               # CRT del backtest (perfil CRT): {x0, x1, xc1, c1, c2, direction, state, mtf, ltf, entry...}
+        self._crt_visible = True
+        self._crt_items: list = []
+        self._crt_pills: list = []                # la etiqueta de cada CRT, en el mismo orden que _crts
+        self._hover: tuple[str, int] | None = None    # ("pos", "fib" o "crt", índice) bajo el ratón
         self._pinned: tuple[str, int] | None = None   # el que tiene la ficha fijada por un clic
         self.separators = DaySeparators()
         self.separators.setZValue(-20)
@@ -402,6 +433,7 @@ class ChartView(pg.PlotWidget):
         if self._levels:
             self.set_levels(dict(self._levels))
         self._draw_positions()
+        self._draw_crts()
         self.update()
 
     def set_candles(self, df, view_bars: int | None = None, keep_view: bool = False) -> None:
@@ -767,6 +799,8 @@ class ChartView(pg.PlotWidget):
         right = vb.sceneBoundingRect().right() - 2
         placed = [(float(p["x0"]), float(p["stop"]), pill) for p, pill in zip(self._positions, self._pos_pills)]
         placed += [(float(f["x0"]), float(f["levels"]["1"]), pill) for f, pill in self._fib_pills]
+        placed += [(float(c["x0"]), c["c2"][1] if c["direction"] == "short" else c["c2"][0], pill)
+                   for c, pill in zip(self._crts, self._crt_pills)]
         for x0, stop, pill in placed:
             width = pill.boundingRect().width()                 # en píxeles: la píldora no se escala con el gráfico
             start = vb.mapViewToScene(QPointF(x0, stop)).x()
@@ -797,6 +831,11 @@ class ChartView(pg.PlotWidget):
             lo, hi = min(fib["levels"].values()), max(fib["levels"].values())
             if (x0 <= pt.x() <= x1 and lo <= pt.y() <= hi) or pill.sceneBoundingRect().contains(scene_pos):
                 return "fib", j
+        for k in reversed(range(len(self._crt_pills))):
+            crt = self._crts[k]
+            lo, hi = crt["c2"]
+            if (float(crt["x0"]) <= pt.x() <= float(crt["x1"]) and lo <= pt.y() <= hi) or self._crt_pills[k].sceneBoundingRect().contains(scene_pos):
+                return "crt", k
         return None
 
     def _chart_clicked(self, event) -> None:
@@ -813,6 +852,8 @@ class ChartView(pg.PlotWidget):
             kind, i = hit
             if kind == "pos":
                 return (self._positions[i], self._pos_pills[i], kind) if i < len(self._pos_pills) else None
+            if kind == "crt":
+                return (self._crts[i], self._crt_pills[i], kind) if i < len(self._crt_pills) else None
             return (*self._fib_pills[i], kind) if i < len(self._fib_pills) else None
         if self._pinned is not None and resolve(self._pinned) is None:
             self._pinned = None                                 # ya no está dibujado
@@ -845,6 +886,28 @@ class ChartView(pg.PlotWidget):
             if data.get("decision"):
                 verdict = (f'<div style="margin-top:4px"><b style="color:{_verdict_color(data)}">Cortex {data["decision"]}</b></div>'
                            f'<div style="color:{muted}">{html.escape(why)}</div>')
+        elif kind == "crt":                                     # CRT del backtest: dónde estaba el FVG y dónde se entró
+            long = data["direction"] == "long"
+            word = CRT_RESULT_WORDS.get(str(data["state"]), str(data["state"]))
+            tone = CRT_COLORS[data["direction"]]
+            htf = f"H{int(data.get('htf', 180)) // 60}"
+
+            def crt_row(name: str, value: str) -> str:
+                return (f'<tr><td style="color:{muted}; padding-right:14px">{name}</td>'
+                        f'<td align="right" style="color:{theme.TEXT}">{html.escape(value)}</td></tr>')
+
+            head = f'<b style="color:{tone}">CRT {"alcista" if long else "bajista"}</b> · {"largo" if long else "corto"} · {html.escape(word)}'
+            body = ('<table cellspacing="0" cellpadding="0">'
+                    + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
+                    + crt_row("FVG en MTF", " · ".join(data.get("mtf") or ["-"]))
+                    + crt_row("iFVG + CISD (LTF)", f"M{data.get('ltf', '-')}")
+                    + crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}")
+                    + crt_row("Resultado", word + " (objetivo 2R)") + '</table>')
+            others = data.get("others") or []
+            verdict = ''
+            if others:
+                listed = ' · '.join(f"M{lt}·{en} {CRT_RESULT_WORDS.get(st, st)}" for lt, en, st in others[:8])
+                verdict = f'<div style="margin-top:4px; color:{muted}">Otros LTF y entradas del backtest: {html.escape(listed)}</div>'
         else:                                                   # setup sin entrada: por qué no hubo trade
             word = NO_TRADE_WORDS.get(str(data["tag"]), str(data["tag"]))
             head = f'<b>{html.escape(str(data["label"]))}</b> · {side} · {html.escape(word)}'
@@ -918,6 +981,63 @@ class ChartView(pg.PlotWidget):
     def fib_count(self) -> int:
         """Fibonacci dibujados (cada uno son tres niveles)."""
         return 0 if not self._fib_visible else len(self._fibs)
+
+    # -- CRT del backtest (botón CRT del perfil CRT) --------------------------------------------------------
+    def set_crts(self, crts: list[dict]) -> None:
+        """crts: {x0, x1 (C2), xc1 (inicio de C1), c1 y c2 (mín., máx.), direction, state, mtf, ltf, entry, entry_name, others}."""
+        self._crts = list(crts)
+        self._draw_crts()
+
+    def show_crts(self, visible: bool) -> None:
+        self._crt_visible = visible
+        self._draw_crts()
+
+    def _draw_crts(self) -> None:
+        """Las velas C1 y C2 del HTF como dos cajas (C1 tenue, C2 del color del CRT), el nivel barrido de C1 y la etiqueta discreta."""
+        pi = self.getPlotItem()
+        for item in self._crt_items:
+            pi.removeItem(item)
+        self._crt_items.clear()
+        self._crt_pills.clear()
+        if not self._crt_visible:
+            self._update_card()
+            return
+        for crt in self._crts:
+            x0, x1, xc1 = float(crt["x0"]), float(crt["x1"]), float(crt["xc1"])
+            c1lo, c1hi = crt["c1"]
+            c2lo, c2hi = crt["c2"]
+            short = crt["direction"] == "short"
+            tone = CRT_COLORS[crt["direction"]]
+            border = BOX_BORDER.get(str(crt["state"]), RESULTS.get(str(crt["state"]), ("", None))[1] or tone)
+            for lo, hi, brush, pen_color, width, left, right in (
+                    (c1lo, c1hi, _alpha(theme.MUTED, 22), _alpha(theme.MUTED, 110), 1.0, xc1, x0),
+                    (c2lo, c2hi, _alpha(tone, 34), QColor(border), 1.5, x0, x1)):
+                box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
+                box.setBrush(brush)
+                pen = QPen(pen_color, width)
+                pen.setCosmetic(True)
+                box.setPen(pen)
+                box.setZValue(-7)
+                pi.addItem(box, ignoreBounds=True)
+                self._crt_items.append(box)
+            swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
+            line = pg.PlotCurveItem(x=np.array([xc1, x1]), y=np.array([swept, swept]),
+                                    pen=pg.mkPen(tone, width=1, style=Qt.PenStyle.DashLine))
+            line.setZValue(-6)
+            pi.addItem(line, ignoreBounds=True)
+            self._crt_items.append(line)
+            pill = CrtPill(crt)
+            pill.setPos(x0, c2hi if short else c2lo)
+            pi.addItem(pill, ignoreBounds=True)
+            self._crt_items.append(pill)
+            self._crt_pills.append(pill)
+        self._fit_pills()
+        self._update_card()
+
+    @property
+    def crt_count(self) -> int:
+        """CRT dibujados."""
+        return 0 if not self._crt_visible else len(self._crts)
 
     # -- media móvil simple ----------------------------------------------------------------------------
     def set_sma(self, values, color: str = "#00ACC1", style: str = "normal") -> None:

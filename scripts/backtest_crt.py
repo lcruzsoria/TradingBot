@@ -154,7 +154,7 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
             "dirección": st["dirección"], "FVG MTF": st["mtf"], "C2 cierra dentro": st["inside"], "entrada": sgn * entry,
             "stop": sgn * hx, "objetivo": sgn * mg["target"], "salida": sgn * mg["exit_price"], "riesgo": risk,
             "riesgo %": 100 * risk / abs(entry), "cómo": mg["cómo"], "R bruto": mg["gross"], "coste (R)": mg["cost"],
-            "R neto": mg["gross"] - mg["cost"], "_ts_exit": int(ts[j])}
+            "R neto": mg["gross"] - mg["cost"], "C2": st["C2"], "_ts_exit": int(ts[j])}
 
 
 def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rule: Rule) -> pd.DataFrame:

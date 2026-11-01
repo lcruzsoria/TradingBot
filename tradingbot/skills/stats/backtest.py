@@ -30,10 +30,11 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
 # CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3), t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
-# y h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no)
+# h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no) y c (inicio de la vela H3 / H4 del
+# sweep, en minutos NY: con él el gráfico marca cada CRT)
 CRT_MTF_BITS = {15: 1, 30: 2, 60: 4}
 CRT_MTF_NAMES = {0: "Todos", 15: "M15", 30: "M30", 60: "H1"}
 CRT_LTFS = (5, 3, 1)
