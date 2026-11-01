@@ -1,6 +1,6 @@
 """Los CRT que salieron en el backtest, como marcas del gráfico (botón CRT del perfil CRT).
 
-Cada marca es una vela C2 del HTF (H3 en índices, H4 en el resto) que barrió el extremo de la anterior (C1) y de la que el backtest sacó
+Cada marca es una vela C2 (manipulación) del HTF (H3 en índices, H4 en el resto) que barrió el extremo de la anterior (C1) y de la que el backtest sacó
 alguna operación. El backtest guarda de cada operación su mercado, el inicio de C2 (columna `c`, minutos de Nueva York), el timeframe del
 FVG de MTF que toca la mecha, el LTF y el modelo de entrada con los que entró y cómo acabó. Los rangos de C1 y C2 se rehacen con las
 velas cargadas: solo salen los CRT cuya C2 está entre ellas (FEED_MAX_BARS por mercado y timeframe).
@@ -19,7 +19,7 @@ from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..stats.backtest import CRT_ENTRIES, CRT_MTF_BITS, CRT_MTF_NAMES
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
-AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq")      # columnas del backtest para auditar la operación
+AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
 MTF_TFS = {15: "M15", 30: "M30", 60: "H1"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T"}
@@ -81,6 +81,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
             continue
         x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
         xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
+        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))        # fin de C3, la vela de expansión donde se busca el setup
         if x1 <= x0 or xc1 >= x0:
             continue
         rows = sorted(rows, key=lambda r: (ltf_pref.index(r[0]), entry_pref.index(r[1])))
@@ -90,7 +91,8 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
         mark = {
             "x0": x0, "x1": x1, "xc1": xc1, "direction": "short" if direction else "long", "state": state, "label": "CRT",
             "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
-            "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+            "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
+            "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
             "mtf": mtf_names(best[3]), "ltf": best[0], "entry": best[1], "entry_name": CRT_ENTRIES[best[1]], "htf": htf,
             "start": start, "fvg_all": fvg, "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
             "others": [(r[0], r[1], STATES.get(r[2], "tiempo")) for r in rows[1:]]}
@@ -112,5 +114,5 @@ def audit_marks(d: dict, ts, ahead: int, n: int) -> dict:
             "ifvg": {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]},
             "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"]},
             "extreme": {"x": at(d["th"]), "price": d["ps"]},
-            "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["th"]), at(t) + 1), "bottom": a, "top": b}
+            "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
                      for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}

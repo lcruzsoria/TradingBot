@@ -1,9 +1,14 @@
-"""Motor de la estrategia CRT (variante B): sweep en el HTF, FVG tocado en MTF, iFVG en LTF, CISD y cuatro entradas.
+"""Motor de la estrategia CRT: el setup se define DENTRO de C2 (la vela HTF que manipula a C1).
 
-Criterio 2 (FVG de MTF): en un corto, un FVG BAJISTA ya formado (creado antes, en la bajada) que queda POR ENCIMA del máximo de C1
-y que el extremo del sweep toca; en un largo, un FVG alcista por debajo del mínimo de C1.
+C1 = rango, C2 = manipulación, C3 = expansión. Corto (el largo es el espejo, ver `view`):
+  1. C2 supera el máximo de C1 con una mecha (el extremo del sweep, que va subiendo mientras C2 sigue haciendo máximos).
+  2. Tras ese extremo, el desplazamiento a la baja deja un FVG BAJISTA de MTF (M15/M30/H1) que nace DESPUÉS del extremo, y el precio
+     vuelve a él (basta con que lo toque la mecha).
+  3. En LTF (M5/M3/M1) el tramo de vuelta deja un FVG ALCISTA que el precio invierte con un cierre por debajo de su base: es el iFVG y esa
+     inversión es el CISD.
+  4. Entrada en corto, con el stop en el extremo del sweep. Todo ocurre antes de que cierre C2: no se espera a saber si C2 cierra dentro.
 Lo usan la skill CRT (en directo) y scripts/backtest_crt.py (histórico): es el mismo código, así lo probado es lo que se opera.
-Reglas completas en docs/estrategia_crt/GUIA.md. El largo se calcula como el corto con los precios cambiados de signo (`view`).
+Reglas completas en docs/estrategia_crt/GUIA.md.
 """
 from __future__ import annotations
 
@@ -30,17 +35,12 @@ FOREX = Cfg(240, 17 * 3600, 17 * 3600)
 
 @dataclass(frozen=True)
 class Rule:
-    lookback_days: int = 10                              # antigüedad máxima del FVG de MTF
-    fvg_above: bool = True                               # el FVG queda entero más allá del extremo de C1 (cortos: por encima del máximo);
-                                                         # False = regla anterior: basta con que su zona llegue más allá de ese extremo
-    touch_tol: float = 0.0                               # tolerancia al tocar el FVG, en fracción del precio
-    leg_min: int = 120                                   # minutos hacia atrás para buscar el FVG LTF del tramo del sweep
-    inside_c1: bool = False                              # el CISD exige además un cierre dentro del rango de C1. Era una exigencia añadida
-                                                         # por el motor (no está en la definición del CISD) que retrasaba la entrada
+    leg_min: int = 120                                   # minutos hacia atrás (desde la vuelta al FVG de MTF) para buscar el FVG LTF a invertir
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
-    wait_c2: bool = False                                # sin look-ahead: espera al cierre de C2 y busca el CISD hasta el final de C3
     rr: float = 2.0
     target_c1: bool = False                               # objetivo en el extremo opuesto de C1 (cortos: su mínimo) en vez de rr veces el riesgo
+    min_rr: float = 0.0                                  # con el objetivo en C1: se descarta el setup si el extremo de C1 queda a menos de
+                                                         # min_rr veces el riesgo de la entrada (se anota el R máximo que habría llegado a dar)
     be_at: float = 1.0                                   # el stop pasa a la entrada al llegar a este R (0 = sin BE)
 
 
@@ -83,20 +83,30 @@ def session_end(ts: int, cfg: Cfg) -> int:
 # -- setups --------------------------------------------------------------------------------------------------------------
 
 def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule, cfg: Cfg) -> tuple[list, dict]:
-    """Todos los setups (sweep + FVG de MTF + iFVG + CISD) de las velas dadas, sin entrada todavía.
+    """Todos los setups (sweep + FVG de MTF tras el extremo + vuelta + iFVG invertido) de las velas dadas, sin entrada todavía.
 
     `base` son las velas de las que salen el HTF y el MTF (en el backtest, M5) y `ltf` las de la entrada (M5, M3 o M1).
     """
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
     mtf = {m: aggregate(base, m, cfg) for m in MTF}
-    funnel = {"velas HTF con sweep": 0, "con FVG de MTF sin mitigar al alcance": 0, "con el extremo tocando el FVG": 0,
-              "con iFVG": 0, "con CISD": 0}
+    funnel = {"velas HTF con sweep": 0, "con FVG de MTF formado tras el extremo": 0, "con vuelta al FVG": 0, "con iFVG": 0, "con CISD": 0}
     leg_bars = max(rule.leg_min // ltf_min, 3)
     setups = []
     for sign, name in ((1, "short"), (-1, "long")):
-        B, L, H = view(base, sign), view(ltf, sign), view(htf, sign)
+        L, H = view(ltf, sign), view(htf, sign)
         fv = {m: bearish_fvgs(view(mtf[m], sign), m) for m in MTF}
-        lts, lo_, hi_, cl_, op_ = L["ts"], L["low"], L["high"], L["close"], L["open"]
+        lts, lo_, hi_, cl_ = L["ts"], L["low"], L["high"], L["close"]
+
+        def pool_after(extreme_ts: int, until: int) -> list:
+            """FVG de MTF cuya primera vela termina después del extremo (nacen del desplazamiento) y que se forman antes de `until`."""
+            out = []
+            for m in MTF:
+                f = fv[m]
+                lo = int(np.searchsorted(f["formed"], extreme_ts + 2 * m * 60, "right"))
+                hi = int(np.searchsorted(f["formed"], until, "right"))
+                out += [(m, float(f["bottom"][q]), float(f["top"][q]), int(f["formed"][q])) for q in range(lo, hi)]
+            return out
+
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
             if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60 or H["high"][i] <= H["high"][i - 1]:
@@ -109,77 +119,43 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
             if not len(rel):
                 continue
             s0 = a + int(rel[0])
-            if rule.wait_c2 and not (c1l <= H["close"][i] < c1h):             # C2 tiene que cerrar dentro del rango de C1
-                continue
-            b_end = int(np.searchsorted(lts, s2 + 2 * cfg.htf_min * 60)) if rule.wait_c2 else b
             funnel["velas HTF con sweep"] += 1
-            hall, t0 = hi_[a:b].max(), int(lts[s0])
-            tol_all = rule.touch_tol * abs(hall)
-            zones = []
-            for m in MTF:
-                f = fv[m]
-                lo = int(np.searchsorted(f["formed"], t0 - rule.lookback_days * 86400, "left"))
-                hi = int(np.searchsorted(f["formed"], t0, "right"))
-                if hi <= lo:
-                    continue
-                beyond = (f["bottom"][lo:hi] > c1h) if rule.fvg_above else (f["top"][lo:hi] + tol_all > c1h)
-                sel = np.flatnonzero(beyond & (f["bottom"][lo:hi] - tol_all <= hall)) + lo
-                for q in sel:
-                    x0 = int(np.searchsorted(B["ts"], f["formed"][q], "left"))
-                    x1 = int(np.searchsorted(B["ts"], t0, "left"))
-                    if x1 <= x0 or B["high"][x0:x1].max() < f["bottom"][q]:     # sin mitigar
-                        zones.append((m, float(f["bottom"][q]), float(f["top"][q]), int(f["formed"][q])))
-            if not zones:
-                continue
-            funnel["con FVG de MTF sin mitigar al alcance"] += 1
-            hx, ih = hi_[s0], s0
-            hit_ever = inv_ever = False
+            ks_all = 2 + a + np.flatnonzero(lo_[a + 2:b] > hi_[a:b - 2])        # velas 3 de los FVG alcistas de LTF (espacio del corto)
+            hx, ih, jt, pool, hit = float(hi_[s0]), s0, None, None, []
+            seen_zone = seen_touch = seen_ifvg = False
             trig = None
-            for j in range(s0, b_end):
-                if j < b and lo_[j] < c1l:                                    # barre los dos extremos de C1
+            for j in range(s0, b):
+                if lo_[j] < c1l:                                                # barre los dos extremos de C1
                     break
-                if hi_[j] > hx:
-                    if j >= b:                                                # C3 sigue más allá del extremo: el setup se anula
-                        break
-                    hx, ih = hi_[j], j
-                tol = rule.touch_tol * abs(hx)
-                hit = [z for z in zones if z[1] - tol <= hx <= z[2] + tol]
-                if not hit:
+                if hi_[j] > hx:                                                 # extremo nuevo: lo anterior ya no vale
+                    hx, ih, jt, pool, hit = float(hi_[j]), j, None, None, []
                     continue
-                hit_ever = True
-                if j == ih:
+                if pool is None:
+                    pool = pool_after(int(lts[ih]), int(lts[b - 1]))
+                    seen_zone |= bool(pool)
+                if jt is None:                                                  # primera vuelta al FVG de MTF: lo toca la mecha
+                    hit = [z for z in pool if z[3] <= lts[j] and hi_[j] >= z[1]]
+                    if not hit:
+                        continue
+                    jt, seen_touch = j, True
+                ks = ks_all[(ks_all < j) & (ks_all - 2 >= ih) & (ks_all >= jt - leg_bars)]
+                alive = [int(k) for k in ks if cl_[k + 1:j].size == 0 or cl_[k + 1:j].min() >= hi_[k - 2]]      # aún sin invertir
+                seen_ifvg |= bool(alive)
+                done = [k for k in alive if cl_[j] < hi_[k - 2]]                # el cierre de esta vela lo invierte: CISD
+                if not done:
                     continue
-                ks = np.arange(max(2, ih - leg_bars), ih + 1)
-                ks = ks[lo_[ks] > hi_[ks - 2]]                                # FVG alcistas del tramo (en el espacio del corto)
-                elig = [int(k) for k in ks if k == ih or cl_[k + 1:ih + 1].min() >= hi_[k - 2]]
-                if not elig:
-                    continue
-                bots = hi_[np.array(elig) - 2]
-                below = np.flatnonzero(cl_[ih + 1:j + 1] < bots.max())
-                if not len(below):
-                    continue
-                m_inv = ih + 1 + int(below[0])
-                kf = max(k for k in elig if hi_[k - 2] > cl_[m_inv])
-                inv_ever = True
-                e = ih
-                while e > ih - 5 and cl_[e] <= op_[e]:                        # última vela alcista a/antes del extremo
-                    e -= 1
-                if cl_[e] <= op_[e]:
-                    continue
-                st = e
-                while st - 1 >= 0 and cl_[st - 1] > op_[st - 1]:
-                    st -= 1
-                level = op_[st]
-                if cl_[j] < level and (not rule.inside_c1 or cl_[j] < c1h) and (not rule.wait_c2 or j >= b):
-                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": float(hx), "level": float(level),
-                            "z_bottom": float(hi_[kf - 2]), "z_top": float(lo_[kf]),
-                            "mtf": "/".join(sorted({f"M{z[0]}" for z in hit}, key=lambda x: int(x[1:]))),
-                            "inside": bool(c1l <= H["close"][i] <= c1h),
-                            # detalle para dibujar la operación (índices sobre las velas `ltf`; zonas en el espacio del corto)
-                            "s0": s0, "kf": kf, "m_inv": m_inv, "seq": (st, e), "c1": (c1l, c1h), "zones": hit}
-                    break
-            funnel["con el extremo tocando el FVG"] += hit_ever
-            funnel["con iFVG"] += inv_ever
+                kf = max(done)
+                trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": float(hi_[kf - 2]),
+                        "z_bottom": float(hi_[kf - 2]), "z_top": float(lo_[kf]),
+                        "mtf": "/".join(sorted({f"M{z[0]}" for z in hit}, key=lambda x: int(x[1:]))),
+                        "inside": bool(c1l <= H["close"][i] <= c1h),
+                        "c2_end": s2 + cfg.htf_min * 60,                        # la entrada tiene que abrirse antes (si C2 sigue en curso, no se sabe por las velas)
+                        # detalle para dibujar la operación (índices sobre las velas `ltf`; zonas en el espacio del corto)
+                        "s0": s0, "kf": kf, "m_inv": j, "jt": jt, "seq": (kf - 2, ih), "c1": (c1l, c1h), "zones": hit}
+                break
+            funnel["con FVG de MTF formado tras el extremo"] += seen_zone
+            funnel["con vuelta al FVG"] += seen_touch
+            funnel["con iFVG"] += seen_ifvg
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
@@ -199,10 +175,11 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
     n, jc, hx, step = len(ts), st["jc"], st["stop"], ltf_min * 60
     closed = n if closed is None else closed
     end = session_end(int(ts[jc]), cfg)
+    limit = min(end, st["c2_end"])                        # la entrada tiene que abrirse antes de que cierre C2
     fill = None
     if variant == 1:
         e = jc + 1
-        if e >= n or ts[e] - ts[jc] > 2 * step or ts[e] >= end:
+        if e >= n or ts[e] - ts[jc] > 2 * step or ts[e] >= limit:
             return None
         entry, start = o[e], e
     elif variant == 2:
@@ -213,7 +190,7 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
         target0, cont, k, start = (st["c1"][0] if rule.target_c1 else zb - rule.rr * risk0), False, jc + 1, None
         if target0 >= zb:                                 # el extremo de C1 queda por encima de la entrada: no hay objetivo válido
             return None
-        while k < n and ts[k] < end and ts[k] - ts[k - 1] <= 2 * step:
+        while k < n and ts[k] < limit and ts[k] - ts[k - 1] <= 2 * step:
             if cont and h[k] >= zb:
                 entry, start, fill = max(zb, o[k]), k, k
                 break
@@ -227,17 +204,17 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
         if start is None:
             return None
     elif variant == 4:                                    # al cierre de la vela del CISD: a mercado, sin esperar a la siguiente
-        if ts[jc] + step >= end:
+        if ts[jc] + step >= limit:
             return None
         entry, start = c[jc], jc + 1
     else:
         k, start = jc + 1, None
-        while k < min(n, closed) and ts[k] < end and ts[k] - ts[k - 1] <= 2 * step:
+        while k < min(n, closed) and ts[k] < limit and ts[k] - ts[k - 1] <= 2 * step:
             if h[k] >= hx:
                 break
             if c[k] < o[k] and h[k] <= o[k] + 1e-9:       # bajista sin mecha en el lado del extremo
                 e = k + 1
-                if e < n and ts[e] - ts[k] <= 2 * step and ts[e] < end:
+                if e < n and ts[e] - ts[k] <= 2 * step and ts[e] < limit:
                     entry, start = o[e], e
                 break
             k += 1
@@ -247,6 +224,20 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
     if risk <= 0:
         return None
     return {"entry": float(entry), "start": int(start), "fill": fill, "risk": float(risk), "end": int(end)}
+
+
+def planned_rr(st: dict, ep: dict) -> float:
+    """R que da la entrada si el objetivo es el extremo opuesto de C1 (espacio del corto: su mínimo)."""
+    return float((ep["entry"] - st["c1"][0]) / ep["risk"])
+
+
+def max_r(L: dict, st: dict, ep: dict) -> float:
+    """El R máximo que habría dado la entrada: lo más lejos que llega el precio a favor antes de tocar el stop o de cerrar la sesión."""
+    ts, h, l = L["ts"], L["high"], L["low"]
+    j, n = ep["start"], len(ts)
+    while j < n and ts[j] < ep["end"] and h[j] < st["stop"]:
+        j += 1
+    return float(max((ep["entry"] - l[ep["start"]:j].min()) / ep["risk"], 0.0)) if j > ep["start"] else 0.0
 
 
 def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict | None:

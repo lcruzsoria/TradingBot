@@ -39,7 +39,8 @@ PROFILE, PROFILE_NAME = "crt", "CRT"
 LTFS = (5, 3, 1)
 ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha", 4: "Cierre del CISD"}
 # Objetivos: código -> (nombre, regla). 1R sin BE; 2R con BE a 1R (el del bot); extremo opuesto de C1 con BE a 1R
-TARGETS = {1: ("1R", engine.Rule(rr=1.0, be_at=0.0)), 2: ("2R", engine.Rule()), 3: ("Extremo de C1", engine.Rule(target_c1=True))}
+TARGETS = {1: ("1R", engine.Rule(rr=1.0, be_at=0.0)), 2: ("2R", engine.Rule()),
+           3: ("Extremo de C1", engine.Rule(target_c1=True, min_rr=2.0))}       # regla 1: si el extremo de C1 da menos de 2 R, se descarta
 GROUPS = {"indices": ("Índices", [("puprime", "NAS100"), ("puprime", "SP500"), ("puprime", "DJ30")]),
           "forex": ("Forex", [("puprime", "EURUSD"), ("puprime", "GBPUSD")])}
 ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
@@ -147,7 +148,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
             "pe": floats(t["entrada"], 5), "ps": floats(t["stop"], 5), "pt": floats(t["objetivo"], 5),        # entrada, stop y objetivo
             "pa": floats(t["iFVG bajo"], 5), "pb": floats(t["iFVG alto"], 5), "pc": floats(t["CISD"], 5),     # iFVG invertido y nivel del CISD
             "ti": ny_min(t["t iFVG"]), "tv": ny_min(t["t inversión"]), "tj": ny_min(t["t CISD"]), "th": ny_min(t["t extremo"]),
-            "tq": ny_min(t["t secuencia"]),                                                                    # horas de cada paso
+            "tq": ny_min(t["t secuencia"]), "tt": ny_min(t["t vuelta"]),                                                                    # horas de cada paso
             **{f"f{tf}{k}": v for tf in engine.MTF for k, v in (
                 ("a", floats(t[f"FVG{tf} bajo"], 5)), ("b", floats(t[f"FVG{tf} alto"], 5)),
                 ("t", [-1 if x == 0 else (int(x) - AHEAD) // 60 for x in t[f"FVG{tf} t"]]))},          # FVG de MTF: base, techo y primera vela
@@ -165,7 +166,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
         "datos": [{"mercado": f"{r['mercado']} · M{r['ltf']}", "velas M15": int(r["velas"]), "desde (NY)": r["desde"].strftime("%Y-%m-%d"),
                    "hasta (NY)": r["hasta"].strftime("%Y-%m-%d"), "TBR evaluadas": None} for _, r in data.iterrows()],
         "embudo_crt": [{"mercado": r["mercado"], "ltf": int(r["ltf"]), "sweeps": int(r["velas HTF con sweep"]),
-                        "fvg": int(r["con FVG de MTF sin mitigar al alcance"]), "toque": int(r["con el extremo tocando el FVG"]),
+                        "fvg": int(r["con FVG de MTF formado tras el extremo"]), "toque": int(r["con vuelta al FVG"]),
                         "ifvg": int(r["con iFVG"]), "cisd": int(r["con CISD"]), "e1": int(r["entrada 1"]), "e2": int(r["entrada 2"]),
                         "e3": int(r["entrada 3"]), "e4": int(r["entrada 4"])} for _, r in funnel.iterrows()],
         "metodologia": methodology(gkey)}

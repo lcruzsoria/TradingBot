@@ -1000,7 +1000,7 @@ class ChartView(pg.PlotWidget):
         self._draw_crts()
 
     def _draw_crts(self) -> None:
-        """Las velas C1 y C2 del HTF como dos cajas grises (con su nombre debajo), el nivel barrido de C1 y la etiqueta discreta."""
+        """Las velas C1 (rango), C2 (manipulación) y C3 (expansión) del HTF como cajas grises (con su nombre debajo), el nivel barrido de C1 y la etiqueta discreta."""
         pi = self.getPlotItem()
         for item in self._crt_items:
             pi.removeItem(item)
@@ -1016,9 +1016,12 @@ class ChartView(pg.PlotWidget):
             short = crt["direction"] == "short"
             tone = CRT_COLORS[crt["direction"]]
             htf = f"H{int(crt.get('htf', 180)) // 60}"
-            for lo, hi, brush, pen_color, width, left, right, name in (
-                    (c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0, "C1"),
-                    (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1, "C2")):
+            c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
+            boxes = [(c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0, "C1 · rango"),
+                     (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1, "C2 · manipulación")]
+            if c3:
+                boxes.append((c3[0], c3[1], _alpha(HTF_BOX, 10), _alpha(HTF_BOX, 160), 1.2, x1, float(crt["x2"]), "C3 · expansión"))
+            for lo, hi, brush, pen_color, width, left, right, name in boxes:
                 box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
                 box.setBrush(brush)
                 pen = QPen(pen_color, width)
@@ -1028,7 +1031,7 @@ class ChartView(pg.PlotWidget):
                 pi.addItem(box, ignoreBounds=True)
                 self._crt_items.append(box)
                 label = pg.TextItem(anchor=(0.5, -0.15))                    # el nombre de la vela, debajo de su caja
-                label.setHtml(f'<span style="font-size:8pt; color:{HTF_BOX}">{name} · {htf}</span>')
+                label.setHtml(f'<span style="font-size:8pt; color:{HTF_BOX}">{name.split(" · ")[0]} · {htf} · {name.split(" · ")[1]}</span>')
                 label.setPos((left + right) / 2, lo)
                 label.setZValue(7)
                 pi.addItem(label, ignoreBounds=True)

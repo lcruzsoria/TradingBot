@@ -21,14 +21,14 @@ D1_FVG = int(pd.Timestamp("2026-10-12 12:00").value // 10**9 // 60)             
 
 def raw(ops: list[tuple]) -> dict:
     """Operaciones CRT en NAS100: (inicio de C2, dirección 0 largo / 1 corto, LTF, entrada, resultado, máscara de FVG de MTF)."""
-    keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq",
+    keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt",
             "f15a", "f15b", "f15t", "f30a", "f30b", "f30t", "f60a", "f60b", "f60t")
     cols = {k: [] for k in keys}
     for c2, d, ltf, entry, out, mtf in ops:
         # el corto del escenario: entra en 103.1 a las 06:55 (C2 + 55 min), stop 108.5 (extremo de las 06:35), objetivo 92.3, iFVG 106.1-107.3
         # (de las 06:25 a la inversión de las 06:45), CISD en 103.2 a las 06:50 con la secuencia desde las 06:15
         vals = (c2, d, ltf, entry, out, mtf, 0, 2, 3, c2 + 55, c2 + 70, 1.9, 0.1, -1, 103.1, 108.5, 92.3, 106.1, 107.3, 103.2,
-                c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15,
+                c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15, c2 + 35,
                 107.5, 110.0, D1_FVG, float("nan"), float("nan"), -1, float("nan"), float("nan"), -1)     # FVG de M15 del día 1; M30 y H1 no
         for k, v in zip(keys, vals):
             cols[k].append(v)

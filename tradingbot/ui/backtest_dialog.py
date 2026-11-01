@@ -381,7 +381,7 @@ class BacktestDialog(QDialog):
         self.by_round = Book("Por hora en punto (±15 min)", "03:00 = de 02:45 a 03:15 · solo las horas con operaciones",
                              ("Hora",) + METRIC_HEADERS)
         self.crt_funnel = Book("Embudo CRT", "de los sweeps de H3 / H4 a las entradas, por mercado y LTF",
-                               ("Mercado · LTF", "Sweeps", "FVG sin mitigar", "Mecha toca FVG", "iFVG", "CISD", "Entrada 1", "Entrada 2",
+                               ("Mercado · LTF", "Sweeps", "FVG tras el extremo", "Vuelta al FVG", "iFVG", "CISD", "Entrada 1", "Entrada 2",
                                 "Entrada 3", "Entrada 4"))
         self.by_day = Book("Días de la semana · detalle", "día de la entrada", ("Día",) + METRIC_HEADERS)
         self.halves = Book("Robustez", "el histórico partido en dos por la mediana de las fechas", ("Mitad",) + METRIC_HEADERS)

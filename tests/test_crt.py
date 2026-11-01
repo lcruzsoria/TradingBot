@@ -24,14 +24,24 @@ def ny(ts: int) -> str:
     return f"{pd.Timestamp(int(ts) - AHEAD, unit='s'):%Y-%m-%d %H:%M}"
 
 
+def at(hhmm: str) -> int:
+    return pd.Timestamp(f"2026-10-13 {hhmm}").value // 10**9 + AHEAD
+
+
 def test_el_escenario_da_un_unico_corto_con_todos_los_pasos():
     df = scenario()
     setups, funnel = engine.find_setups(df, df, 5, RULE, CFG)
-    assert len(setups) == 1 and funnel["con CISD"] == 1
+    assert len(setups) == 1
+    assert funnel["velas HTF con sweep"] >= 1                                         # (el relleno del día 1 también tiene sweeps sin FVG)
+    assert [funnel[k] for k in list(funnel)[1:]] == [1, 1, 1, 1]
     st = setups[0]
-    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["level"] == pytest.approx(103.2)
-    assert "M15" in st["mtf"]                                                    # el extremo del sweep tocó el FVG de M15
-    assert funnel["con el extremo tocando el FVG"] >= funnel["con iFVG"] >= funnel["con CISD"]
+    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M15"
+    assert ny(df["ts"][st["ih"]]) == "2026-10-13 06:35"                               # el extremo del sweep
+    assert ny(df["ts"][st["jt"]]) == "2026-10-13 07:15"                               # la vuelta al FVG de M15 (formado a las 07:15)
+    assert [z[:3] for z in st["zones"]] == [(15, 103.2, 107.3)]
+    assert ny(df["ts"][st["jc"]]) == "2026-10-13 07:30"                               # el cierre bajo la base del iFVG es el CISD
+    assert (st["z_bottom"], st["z_top"], st["level"]) == (103.4, 104.9, 103.4)
+    assert st["inside"] is False                                                      # C2 acaba fuera de C1 y el setup vale igual
 
 
 def test_entrada_1_a_la_apertura_de_la_vela_siguiente_al_cisd_y_gana_2r():
@@ -39,7 +49,7 @@ def test_entrada_1_a_la_apertura_de_la_vela_siguiente_al_cisd_y_gana_2r():
     st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
     L = engine.view(df, 1)
     ep = engine.entry_point(L, st, 1, 5, RULE, CFG)
-    assert ny(L["ts"][st["jc"]]) == "2026-10-13 06:50" and ny(L["ts"][ep["start"]]) == "2026-10-13 06:55"
+    assert ny(L["ts"][st["jc"]]) == "2026-10-13 07:30" and ny(L["ts"][ep["start"]]) == "2026-10-13 07:35"
     assert ep["entry"] == pytest.approx(103.1) and ep["risk"] == pytest.approx(5.4)
     res = engine.manage(L, st, ep, RULE)
     assert res["cómo"] == "objetivo" and res["gross"] == pytest.approx(2.0)
@@ -51,14 +61,36 @@ def test_entrada_4_al_cierre_de_la_vela_del_cisd_y_gana_2r():
     st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
     L = engine.view(df, 1)
     ep = engine.entry_point(L, st, 4, 5, RULE, CFG)
-    assert ny(L["ts"][st["jc"]]) == "2026-10-13 06:50" and ny(L["ts"][ep["start"]]) == "2026-10-13 06:55"        # la hora de la entrada es el fin de esa vela
-    assert ep["entry"] == pytest.approx(L["close"][st["jc"]]) == pytest.approx(103.1)      # el cierre de la vela del CISD, que cerró bajo 103.2
+    assert ny(L["ts"][st["jc"]]) == "2026-10-13 07:30" and ny(L["ts"][ep["start"]]) == "2026-10-13 07:35"        # la hora de la entrada es el fin de esa vela
+    assert ep["entry"] == pytest.approx(L["close"][st["jc"]]) == pytest.approx(103.1)      # el cierre de la vela del CISD
     assert ep["risk"] == pytest.approx(108.5 - 103.1)
     L2 = engine.view(df.assign(open=df["open"].where(df.index != st["jc"] + 1, 102.0)), 1)      # si la siguiente abre más lejos del extremo
     assert engine.entry_point(L2, st, 4, 5, RULE, CFG)["risk"] == pytest.approx(5.4)           # la entrada 4 no cambia...
     assert engine.entry_point(L2, st, 1, 5, RULE, CFG)["risk"] == pytest.approx(108.5 - 102.0)   # ...y la 1 sí
     res = engine.manage(L, st, ep, RULE)
     assert res["cómo"] == "objetivo" and res["gross"] == pytest.approx(2.0)
+
+
+def test_la_entrada_tiene_que_abrirse_antes_de_que_cierre_c2():
+    df = scenario()
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
+    L = engine.view(df, 1)
+    assert st["c2_end"] == at("09:00")
+    tarde = dict(st, c2_end=int(L["ts"][st["jc"]]) + 300)                              # C2 acaba justo con la vela del CISD
+    for variant in (1, 2, 3, 4):
+        assert engine.entry_point(L, tarde, variant, 5, RULE, CFG) is None
+    assert engine.entry_point(L, dict(st, c2_end=at("07:40")), 1, 5, RULE, CFG)["start"] == st["jc"] + 1
+
+
+def test_regla_1_se_descarta_si_el_extremo_de_c1_da_menos_de_2r_y_se_anota_el_r_maximo():
+    df = scenario()
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
+    L = engine.view(df, 1)
+    ep = engine.entry_point(L, st, 1, 5, RULE, CFG)
+    assert st["c1"][0] == pytest.approx(100.0)                                       # el mínimo de C1 (espacio del corto)
+    assert engine.planned_rr(st, ep) == pytest.approx((103.1 - 100.0) / 5.4)         # 0.57 R: queda cerca, se descartaría con min_rr=2
+    reach = engine.max_r(L, st, ep)                                                  # lo que habría llegado a dar antes del stop
+    assert reach == pytest.approx((103.1 - L["low"][ep["start"]:].min()) / 5.4) and reach > 2.0   # el escenario baja a 92.3: 2 R, no 0.57
 
 
 def test_con_be_a_1r_un_retroceso_cierra_a_cero():
@@ -86,39 +118,45 @@ def test_el_largo_es_el_espejo_del_corto():
     assert ep_s["start"] == ep_l["start"] and ep_s["risk"] == pytest.approx(ep_l["risk"])
 
 
-def test_sin_fvg_de_mtf_no_hay_setup():
-    df = scenario(fvg=False)
+def test_sin_hueco_de_mtf_tras_el_extremo_no_hay_setup():
+    df = scenario()
+    i = int(df.index[df["ts"] == at("07:10")][0])
+    df.loc[i, "high"] = 107.5                                                    # la vela 3 llega al mínimo de la vela 1 (107.3): no hay FVG
     assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
 
 
-def test_si_el_sweep_no_llega_al_fvg_no_hay_setup():
+def test_si_el_precio_no_vuelve_al_fvg_no_hay_setup():
     df = scenario()
-    c2 = df["ts"] >= pd.Timestamp("2026-10-13 06:00").value // 10**9 + AHEAD
+    c2 = df["ts"] >= at("07:15")
     cols = ["open", "high", "low", "close"]
-    df.loc[c2, cols] = df.loc[c2, cols].clip(upper=107.0)                      # el sweep se queda corto: el FVG de M15 empieza en 107.5
-    st = engine.find_setups(df, df, 5, RULE, CFG)[0]
-    assert all("M15" not in x["mtf"] and "M30" not in x["mtf"] for x in st)     # (un FVG de H1 más ancho aún podría tocarse)
+    df.loc[c2, cols] = df.loc[c2, cols].clip(upper=103.0)                          # tras formarse el FVG (103.2-107.3) ya no lo toca
+    setups, funnel = engine.find_setups(df, df, 5, RULE, CFG)
+    assert setups == [] and funnel["con FVG de MTF formado tras el extremo"] == 1 and funnel["con vuelta al FVG"] == 0
 
 
-def test_el_fvg_tiene_que_quedar_por_encima_del_maximo_de_c1():
-    df = scenario("en_c1")                                                       # borde inferior del FVG = máximo de C1 (107.5)
-    assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
-    assert len(engine.find_setups(df, df, 5, engine.Rule(fvg_above=False), CFG)[0]) == 1     # la regla anterior sí lo daba por bueno
-
-
-def test_largo_el_fvg_alcista_tiene_que_quedar_por_debajo_del_minimo_de_c1():
-    m = mirror(scenario("en_c1"))
-    assert engine.find_setups(m, m, 5, RULE, CFG)[0] == []
-    st = engine.find_setups(m, m, 5, engine.Rule(fvg_above=False), CFG)[0]
-    assert len(st) == 1 and st[0]["dirección"] == "long"
-
-
-def test_si_el_fvg_ya_fue_mitigado_no_cuenta():
+def test_un_extremo_nuevo_reinicia_el_setup():
     df = scenario()
-    t = pd.Timestamp("2026-10-12 20:00").value // 10**9 + AHEAD                  # esa tarde el precio ya había entrado en el FVG
-    i = int((df["ts"] - t).abs().idxmin())
-    df.loc[i, "high"] = 108.0
+    i = int(df.index[df["ts"] == at("07:20")][0])
+    df.loc[i, "high"] = 109.0                                                    # antes del CISD el precio hace un máximo nuevo
+    setups, _ = engine.find_setups(df, df, 5, RULE, CFG)
+    assert setups == []                                                          # el FVG y la vuelta eran del extremo anterior
+
+
+def test_si_c2_barre_los_dos_extremos_de_c1_antes_de_la_entrada_no_hay_setup():
+    df = scenario()
+    i = int(df.index[df["ts"] == at("06:55")][0])
+    df.loc[i, "low"] = 99.0                                                      # C2 pasa también el mínimo de C1 (100) antes del CISD
     assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
+
+
+def test_el_cisd_es_la_inversion_del_ifvg_sin_mirar_la_secuencia_ni_el_rango_de_c1():
+    """El CISD es el cierre bajo la base del FVG alcista de M5 (103.4), no un nivel de secuencia ni de C1."""
+    df = scenario()
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
+    assert df["close"][st["jc"]] < st["z_bottom"] <= df["close"][st["jc"] - 1]            # la vela anterior aún cierra por encima
+    c1 = (df["ts"] >= at("03:00")) & (df["ts"] < at("06:00"))
+    df.loc[c1, ["high", "low", "open", "close"]] = df.loc[c1, ["high", "low", "open", "close"]].clip(upper=102.5)
+    assert len(engine.find_setups(df, df, 5, RULE, CFG)[0]) == 1                          # cambiar el rango de C1 no cambia el CISD
 
 
 def test_h4_en_forex_y_cfg_del_mercado():
@@ -152,8 +190,8 @@ def loaded(bus, df, symbol="NAS100.s", tf="5m"):
 
 
 def until_entry(df: pd.DataFrame, extra: int = 1) -> pd.DataFrame:
-    """Las velas hasta la de la entrada (06:55 NY, la última puede estar formándose)."""
-    return df[df["ts"] <= pd.Timestamp("2026-10-13 06:55").value // 10**9 + AHEAD + extra * 300 - 300].reset_index(drop=True)
+    """Las velas hasta la de la entrada (07:35 NY, la última puede estar formándose)."""
+    return df[df["ts"] <= pd.Timestamp("2026-10-13 07:35").value // 10**9 + AHEAD + extra * 300 - 300].reset_index(drop=True)
 
 
 def test_la_skill_da_la_senal_y_llega_simulada_a_setup():
@@ -230,16 +268,3 @@ def test_el_perfil_crt_trae_su_skill_y_quita_pattern_tbr_y_calendario(tmp_path):
     assert [s["type"] for s in kept] == ["cortex", "setup", "crt"]
     assert kept[-1]["slot"] == "aux2"
     assert strategy_skills([{"type": "cortex"}], "calendario") == [{"type": "cortex"}]      # CRT no se cuela en otros perfiles
-
-
-def test_el_cisd_es_solo_el_cierre_mas_alla_de_la_secuencia_sin_exigir_el_rango_de_c1():
-    """El nivel del CISD (103.2) queda por encima del máximo de C1 (aquí 102.5): el cierre de las 06:50 (103.1) pasa el nivel pero no está
-    dentro del rango de C1. Es lo que desfasaba la entrada en EURUSD: la exigencia añadida de «cierre dentro de C1» retrasaba el CISD."""
-    df = scenario()
-    c1 = (df["ts"] >= pd.Timestamp("2026-10-13 03:00").value // 10**9 + AHEAD) & (df["ts"] < pd.Timestamp("2026-10-13 06:00").value // 10**9 + AHEAD)
-    cols = ["open", "high", "low", "close"]
-    df.loc[c1, cols] = df.loc[c1, cols].clip(upper=102.5)
-    st = engine.find_setups(df, df, 5, RULE, CFG)[0]
-    assert len(st) == 1 and ny(df["ts"][st[0]["jc"]]) == "2026-10-13 06:50"                 # el CISD es la primera vela que cierra bajo el nivel
-    old = engine.find_setups(df, df, 5, engine.Rule(inside_c1=True), CFG)[0]
-    assert len(old) == 1 and ny(df["ts"][old[0]["jc"]]) == "2026-10-13 06:55"               # la versión anterior esperaba una vela más

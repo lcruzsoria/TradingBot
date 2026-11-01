@@ -23,10 +23,10 @@ DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # lo
 @register_skill("crt")
 class CrtSkill(Skill):
     title = "CRT"
-    description = ("Estrategia CRT (Candle Range Theory, variante B): una vela H3 (índices) o H4 (forex) barre el máximo o mínimo "
-                   "de la anterior y el extremo toca un FVG de M15, M30 o H1; en las velas del gráfico (M1, M3 o M5) el precio "
-                   "invierte un FVG (iFVG) y cierra más allá de la secuencia que hizo el sweep (CISD). Entra con una de las tres "
-                   "variantes de entrada, con stop en el extremo del sweep y objetivo 2R (el breakeven a 1R lo lleva Setup). "
+    description = ("Estrategia CRT (Candle Range Theory, variante B), dentro de C2: una vela H3 (índices) o H4 (forex) barre con "
+                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M15, M30 o H1 y el precio vuelve a él; "
+                   "en las velas del gráfico (M1, M3 o M5) el precio invierte un FVG (iFVG, el CISD) antes de que cierre C2. Entra con "
+                   "una de las cuatro variantes de entrada, con stop en el extremo del sweep y objetivo 2R (el breakeven a 1R lo lleva Setup). "
                    "Avisa a Cortex, que le da la orden a Setup; solo simulación. Solo actúa en el perfil CRT. Ojo: en el backtest "
                    "(docs/estrategia_crt) ninguna combinación pasó los criterios.")
     subscribes = ("candles.loaded", "clock.offset")
@@ -54,11 +54,10 @@ class CrtSkill(Skill):
         if self.entry not in ENTRY_NAMES:
             raise ValueError(f"CRT_ENTRY={self.entry}: usa 1 (vela siguiente al CISD), 2 (retesteo del iFVG), 3 (primera vela sin mecha) o 4 (cierre del CISD)")
         rr = s.get_float("RR", 2.0)
-        lookback = s.get_int("LOOKBACK_DAYS", 10)
-        if rr <= 0 or lookback <= 0:
-            raise ValueError("CRT_RR y CRT_LOOKBACK_DAYS deben ser mayores que 0")
+        if rr <= 0:
+            raise ValueError("CRT_RR debe ser mayor que 0")
         # El breakeven (a 1R) no lo hace esta skill: lo lleva Setup (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT)
-        self.rule = engine.Rule(lookback_days=lookback, rr=rr, be_at=0.0, wait_c2=s.get_bool("WAIT_C2", False))
+        self.rule = engine.Rule(rr=rr, be_at=0.0)
         env = self.services.env
         self.indices = env.get_list("LEVELS_US_INDICES", list(DEFAULT_US_INDICES)) if env is not None else DEFAULT_US_INDICES
 
@@ -87,7 +86,7 @@ class CrtSkill(Skill):
             self.publish("crt.signal", signal)
             caption(f"señal {symbol}")
         else:
-            caption(f"{symbol}: buscando sweep + FVG + iFVG + CISD")
+            caption(f"{symbol}: buscando sweep + FVG de MTF + iFVG + CISD")
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas de `df` (o None). La última vela puede estar formándose: los setups se
@@ -96,7 +95,7 @@ class CrtSkill(Skill):
         ahead, _ = server_minus_ny(self._offset)
         base_cfg = engine.INDICES if is_us_index(symbol, self.indices) else engine.FOREX
         cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
-        keep = (self.rule.lookback_days + 4) * 1440 // step               # lo que cubre el FVG más antiguo y el HTF en curso
+        keep = 2 * 1440 // step                                            # lo que cubre C1, C2 y el FVG de MTF que nace en C2
         df = df.tail(keep).reset_index(drop=True)
         closed = len(df) - 1
         setups, _ = engine.find_setups(df.iloc[:closed], df.iloc[:closed], step, self.rule, cfg)
@@ -122,6 +121,6 @@ class CrtSkill(Skill):
                     "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
                     "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
                     "pattern": f"CRT ({ENTRY_NAMES[self.entry]})", "pattern_key": STRATEGY,
-                    "reason": f"CRT: sweep {st['dirección']} con FVG de {st['mtf']} tocado, iFVG y CISD en {tf}; "
+                    "reason": f"CRT: sweep {st['dirección']} en C2, vuelta al FVG de {st['mtf']}, iFVG y CISD en {tf}; "
                               f"entrada «{ENTRY_NAMES[self.entry]}». No depende del sesgo (el backtest no lo usa)"}
         return None

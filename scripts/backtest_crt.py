@@ -1,37 +1,30 @@
-"""Backtest del CRT (variante B) en NAS100 (HTF H3) o forex (HTF H4, --mercado forex): sweep en el HTF, FVG tocado en MTF, iFVG en M5/M3, CISD y cuatro entradas.
+"""Backtest del CRT (variante B) en NAS100 (HTF H3) o forex (HTF H4, --mercado forex): el setup dentro de C2 y cuatro entradas.
 
 REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS ANTES DE VER LOS RESULTADOS:
-- HTF = H3 con las velas alineadas a las 18:00 NY (18, 21, 0, 3 ... 15). Sweep: una vela H3 (C2) supera el máximo (o mínimo) de la
-  anterior (C1). Máximo barrido -> corto; mínimo barrido -> largo. El largo se calcula como el corto con los precios cambiados
-  de signo, así que las dos direcciones usan exactamente el mismo código.
-- "Cierra dentro del rango": en vivo no se conoce hasta que C2 termina. El CISD es solo el cierre más allá de la apertura de la
-  secuencia del sweep (antes se le exigía además un cierre dentro del rango de C1, que retrasaba la entrada: es la fila «CISD con
-  cierre dentro de C1» de la sensibilidad). Para exigir que C2 cierre dentro de C1: --esperar-c2 (sin look-ahead) o, con look-ahead
-  y solo informativo, la fila «C2 cierra dentro de C1».
-- Si C2 supera los dos extremos de C1 a la vez, ese setup se descarta.
-- MTF = M15, M30 y H1 (se agregan de M5). Criterio 2: el máximo del sweep (el más alto de C2 hasta el momento) está dentro de un
-  FVG bajista de MTF (largos: el mínimo dentro de un FVG alcista). Definiciones operativas:
+- HTF = H3 con las velas alineadas a las 18:00 NY (18, 21, 0, 3 ... 15; forex H4 a las 17:00). C1 = rango, C2 = manipulación, C3 =
+  expansión. Sweep: una vela H3 (C2) supera con una mecha el máximo (o mínimo) de la anterior (C1). Máximo barrido -> corto; mínimo
+  barrido -> largo. El largo se calcula como el corto con los precios cambiados de signo (mismo código para las dos direcciones).
+  Si C2 supera los dos extremos de C1 antes de la entrada, ese setup se descarta. No se espera a que C2 cierre: todo ocurre dentro de C2.
+- MTF = M15, M30 y H1 (se agregan de M5). Paso 2 del setup: tras el extremo del sweep (el más alto de C2 hasta el momento), el
+  desplazamiento deja un FVG bajista de MTF que nace DESPUÉS del extremo (su primera vela termina después de él), y el precio vuelve a
+  él: basta con que lo toque la mecha. Vale cualquier FVG de M15, M30 o H1 formado tras el extremo. Un extremo nuevo reinicia todo.
     * FVG: tres velas con hueco entre el mínimo de la 1.ª y el máximo de la 3.ª (bajista) o al revés (alcista).
-    * Ya formado: la 3.ª vela está cerrada antes de la primera vela LTF que supera el máximo de C1.
-    * Sin mitigar: desde que se forma hasta que empieza el sweep, ningún precio ha entrado en la zona.
-    * Antigüedad máxima: 10 días (sensibilidad: 3 y 30).
-    * Toca: el extremo del sweep cae dentro de la zona del FVG (sin tolerancia; sensibilidad con tolerancia).
-- LTF = M5 y M3 (dos backtests separados; el TF donde aparece el iFVG es el TF de entrada).
-    * iFVG (cortos): FVG alcista del tramo alcista que lleva al extremo del sweep (3.ª vela entre 120 min antes y la vela del extremo,
-      sin cerrar por debajo de su base antes del extremo). Se invierte cuando una vela cierra por debajo de su base.
-    * CISD: tras la inversión, cierre por debajo de la apertura de la secuencia de velas alcistas consecutivas que terminó en el
-      extremo del sweep. Tiene que ocurrir dentro de C2.
-- Entradas (cada una es un backtest):
+- LTF = M5, M3 y M1 (backtests separados; el TF donde aparece el iFVG es el TF de entrada).
+    * iFVG (cortos): FVG alcista de LTF (3.ª vela desde 120 min antes de la vuelta al FVG de MTF) posterior al extremo, sin cerrar por
+      debajo de su base antes. Se invierte cuando una vela cierra por debajo de su base: esa inversión es el CISD.
+- Entradas (cada una es un backtest), siempre antes de que cierre C2:
     1. A la apertura de la vela siguiente a la del CISD.
     2. Retesteo del iFVG: el precio continúa (nuevo mínimo bajo el de la vela del CISD) y vuelve a la base del iFVG; orden límite en
        esa base. Se cancela si toca el stop o si llega al objetivo sin retestear.
     3. Primera vela sin mecha tras el CISD (sin mecha en el lado del extremo: bajista con máximo = apertura, en cortos). Entrada a la
        apertura de la vela siguiente.
-- Stop en el extremo del sweep (sin colchón; el spread se descuenta como coste). Objetivo 2R. A 1R el stop pasa a la entrada (BE).
-  Stop y objetivo en la misma vela: cuenta el stop. A las 18:00 NY no se abren entradas y lo abierto se cierra al cierre de la última
-  vela anterior. Una operación a la vez (se descartan setups que llegan con otra operación abierta).
+    4. Al cierre de la vela del CISD.
+- Stop en el extremo del sweep (sin colchón; el spread se descuenta como coste). Objetivo 2R (o el extremo opuesto de C1 con
+  --objetivo-c1, descartando los setups que no dan --min-rr y anotando el R máximo que habrían dado). A 1R el stop pasa a la entrada
+  (BE). Stop y objetivo en la misma vela: cuenta el stop. A las 18:00 NY (17:00 en forex) no se abren entradas y lo abierto se cierra al
+  cierre de la última vela anterior. Una operación a la vez (se descartan setups que llegan con otra operación abierta).
 - Costes: spread real de MT5 en la vela de entrada (R neto = R bruto - spread / riesgo).
-- Se da por buena (cada una de las 6 combinaciones LTF x entrada) si cumple TODOS:
+- Se da por buena (cada una de las combinaciones LTF x entrada) si cumple TODOS:
     1. NAS100 de PUPrime, todo el histórico: >= 100 operaciones y R neto medio > +0,05 con t > 2.
     2. R neto medio positivo en 2018-2022 y en 2023 en adelante (con al menos una operación en cada periodo).
     3. R neto medio > 0 en el control: NAS100 (USTEC) de MetaQuotes.
@@ -162,6 +155,12 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
     ep = engine.entry_point(L, st, variant, ltf_min, rule, CFG)
     if ep is None:
         return None
+    reach = engine.max_r(L, st, ep)
+    if rule.target_c1 and rule.min_rr and engine.planned_rr(st, ep) < rule.min_rr - 1e-9:       # el extremo de C1 queda demasiado cerca
+        sgn = st["sign"]
+        return {"_skip": True, "entrada (NY)": pd.Timestamp(int(L["ts"][ep["start"]]) - AHEAD, unit="s"), "dirección": st["dirección"],
+                "FVG MTF": st["mtf"], "entrada": sgn * ep["entry"], "stop": sgn * st["stop"], "objetivo": sgn * st["c1"][0],
+                "riesgo": ep["risk"], "R planificado": engine.planned_rr(st, ep), "R máx": reach, "C2": st["C2"]}
     mg = engine.manage(L, st, ep, rule)
     if mg is None:
         return None
@@ -170,16 +169,17 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
             "dirección": st["dirección"], "FVG MTF": st["mtf"], "C2 cierra dentro": st["inside"], "entrada": sgn * entry,
             "stop": sgn * hx, "objetivo": sgn * mg["target"], "salida": sgn * mg["exit_price"], "riesgo": risk,
             "riesgo %": 100 * risk / abs(entry), "cómo": mg["cómo"], "R bruto": mg["gross"], "coste (R)": mg["cost"],
-            "R neto": mg["gross"] - mg["cost"], "C2": st["C2"], "_ts_exit": int(ts[j]),
+            "R neto": mg["gross"] - mg["cost"], "R planificado": (ep["entry"] - mg["target"]) / risk, "R máx": reach,
+            "C2": st["C2"], "_ts_exit": int(ts[j]),
             # para auditar el criterio en el gráfico: el iFVG invertido, el CISD y las horas de cada paso (hora de servidor)
             "iFVG bajo": min(sgn * st["z_bottom"], sgn * st["z_top"]), "iFVG alto": max(sgn * st["z_bottom"], sgn * st["z_top"]),
             "CISD": sgn * st["level"], "t iFVG": int(ts[st["kf"] - 2]), "t inversión": int(ts[st["m_inv"]]), "t CISD": int(ts[st["jc"]]),
-            "t extremo": int(ts[st["ih"]]), "t secuencia": int(ts[st["seq"][0]]), **mtf_zones(st, sgn)}
+            "t extremo": int(ts[st["ih"]]), "t vuelta": int(ts[st["jt"]]), "t secuencia": int(ts[st["seq"][0]]), **mtf_zones(st, sgn)}
 
 
 def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rule: Rule) -> pd.DataFrame:
     views = {1: view(ltf, 1), -1: view(ltf, -1)}
-    rows, last_exit = [], 0
+    rows, skipped, last_exit = [], [], 0
     for st in setups:
         L = views[st["sign"]]
         if int(L["ts"][st["jc"]]) < last_exit:             # sigue abierta la operación anterior
@@ -187,11 +187,16 @@ def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rul
         r = execute(L, st, variant, ltf_min, rule)
         if r is None:
             continue
+        if r.get("_skip"):                                 # descartado: no se opera, solo se anota lo que habría dado
+            skipped.append(r)
+            continue
         if rule.close_inside and not r["C2 cierra dentro"]:
             continue
         last_exit = r.pop("_ts_exit")
         rows.append(r)
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    out.attrs["descartados"] = skipped                  # lista de filas (un DataFrame en attrs rompe pd.concat)
+    return out
 
 
 def by_period(t: pd.DataFrame, cut: pd.Timestamp = TRAIN_END) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -215,8 +220,10 @@ def main() -> None:
     ap.add_argument("--ltf", type=int, nargs="+", choices=(1, 3, 5), default=list(LTFS),
                     help="timeframes de entrada (iFVG, CISD y entrada). Con M1 el histórico de MT5 solo llega a 2024: el criterio (2) "
                          "usa dos mitades por fecha")
-    ap.add_argument("--esperar-c2", action="store_true", help="espera al cierre de C2 dentro del rango de C1 (sin look-ahead) y "
-                                                                "busca el CISD hasta el final de C3")
+    ap.add_argument("--min-rr", type=float, default=2.0, help="con --objetivo-c1: se descarta el setup si el extremo de C1 da menos de este "
+                                                               "R (se anota el R máximo que habría dado)")
+    ap.add_argument("--objetivo-c1", action="store_true", help="objetivo en el extremo opuesto de C1 (si barrió el máximo, va a por el "
+                                                               "mínimo) en vez de 2R")
     args = ap.parse_args()
     mk = configure(args.mercado)
     ltfs = tuple(args.ltf)
@@ -229,8 +236,8 @@ def main() -> None:
                 except Exception as err:                       # noqa: BLE001
                     print(f"  fallo {profile} {want} M{tf}: {err}", flush=True)
         return
-    base_rule = Rule(wait_c2=args.esperar_c2)
-    suffix = mk["suffix"] + ("_m1" if ltfs == (1,) else "") + ("_esperar_c2" if args.esperar_c2 else "")
+    base_rule = Rule(target_c1=args.objetivo_c1, min_rr=args.min_rr if args.objetivo_c1 else 0.0)
+    suffix = mk["suffix"] + ("_m1" if ltfs == (1,) else "") + ("_objetivo_c1" if args.objetivo_c1 else "")
     doc = DOC.with_name(f"RESULTADOS{suffix}.md")
 
     def key(profile: str, want: str) -> str:
@@ -281,10 +288,7 @@ def main() -> None:
     n_pass = sum(all(x) for x in summ.values())
 
     out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15/M30/H1 → {'/'.join(f'M{x}' for x in ltfs)}" + (
-               " · esperando al cierre de C2" if args.esperar_c2 else ""), "",
-           *(["**Variante sin look-ahead:** C2 tiene que haber cerrado dentro del rango de C1 (cierre real del HTF) y el CISD y la "
-              "entrada se buscan desde el cierre de C2 hasta el final de C3. Si el precio supera el extremo del sweep en C3, el setup "
-              "se anula.", ""] if args.esperar_c2 else []),
+               (" · objetivo en el extremo de C1" if args.objetivo_c1 else "")), "",
            *(["**Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; "
               "las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.", ""]
              if args.mercado == "forex" else []),
@@ -344,23 +348,30 @@ def main() -> None:
             if len(t):
                 out += [f"**M{tf} · {v}. {vname}**", "",
                         table([row(str(y), g) for y, g in t.groupby(t["entrada (NY)"].dt.year)]), ""]
+    if base_rule.min_rr and base_rule.target_c1:
+        out += [f"## Descartados: el extremo de C1 da menos de {base_rule.min_rr:g} R ({mk['primary']})", "",
+                "No se operan. Se anota el R máximo que habría dado la entrada (lo más lejos que llega el precio a favor antes del stop o del "
+                "cierre de sesión), para ver si el filtro descarta ganadoras. Detalle en `analisis/backtest_crt_*_descartados.csv`.", ""]
+        rows = []
+        for tf in ltfs:
+            for v, vname in VARIANTS.items():
+                sk, kept = pd.DataFrame(results[(P, tf, v)].attrs["descartados"]), results[(P, tf, v)]
+                if len(sk):
+                    sk.to_csv(ROOT / "analisis" / f"backtest_crt_{DATASETS[0][0]}_{DATASETS[0][1].lower()}_m{tf}_e{v}{suffix}_descartados.csv", index=False)
+                rows.append([f"M{tf} · {v}. {vname}", len(kept), len(sk),
+                             f"{sk['R planificado'].median():.2f}" if len(sk) else "-", f"{sk['R máx'].median():.2f}" if len(sk) else "-",
+                             f"{(sk['R máx'] >= 1).mean() * 100:.0f} %" if len(sk) else "-",
+                             f"{(sk['R máx'] >= base_rule.min_rr).mean() * 100:.0f} %" if len(sk) else "-"])
+        out += [table(rows, ["Combinación", "Operadas", "Descartadas", "R planificado mediano", "R máx mediano", "Llegaron a 1 R",
+                             f"Llegaron a {base_rule.min_rr:g} R"]), ""]
     out += ["## Sensibilidad (no cuenta para el veredicto)", "",
             "Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro» usa información futura (el cierre de C2).",
             ""]
     sens = []
-    for label, rule in (("regla anterior: el FVG solo tiene que llegar más allá del extremo de C1", replace(base_rule, fvg_above=False)),
-                        ("antigüedad del FVG 3 días", replace(base_rule, lookback_days=3)),
-                        ("antigüedad del FVG 30 días", replace(base_rule, lookback_days=30)),
-                        ("tolerancia al tocar el FVG 0,05 % del precio", replace(base_rule, touch_tol=0.0005)),
-                        ("CISD con cierre dentro de C1 (la versión anterior)", replace(base_rule, inside_c1=True)),
-                        ("exigir que C2 cierre dentro de C1 (look-ahead)", replace(base_rule, close_inside=True)),
+    for label, rule in (("exigir que C2 cierre dentro de C1 (look-ahead)", replace(base_rule, close_inside=True)),
                         ("sin BE", replace(base_rule, be_at=0.0)), ("objetivo 3R", replace(base_rule, rr=3.0))):
         for tf in ltfs:
-            if (rule.lookback_days, rule.touch_tol, rule.fvg_above, rule.inside_c1) != (base_rule.lookback_days, base_rule.touch_tol,
-                                                                                       base_rule.fvg_above, base_rule.inside_c1):
-                st, _ = find_setups(raw[(P, 5)][1], raw[(P, tf)][1], tf, rule)
-            else:
-                st = setups_by[(P, tf)]
+            st = setups_by[(P, tf)]                                   # los setups no dependen de estas reglas
             for v in VARIANTS:
                 sens.append(row(f"{label}: M{tf} · {v}", run_variant(raw[(P, tf)][1], st, v, tf, rule)))
     out += [table(sens)]
