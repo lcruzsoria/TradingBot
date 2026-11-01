@@ -17,7 +17,7 @@ LTF_MINUTES = (1, 3, 5)                           # el iFVG, el CISD y la entrad
 MAX_LATE_BARS = 2                                 # una señal se da si la vela de entrada es una de las últimas 2
 MIN_BARS = 200
 ENTRY_NAMES = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha"}
-DEFAULT_SYMBOLS = ["NAS100", "EURUSD", "GBPUSD"]
+DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
 
 
 @register_skill("crt")

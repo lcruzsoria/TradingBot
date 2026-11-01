@@ -131,7 +131,7 @@ def run(strategy="crt", env_text="", skills=("crt", "cortex", "setup")):
     return manager, bus, out
 
 
-def loaded(bus, df, symbol="NAS100.r", tf="5m"):
+def loaded(bus, df, symbol="NAS100.s", tf="5m"):
     bus.publish("candles.loaded", {"symbol": symbol, "timeframe": tf, "df": df}, source="feed")
     time.sleep(0.6)
 
@@ -148,7 +148,7 @@ def test_la_skill_da_la_senal_y_llega_simulada_a_setup():
     manager.stop()
     assert len(out["signal"]) == 1
     s = out["signal"][0].payload
-    assert (s["symbol"], s["direction"], s["strategy"]) == ("NAS100.r", "short", "crt")
+    assert (s["symbol"], s["direction"], s["strategy"]) == ("NAS100.s", "short", "crt")
     assert s["price"] == pytest.approx(103.1) and s["stop"] == pytest.approx(108.5) and s["target"] == pytest.approx(92.3)
     assert s["close_at"].startswith("18:00 NY")
     o = out["executed"][0].payload["order"]
