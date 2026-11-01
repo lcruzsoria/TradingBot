@@ -31,7 +31,7 @@ class CortexSkill(Skill):
                    "del barrido de la watchlist retiene los patrones y los decide al final, todos los mercados juntos y en "
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
     subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "pattern.discarded",
-                  "calendar.signal", "setup.closed", "feed.sweep", "pattern.swept")
+                  "calendar.signal", "crt.signal", "setup.closed", "feed.sweep", "pattern.swept")
     publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
     interval = 5.0                   # para no esperar para siempre a una vuelta del barrido que no se completa
@@ -102,7 +102,7 @@ class CortexSkill(Skill):
         elif event.topic == "setup.closed":
             self._open.pop(event.payload["order"].symbol, None)
             self.set_caption(f"{event.payload['order'].symbol}: posición cerrada")
-        elif event.topic == "calendar.signal":
+        elif event.topic in ("calendar.signal", "crt.signal"):         # estrategias sin patrón ni TBR: misma vía
             self._pending = (self._pending + [{**p, "calendar": True}])[-MAX_PENDING:]
             self._decide()
         elif event.topic == "trade.request":
@@ -213,13 +213,15 @@ class CortexSkill(Skill):
         busy = self._busy(payload["symbol"], payload.get("entry_ts"))
         if busy is not None:
             allowed, reason = False, self._busy_reason(busy)
+        elif payload.get("strategy") == "crt":                      # CRT no usa el sesgo (el backtest no lo usa)
+            allowed, reason = True, payload["reason"]
         elif self.calendar_use_bias:
             allowed, reason = filter_.check(Direction(direction.capitalize()))
         else:
             allowed, reason = True, "estrategia de calendario: no depende del sesgo (CORTEX_CALENDAR_USE_BIAS=false)"
         if allowed:
             self._send(build_calendar_order(payload, result, reason))
-        self.set_caption(f"{'GO' if allowed else 'NO GO'} {direction.capitalize()} calendario")
+        self.set_caption(f"{'GO' if allowed else 'NO GO'} {direction.capitalize()} {payload.get('strategy', 'calendario')}")
 
     def _decide(self, closing: bool = False) -> None:
         """Valida cada patrón pendiente con el sesgo de su mercado; si es GO, le pasa la orden a Setup.

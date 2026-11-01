@@ -63,10 +63,11 @@ def build_order(payload: dict, decision, bias_result) -> Order:
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
-    """Orden a partir de un `calendar.signal`: sin TBR ni patrón, con cierre por tiempo."""
+    """Orden a partir de un `calendar.signal` (o `crt.signal`): sin TBR ni patrón, con cierre por tiempo."""
     price = payload["price"]
     bias = bias_result.bias.value if bias_result is not None else "sin consultar"
     score = float(bias_result.score) if bias_result is not None else 0.0
-    return Order(payload["symbol"], payload["timeframe"], payload["direction"], "Calendario (largo a hora fija)", "calendario",
+    return Order(payload["symbol"], payload["timeframe"], payload["direction"], payload.get("pattern", "Calendario (largo a hora fija)"),
+                 payload.get("pattern_key", "calendario"),
                  "", payload["day"], price, price, price, price, payload["stop"], payload["target"], bias, score, reason,
                  payload["close_at"], payload["entry_ts"], payload["close_ts"], **_lateral(bias_result))

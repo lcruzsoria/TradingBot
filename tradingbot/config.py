@@ -78,7 +78,12 @@ class Mt5Profile:
         return f"{self.display} - {self.login} @ {self.server}"
 
 
-STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",)}   # skills que un perfil de estrategia no usa (solo opera la suya)
+STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",),
+                       "crt": ("pattern", "tbr", "calendario")}   # skills que un perfil de estrategia no usa (solo opera la suya)
+
+STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},)}   # skills que solo existen en ese perfil de estrategia
+
+STRATEGY_TIMEFRAMES = {"crt": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
 STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",)}      # patrones que busca un perfil de estrategia (y solo esos)
 
@@ -86,7 +91,9 @@ STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",)}      # patrones que busca un perf
 def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:
     """Las skills de un perfil de estrategia: sin las de los patrones (Calendario no opera patrones)."""
     off = STRATEGY_SKILLS_OFF.get(strategy, ())
-    return [s for s in skills if s.get("type") not in off]
+    kept = [s for s in skills if s.get("type") not in off]
+    kept += [dict(s) for s in STRATEGY_SKILLS_ON.get(strategy, ()) if not any(k.get("type") == s["type"] for k in kept)]
+    return kept
 
 
 def profile_dir(name: str) -> Path:

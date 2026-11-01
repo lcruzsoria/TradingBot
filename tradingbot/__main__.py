@@ -12,7 +12,7 @@ from .skills.bias import BiasEngine
 from .core import EventBus, Services, SkillManager
 from . import envconfig, settings
 from .config import (DEFAULT_CONFIG_FILE, DEFAULT_ENV_FILE, DEMO_PROFILE, PROJECT_ROOT, ConfigError,
-                     load_app_config, load_profiles, profile_dir, select_profile, strategy_skills)
+                     load_app_config, load_profiles, profile_dir, select_profile, strategy_skills, STRATEGY_TIMEFRAMES)
 from .timeframes import TIMEFRAMES
 
 
@@ -127,6 +127,8 @@ def main(argv=None) -> int:
             if args.symbol is None:                               # arranca en uno de sus mercados
                 cfg["app"]["symbol"] = next((s for s in cfg["app"]["watchlist"] if s.lower().startswith(cfg["app"]["symbol"].lower())),
                                             cfg["app"]["watchlist"][0])
+            if args.timeframe is None and strategy in STRATEGY_TIMEFRAMES:
+                cfg["app"]["timeframe"] = STRATEGY_TIMEFRAMES[strategy]
         else:
             cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"])
     except (ConfigError, ValueError) as exc:

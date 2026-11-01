@@ -4,14 +4,14 @@
 
 **Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.
 
-Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5. Las reglas y definiciones operativas están en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.
+Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5. Las reglas y definiciones operativas están en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.
 
-- **Se da por buena (cada combinación LTF × entrada) si:** (1) EURUSD de PUPrime, todo el histórico: ≥ 100 operaciones y R neto > +0.05 con t > 2.0; (2) R neto positivo hasta 2022 y en 2023 en adelante; (3) R neto > 0 en el control (GBPUSD de PUPrime).
+- **Se da por buena (cada combinación LTF × entrada) si:** (1) EURUSD de PUPrime, todo el histórico: ≥ 100 operaciones y R neto > +0.05 con t > 2.0; (2) R neto positivo en los dos periodos (hasta 2022; 2023 en adelante); (3) R neto > 0 en el control (GBPUSD de PUPrime).
 - Son 6 combinaciones, así que algún t alto por azar es esperable: se mira la consistencia, no un solo número.
 
 ## Veredicto
 
-| Combinación | EURUSD de PUPrime | (1) | hasta 2022 / 2023- | (2) | Control: GBPUSD de PUPrime | (3) | Resultado |
+| Combinación | EURUSD de PUPrime | (1) | hasta 2022 / 2023 en adelante | (2) | Control: GBPUSD de PUPrime | (3) | Resultado |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | M5 · 1. vela siguiente al CISD | 658 ops, -0.078 R, t -1.97 | **no** | -0.100 R, t -2.21 / -0.026 R, t -0.33 | **no** | -0.066 R, t -1.58 | **no** | No pasa |
 | M5 · 2. retesteo del iFVG | 227 ops, -0.121 R, t -1.70 | **no** | -0.123 R, t -1.47 / -0.118 R, t -0.85 | **no** | -0.059 R, t -0.84 | **no** | No pasa |
@@ -24,10 +24,10 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5. La
 
 ## Datos
 
-- EURUSD (puprime) M5: 999999 velas, 2013-05-30 → 2026-10-30 (NY).
 - EURUSD (puprime) M3: 999999 velas, 2018-10-17 → 2026-10-30 (NY).
-- GBPUSD (puprime) M5: 999999 velas, 2013-05-30 → 2026-10-30 (NY).
+- EURUSD (puprime) M5: 999999 velas, 2013-05-30 → 2026-10-30 (NY).
 - GBPUSD (puprime) M3: 999999 velas, 2018-10-17 → 2026-10-30 (NY).
+- GBPUSD (puprime) M5: 999999 velas, 2013-05-30 → 2026-10-30 (NY).
 
 ## Embudo (cuántos pasos pasan)
 

@@ -1,13 +1,13 @@
 # Backtest: CRT (variante B) en NAS100, H3 → M15/M30/H1 → M5/M3
 
-Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5 (PUPrime y MetaQuotes). Las reglas y definiciones operativas están en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.
+Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5. Las reglas y definiciones operativas están en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.
 
-- **Se da por buena (cada combinación LTF × entrada) si:** (1) NAS100 de PUPrime, todo el histórico: ≥ 100 operaciones y R neto > +0.05 con t > 2.0; (2) R neto positivo en 2018-2022 y en 2023 en adelante; (3) R neto > 0 en el control (NAS100 de MetaQuotes).
+- **Se da por buena (cada combinación LTF × entrada) si:** (1) NAS100 de PUPrime, todo el histórico: ≥ 100 operaciones y R neto > +0.05 con t > 2.0; (2) R neto positivo en los dos periodos (hasta 2022; 2023 en adelante); (3) R neto > 0 en el control (NAS100 (USTEC) de MetaQuotes).
 - Son 6 combinaciones, así que algún t alto por azar es esperable: se mira la consistencia, no un solo número.
 
 ## Veredicto
 
-| Combinación | NAS100 PUPrime | (1) | 2018-2022 / 2023- | (2) | Control MetaQuotes | (3) | Resultado |
+| Combinación | NAS100 de PUPrime | (1) | hasta 2022 / 2023 en adelante | (2) | Control: NAS100 (USTEC) de MetaQuotes | (3) | Resultado |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | M5 · 1. vela siguiente al CISD | 1001 ops, -0.050 R, t -1.38 | **no** | -0.017 R, t -0.35 / -0.087 R, t -1.64 | **no** | -0.101 R, t -1.98 | **no** | No pasa |
 | M5 · 2. retesteo del iFVG | 558 ops, -0.091 R, t -1.86 | **no** | -0.081 R, t -1.22 / -0.104 R, t -1.41 | **no** | -0.139 R, t -2.02 | **no** | No pasa |
@@ -20,14 +20,14 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5 (PU
 
 ## Datos
 
-- NAS100.s (puprime) M5: 573135 velas, 2018-09-10 → 2026-10-30 (NY).
 - NAS100.s (puprime) M3: 955133 velas, 2018-09-10 → 2026-10-30 (NY).
-- USTEC (metaquotes) M5: 292870 velas, 2022-07-06 → 2026-10-30 (NY).
+- NAS100.s (puprime) M5: 573135 velas, 2018-09-10 → 2026-10-30 (NY).
 - USTEC (metaquotes) M3: 488017 velas, 2022-07-06 → 2026-10-30 (NY).
+- USTEC (metaquotes) M5: 292870 velas, 2022-07-06 → 2026-10-30 (NY).
 
 ## Embudo (cuántos pasos pasan)
 
-| Mercado | velas H3 con sweep | con FVG de MTF sin mitigar al alcance | con el extremo tocando el FVG | con iFVG | con CISD | setups finales |
+| Mercado | velas HTF con sweep | con FVG de MTF sin mitigar al alcance | con el extremo tocando el FVG | con iFVG | con CISD | setups finales |
 |---|---:|---:|---:|---:|---:|---:|
 | NAS100.s (puprime) M5 | 15582 | 5726 | 4238 | 1755 | 1045 | 1045 |
 | NAS100.s (puprime) M3 | 15583 | 5132 | 3998 | 1992 | 1108 | 1108 |
@@ -39,19 +39,19 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5 (PU
 |  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | M5 · 1. vela siguiente al CISD | 1001 | 29.4 % | -0.050 | -50.0 | 0.90 | -67.6 | -1.38 |
-|   2018-2022 | 531 | 30.3 % | -0.017 | -9.3 | 0.96 | -28.9 | -0.35 |
+|   hasta 2022 | 531 | 30.3 % | -0.017 | -9.3 | 0.96 | -28.9 | -0.35 |
 |   2023 en adelante | 470 | 28.3 % | -0.087 | -40.7 | 0.83 | -48.5 | -1.64 |
 |   sin costes (R bruto) | 1001 | 29.9 % | -0.001 | -1.1 | 1.00 | -35.6 | -0.03 |
 |   largos | 546 | 31.3 % | -0.025 | -13.7 | 0.95 | -32.4 | -0.52 |
 |   cortos | 455 | 27.0 % | -0.080 | -36.3 | 0.85 | -51.5 | -1.47 |
 | M5 · 2. retesteo del iFVG | 558 | 26.5 % | -0.091 | -51.0 | 0.83 | -51.0 | -1.86 |
-|   2018-2022 | 307 | 27.4 % | -0.081 | -24.9 | 0.85 | -33.1 | -1.22 |
+|   hasta 2022 | 307 | 27.4 % | -0.081 | -24.9 | 0.85 | -33.1 | -1.22 |
 |   2023 en adelante | 251 | 25.5 % | -0.104 | -26.1 | 0.81 | -29.1 | -1.41 |
 |   sin costes (R bruto) | 558 | 26.7 % | -0.021 | -11.9 | 0.96 | -21.4 | -0.43 |
 |   largos | 302 | 30.1 % | -0.043 | -12.9 | 0.92 | -20.8 | -0.62 |
 |   cortos | 256 | 22.3 % | -0.149 | -38.1 | 0.72 | -39.7 | -2.12 |
 | M5 · 3. primera vela sin mecha | 604 | 32.9 % | -0.029 | -17.7 | 0.93 | -28.0 | -0.68 |
-|   2018-2022 | 336 | 33.6 % | -0.023 | -7.7 | 0.95 | -25.6 | -0.39 |
+|   hasta 2022 | 336 | 33.6 % | -0.023 | -7.7 | 0.95 | -25.6 | -0.39 |
 |   2023 en adelante | 268 | 32.1 % | -0.037 | -10.0 | 0.91 | -26.0 | -0.59 |
 |   sin costes (R bruto) | 604 | 33.1 % | +0.015 | +9.3 | 1.04 | -22.9 | +0.36 |
 |   largos | 348 | 36.8 % | -0.008 | -2.9 | 0.98 | -17.7 | -0.15 |
@@ -60,34 +60,46 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5 (PU
 |  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | M3 · 1. vela siguiente al CISD | 1073 | 30.4 % | -0.026 | -28.1 | 0.95 | -59.6 | -0.75 |
-|   2018-2022 | 579 | 32.8 % | +0.026 | +15.0 | 1.06 | -29.7 | +0.54 |
+|   hasta 2022 | 579 | 32.8 % | +0.026 | +15.0 | 1.06 | -29.7 | +0.54 |
 |   2023 en adelante | 494 | 27.5 % | -0.087 | -43.0 | 0.83 | -59.6 | -1.69 |
 |   sin costes (R bruto) | 1073 | 30.6 % | +0.028 | +30.0 | 1.06 | -39.8 | +0.80 |
 |   largos | 582 | 33.5 % | +0.027 | +15.6 | 1.06 | -37.2 | +0.56 |
 |   cortos | 491 | 26.7 % | -0.089 | -43.7 | 0.82 | -50.2 | -1.74 |
 | M3 · 2. retesteo del iFVG | 547 | 27.2 % | -0.059 | -32.1 | 0.89 | -38.3 | -1.17 |
-|   2018-2022 | 300 | 29.3 % | -0.029 | -8.6 | 0.94 | -23.6 | -0.42 |
+|   hasta 2022 | 300 | 29.3 % | -0.029 | -8.6 | 0.94 | -23.6 | -0.42 |
 |   2023 en adelante | 247 | 24.7 % | -0.095 | -23.5 | 0.82 | -25.5 | -1.27 |
 |   sin costes (R bruto) | 547 | 27.2 % | +0.022 | +11.9 | 1.05 | -20.4 | +0.43 |
 |   largos | 292 | 31.8 % | +0.042 | +12.2 | 1.08 | -13.1 | +0.58 |
 |   cortos | 255 | 22.0 % | -0.174 | -44.3 | 0.68 | -47.5 | -2.50 |
 | M3 · 3. primera vela sin mecha | 731 | 33.5 % | -0.033 | -24.3 | 0.93 | -42.7 | -0.81 |
-|   2018-2022 | 411 | 34.1 % | -0.023 | -9.5 | 0.95 | -33.9 | -0.42 |
+|   hasta 2022 | 411 | 34.1 % | -0.023 | -9.5 | 0.95 | -33.9 | -0.42 |
 |   2023 en adelante | 320 | 32.8 % | -0.046 | -14.8 | 0.90 | -28.4 | -0.75 |
 |   sin costes (R bruto) | 731 | 33.7 % | +0.017 | +12.6 | 1.04 | -23.4 | +0.42 |
 |   largos | 411 | 36.3 % | +0.018 | +7.5 | 1.04 | -17.2 | +0.34 |
 |   cortos | 320 | 30.0 % | -0.099 | -31.8 | 0.81 | -41.5 | -1.57 |
 
-## Control: NAS100 de MetaQuotes
+## Control: NAS100 (USTEC) de MetaQuotes
 
 |  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | M5 · 1. vela siguiente al CISD | 493 | 26.8 % | -0.101 | -49.6 | 0.80 | -57.8 | -1.98 |
+|   hasta 2022 | 65 | 24.6 % | -0.135 | -8.8 | 0.73 | -10.7 | -1.01 |
+|   2023 en adelante | 428 | 27.1 % | -0.095 | -40.9 | 0.82 | -54.6 | -1.74 |
 | M5 · 2. retesteo del iFVG | 266 | 23.7 % | -0.139 | -37.0 | 0.74 | -51.6 | -2.02 |
+|   hasta 2022 | 37 | 45.9 % | +0.303 | +11.2 | 1.62 | -4.3 | +1.32 |
+|   2023 en adelante | 229 | 20.1 % | -0.211 | -48.2 | 0.61 | -50.8 | -3.01 |
 | M5 · 3. primera vela sin mecha | 288 | 29.5 % | -0.100 | -28.8 | 0.78 | -31.2 | -1.65 |
+|   hasta 2022 | 45 | 26.7 % | -0.096 | -4.3 | 0.80 | -8.6 | -0.59 |
+|   2023 en adelante | 243 | 30.0 % | -0.101 | -24.5 | 0.77 | -24.9 | -1.54 |
 | M3 · 1. vela siguiente al CISD | 530 | 27.0 % | -0.078 | -41.1 | 0.85 | -51.0 | -1.57 |
+|   hasta 2022 | 68 | 27.9 % | +0.031 | +2.1 | 1.07 | -7.7 | +0.23 |
+|   2023 en adelante | 462 | 26.8 % | -0.094 | -43.3 | 0.82 | -47.4 | -1.76 |
 | M3 · 2. retesteo del iFVG | 244 | 20.1 % | -0.169 | -41.2 | 0.68 | -51.0 | -2.38 |
+|   hasta 2022 | 32 | 28.1 % | +0.115 | +3.7 | 1.31 | -3.8 | +0.57 |
+|   2023 en adelante | 212 | 18.9 % | -0.212 | -44.9 | 0.62 | -51.0 | -2.80 |
 | M3 · 3. primera vela sin mecha | 341 | 30.8 % | -0.103 | -35.0 | 0.78 | -45.2 | -1.79 |
+|   hasta 2022 | 54 | 38.9 % | -0.045 | -2.4 | 0.90 | -8.9 | -0.30 |
+|   2023 en adelante | 287 | 29.3 % | -0.113 | -32.5 | 0.76 | -36.3 | -1.83 |
 
 ## Cómo terminan y riesgo (NAS100 de PUPrime)
 
