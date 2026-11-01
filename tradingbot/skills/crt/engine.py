@@ -120,7 +120,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
                     x0 = int(np.searchsorted(B["ts"], f["formed"][q], "left"))
                     x1 = int(np.searchsorted(B["ts"], t0, "left"))
                     if x1 <= x0 or B["high"][x0:x1].max() < f["bottom"][q]:     # sin mitigar
-                        zones.append((m, float(f["bottom"][q]), float(f["top"][q])))
+                        zones.append((m, float(f["bottom"][q]), float(f["top"][q]), int(f["formed"][q])))
             if not zones:
                 continue
             funnel["con FVG de MTF sin mitigar al alcance"] += 1
@@ -166,7 +166,9 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
                     trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": float(hx), "level": float(level),
                             "z_bottom": float(hi_[kf - 2]), "z_top": float(lo_[kf]),
                             "mtf": "/".join(sorted({f"M{z[0]}" for z in hit}, key=lambda x: int(x[1:]))),
-                            "inside": bool(c1l <= H["close"][i] <= c1h)}
+                            "inside": bool(c1l <= H["close"][i] <= c1h),
+                            # detalle para dibujar la operación (índices sobre las velas `ltf`; zonas en el espacio del corto)
+                            "s0": s0, "kf": kf, "m_inv": m_inv, "seq": (st, e), "c1": (c1l, c1h), "zones": hit}
                     break
             funnel["con el extremo tocando el FVG"] += hit_ever
             funnel["con iFVG"] += inv_ever
