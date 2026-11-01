@@ -9,7 +9,8 @@ que la ventana funcione sin MT5 ni la carpeta `analisis/` y pueda recalcularlo t
 Comprueba que las cifras que calcula la ventana coinciden con la hoja Resumen de cada Excel (el drawdown puede variar unas
 décimas de R por el orden entre operaciones que cierran en la misma vela).
 
-Cada perfil (puprime, metaquotes) y Calendario son un «perfil» en la ventana Backtest: se elige arriba, antes de los mercados.
+Cada perfil (puprime, metaquotes), Calendario y CRT son un «perfil» en la ventana Backtest: se elige arriba, antes de los mercados.
+Los grupos de CRT (Índices y Forex) los escribe scripts/exportar_backtest_crt.py; este script los conserva tal como están.
 
 Uso (desde la raíz del proyecto, después de regenerar los backtests):
     uv run --with openpyxl python scripts/exportar_backtest.py
@@ -218,6 +219,12 @@ def main() -> None:
                               "notas_mercado": {r["mercado"]: r["nota"] for r in bot if r.get("nota")}}
     if not out["grupos"]:
         raise SystemExit(f"No hay backtests en {args.analisis}: ejecuta antes scripts/backtest_patrones.py")
+    if args.salida.exists():                                           # los grupos CRT no salen de analisis/*.xlsx: se conservan
+        kept = [g for g in json.loads(gzip.decompress(args.salida.read_bytes()).decode("utf-8")).get("grupos", [])
+                if g.get("perfil") == "crt"]                           # (se regeneran con scripts/exportar_backtest_crt.py)
+        out["grupos"].extend(kept)
+        if kept:
+            print(f"  conservados {len(kept)} grupos CRT del fichero actual")
     args.salida.parent.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     args.salida.write_bytes(gzip.compress(raw, 9, mtime=0))

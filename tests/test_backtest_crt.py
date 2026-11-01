@@ -1,0 +1,100 @@
+"""Grupos CRT de la ventana Backtest: filtros por TF del FVG (MTF), LTF y modelo de entrada, zonas TBR y botones."""
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+from tradingbot.skills.stats.backtest import CRT_ZONES, Group, load                  # noqa: E402
+
+DAY = 1440
+
+
+def raw_group() -> dict:
+    """Seis operaciones CRT a mano: mercado (m), LTF (l), entrada (n), FVG de MTF tocados (t: 1 M15, 2 M30, 4 H1), TBR (z), R neto (r)."""
+    e0 = int(pd.Timestamp("2025-03-03 03:00").value // 10**9 // 60)               # minutos desde 1970 (hora NY)
+    n = 6
+    return {"key": "crt:indices", "nombre": "Índices", "tipo": "crt", "perfil": "crt", "perfil_nombre": "CRT",
+            "cats": {"m": ["NAS100.s", "SP500.s"], "o": ["objetivo", "stop", "breakeven", "tiempo"], "z": list(CRT_ZONES), "p": ["CRT"]},
+            "patrones": ["CRT"], "filtros": {"5:1": "M5 · 1", "5:2": "M5 · 2", "3:1": "M3 · 1"},
+            "ops": {"m": [0, 0, 1, 1, 0, 1], "l": [5, 5, 5, 3, 5, 5], "n": [1, 1, 1, 1, 2, 1], "t": [1, 2, 4, 1, 3, 1],
+                    "z": [0, 3, 1, 3, 2, 3], "d": [0, 1, 0, 1, 0, 1], "o": [0, 1, 0, 1, 0, 1],
+                    "e": [e0 + i * DAY for i in range(n)], "x": [e0 + i * DAY + 60 for i in range(n)],
+                    "r": [1.9, -1.0, 1.9, -1.0, 1.9, -1.0], "k": [0.1] * n, "rk": [0.2] * n, "v": [10] * n},
+            "datos": [{"mercado": "NAS100.s · M5", "velas M15": 100, "desde (NY)": "2018-09-10", "hasta (NY)": "2026-10-30"},
+                      {"mercado": "NAS100.s · M1", "velas M15": 100, "desde (NY)": "2024-01-04", "hasta (NY)": "2026-10-30"}]}
+
+
+def test_el_grupo_crt_filtra_por_ltf_entrada_y_tf_del_fvg():
+    g = Group("crt:indices", "Índices", raw_group())
+    assert g.is_crt and not g.is_calendar
+    n = lambda **kw: len(g.view("CRT", "5:1", crt=(kw.get("mtf", 0), kw.get("ltf", 5), kw.get("entry", 1))).main)        # noqa: E731
+    assert n() == 4                                   # M5, entrada 1: operaciones 0, 1, 2 y 5
+    assert n(ltf=3) == 1 and n(entry=2) == 1
+    assert n(mtf=15) == 2 and n(mtf=30) == 1 and n(mtf=60) == 1                      # FVG tocado en M15 (ops. 0 y 5), M30 (op. 1) y H1 (op. 2)
+    assert g.crt_mask(15, 5, 2).sum() == 1                                           # la op. 4 toca M15 y M30 (máscara 3)
+    assert g.crt_mask(30, 5, 2).sum() == 1 and g.crt_mask(60, 5, 2).sum() == 0
+
+
+def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos():
+    g = Group("crt:indices", "Índices", raw_group())
+    v = g.view("CRT", "5:1", crt=(0, 5, 1))
+    zones = {k: o.stats().get("n", 0) for k, o in v.zones}
+    assert zones == {"Asia": 1, "London": 1, "NY Open": 0, "Fuera de TBR": 1 + 1, "Dentro de alguna TBR": 2, "Todas": 4}
+    assert sum(zones[z] for z in CRT_ZONES) == zones["Todas"]                        # no se pierde ninguna operación
+    assert [k for k, _ in v.extra["mtf"]] == ["M15", "M30", "H1"]
+    assert [k for k, _ in v.filters] == ["5:1", "5:2", "3:1"]
+    assert v.main.stats()["total"] == pytest.approx(1.9 - 1.0 + 1.9 - 1.0)
+    assert sorted(m for m, _ in v.markets) == ["NAS100.s", "SP500.s"]
+    assert g.dates_of(1) == ("2024-01-04", "2026-10-30") and g.period_of(5) == "2018-2026"
+
+
+def test_zona_tbr_de_la_hora_de_entrada():
+    import exportar_backtest_crt as ex
+    hours = pd.to_datetime(["2025-03-03 21:00", "2025-03-03 00:00", "2025-03-03 03:30", "2025-03-03 04:59", "2025-03-03 05:00",
+                            "2025-03-03 10:00", "2025-03-03 11:59", "2025-03-03 12:00", "2025-03-03 19:59"])
+    got = ex.tbr_zone(pd.Series(hours)).tolist()
+    assert got == ["Asia", "Fuera de TBR", "London", "London", "Fuera de TBR", "NY Open", "NY Open", "Fuera de TBR", "Fuera de TBR"]
+    assert ex.mtf_bits("M15/M60") == 5 and ex.mtf_bits("M30") == 2
+
+
+def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.ui.backtest_dialog import BacktestDialog
+    QApplication.instance() or QApplication([])
+    bt = load()
+    assert bt.group("crt:indices") is not None and bt.group("crt:forex") is not None
+    dlg = BacktestDialog(None, bt)
+    dlg.set_group("crt:indices")
+    assert dlg.profile_key == "crt" and list(dlg.group_btns) == ["crt:indices", "crt:forex"]
+    assert dlg.pattern_labelled.itemAt(0).widget().isHidden() and not dlg.crt_layouts[0].itemAt(0).widget().isHidden()
+    assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 5, 1)
+    g = bt.group("crt:indices")
+    first = dlg.blocks["n"].value.text()
+    assert first != "-" and len(dlg.by_filter.rows) == 9 and len(dlg.by_mtf.rows) == 3
+    assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
+    for ltf in (5, 3, 1):                                                           # los 3 LTF y los 3 modelos de entrada se pintan
+        dlg.set_crt_ltf(ltf)
+        for entry in (1, 2, 3):
+            dlg.set_crt_entry(entry)
+            n = len(g.view("CRT", "", crt=dlg.crt).main)
+            assert n and dlg.blocks["n"].value.text().replace(".", "") == str(n)
+            assert dlg.crt_btns["ltf"][str(ltf)].isChecked() and dlg.crt_btns["entry"][str(entry)].isChecked()
+    dlg.set_crt_ltf(5)
+    dlg.set_crt_entry(1)
+    dlg.set_crt_mtf(15)                                                             # solo los FVG de M15
+    assert dlg.crt_btns["mtf"]["15"].isChecked() and len(g.view("CRT", "", crt=dlg.crt).main) < len(g.view("CRT", "", crt=(0, 5, 1)).main)
+    dlg.set_group("crt:forex")                                                      # otro grupo de mercados: se queda la selección
+    assert dlg.crt_mtf == 15 and dlg.group_key == "crt:forex" and dlg.compare.rows
+    assert "EURUSD" in "".join(r[0].text() for r in dlg.by_market.rows)
+    dlg.by_year.click(2024)
+    assert dlg.years == {2024} and dlg.blocks["n"].value.text() != "-"
+    dlg.set_group("puprime:indices")                                                # los patrones vuelven con sus botones
+    assert not dlg.pattern_labelled.itemAt(0).widget().isHidden() and dlg.crt_layouts[0].itemAt(0).widget().isHidden()
+    assert dlg.profile_key == "puprime" and dlg.by_mtf.isHidden() and dlg.crt_funnel.isHidden()

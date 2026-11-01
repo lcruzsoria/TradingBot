@@ -30,8 +30,15 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
+# CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3) y t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
+CRT_MTF_BITS = {15: 1, 30: 2, 60: 4}
+CRT_MTF_NAMES = {0: "Todos", 15: "M15", 30: "M30", 60: "H1"}
+CRT_LTFS = (5, 3, 1)
+CRT_ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha"}
+CRT_ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
+CRT_DEFAULT = (0, 5, 1)                             # (TF del FVG: 0 = todos, LTF, entrada)
 # Sensibilidad de los patrones: columna de cada operación -> variante
 SENSITIVITY = (("tp1", "objetivo 1R"), ("tp15", "objetivo 1.5R"), ("tp2", "objetivo 2R"), ("tp25", "objetivo 2.5R"),
                ("tp3", "objetivo 3R"), ("h12", "objetivo 2R, máx. 12 h"), ("r", "objetivo 2R, máx. 24 h"),
@@ -159,6 +166,7 @@ class View:
     halves: list
     sensitivity: list               # [(variante, R neto por operación)]
     outcomes: list                  # [(patrón, operaciones)]
+    extra: dict = field(default_factory=dict)       # CRT: {"mtf": [(TF del FVG, operaciones)]}
 
 
 @dataclass
@@ -208,6 +216,20 @@ class Group:
         starts, ends = [s for s in starts if s], [e for e in ends if e]
         return (min(starts), max(ends)) if starts and ends else ("", "")
 
+    def dates_of(self, ltf: int | None = None) -> tuple[str, str]:
+        """Como `dates`, pero en CRT solo de las velas del LTF (M5, M3 o M1) elegido: M1 llega mucho menos atrás."""
+        if ltf is None or not self.is_crt:
+            return self.dates
+        rows = [m for m in self.markets if str(m.get("mercado") or "").endswith(f"M{ltf}")]
+        starts = [str(m.get("desde (NY)") or "")[:10] for m in rows]
+        ends = [str(m.get("hasta (NY)") or "")[:10] for m in rows]
+        starts, ends = [x for x in starts if x], [x for x in ends if x]
+        return (min(starts), max(ends)) if starts and ends else ("", "")
+
+    def period_of(self, ltf: int | None = None) -> str:
+        start, end = self.dates_of(ltf)
+        return f"{start[:4]}-{end[:4]}" if start else "-"
+
     @property
     def period(self) -> str:
         """«2018-2026» con el primer y el último año de datos de sus mercados."""
@@ -231,6 +253,10 @@ class Group:
     def is_calendar(self) -> bool:
         return self.raw.get("tipo") == "calendario"
 
+    @property
+    def is_crt(self) -> bool:
+        return self.raw.get("tipo") == "crt"
+
     # -- selección ---------------------------------------------------------------------------
     @staticmethod
     def _in(values: np.ndarray, chosen) -> np.ndarray:
@@ -241,6 +267,8 @@ class Group:
         ops = ops or self.ops
         if self.is_calendar:
             return np.isin(ops.names("m"), self.raw["alcance"][filt])
+        if self.is_crt:                                       # CRT no usa sesgo ni solapes: sus filtros son el LTF y la entrada
+            return np.ones(len(ops), dtype=bool)
         s, flags = ops.names("s"), ops["f"]
         mask = {"sin filtro de sesgo": np.ones(len(ops), dtype=bool),
                 "a favor del sesgo (Cortex)": s == "a favor",
@@ -252,10 +280,52 @@ class Group:
             mask &= ops.names("p") == pattern
         return mask
 
-    def view(self, pattern: str, filt: str, years=(), hours=(), days=(), months=()) -> View:
+    def view(self, pattern: str, filt: str, years=(), hours=(), days=(), months=(), crt: tuple | None = None) -> View:
         if self.is_calendar:
             return self._calendar_view(filt, years, hours, days, months)
+        if self.is_crt:
+            return self._crt_view(years, hours, days, months, crt or CRT_DEFAULT)
         return self._pattern_view(pattern, filt, years, hours, days, months)
+
+    def crt_mask(self, mtf: int, ltf: int, entry: int, ops: Ops | None = None) -> np.ndarray:
+        """Operaciones CRT de un LTF y una entrada, y (mtf != 0) con un FVG de ese timeframe de MTF tocado por el extremo del sweep."""
+        ops = ops or self.ops
+        mask = (ops["l"] == ltf) & (ops["n"] == entry)
+        if mtf:
+            mask &= (ops["t"] & CRT_MTF_BITS[mtf]) != 0
+        return mask
+
+    def _crt_view(self, years, hours, days, months, crt: tuple) -> View:
+        """CRT: una entrada y un LTF a la vez (si no, la misma operación contaría varias veces); el timeframe del FVG filtra."""
+        mtf, ltf, entry = crt
+        ops = self.ops
+        y, h = self._in(ops.year, years), self._in(ops.hour, hours)
+        d, mo = self._in(ops.weekday, days), self._in(ops.month, months)
+        chosen = y & h & d & mo
+        base = self.crt_mask(mtf, ltf, entry)
+        main = ops.take(base & chosen)
+        inside = main.take(main.names("z") != CRT_ZONES[-1])
+        zones = main.split(main.names("z"), list(CRT_ZONES)) + [("Dentro de alguna TBR", inside), ("Todas", main)]
+        no_mtf = self.crt_mask(0, ltf, entry) & chosen
+        mtf_rows = [(CRT_MTF_NAMES[tf], ops.take(no_mtf & ((ops["t"] & bit) != 0))) for tf, bit in CRT_MTF_BITS.items()]
+        combos = {}
+        for key in self.all_filters:
+            lt, en = (int(x) for x in key.split(":"))
+            combos[key] = ops.take(self.crt_mask(mtf, lt, en) & chosen)
+        return View(
+            main=main,
+            years=self._split(ops, base & h & d & mo, "year"),
+            hours=self._split(ops, base & y & d & mo, "hour"),
+            months=self._split(ops, base & y & h & d, "month"),
+            markets=main.split(main.names("m")),
+            zones=zones,
+            sides=main.split(main["d"], [0, 1]),
+            filters=list(combos.items()),
+            days=self._split(ops, base & y & h & mo, "weekday", list(range(7))),
+            halves=main.halves(),
+            sensitivity=[("Sin costes (R bruto)", main["r"] + main["k"])],
+            outcomes=[("CRT", main)],
+            extra={"mtf": mtf_rows})
 
     @staticmethod
     def _split(ops: Ops, mask, key: str, order: list | None = None) -> list:
@@ -350,7 +420,7 @@ class Backtest:
         año, la hora, el día y el mes elegidos."""
         out = []
         for g in self.groups:
-            if g.is_calendar or (profile is not None and g.profile != profile):
+            if g.is_calendar or g.is_crt or (profile is not None and g.profile != profile):
                 continue
             ops = g.ops
             sel = (g.filter_mask("Ambos", filt) & g._in(ops.year, years) & g._in(ops.hour, hours)
@@ -359,6 +429,22 @@ class Backtest:
             names = ops.names("m")
             for m in dict.fromkeys(names.tolist()):
                 out.append((m, g.name, chosen.take(chosen.names("m") == m)))
+        return out
+
+    def compare_crt(self, profile: str, crt: tuple, years=(), hours=(), days=(), months=()) -> list[tuple[str, str, Ops]]:
+        """(mercado, grupo, operaciones) de todos los mercados CRT del perfil con el TF del FVG, el LTF y la entrada elegidos."""
+        out = []
+        for g in self.groups_of(profile):
+            if not g.is_crt:
+                continue
+            ops = g.ops
+            mtf, ltf, entry = crt
+            sel = (g.crt_mask(mtf, ltf, entry) & g._in(ops.year, years) & g._in(ops.hour, hours)
+                   & g._in(ops.weekday, days) & g._in(ops.month, months))
+            chosen = ops.take(sel)
+            names = chosen.names("m")
+            for m in ops.cats["m"]:
+                out.append((m, g.name, chosen.take(names == m)))
         return out
 
     def note(self, market: str) -> str:

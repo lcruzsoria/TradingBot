@@ -114,7 +114,7 @@ class StatsSkill(Skill):
         elif s.open:
             self.set_caption(f"{len(s.open)} abierta(s)")
         elif self.backtest is not None:
-            bot = sum(int(g.filter_mask("Ambos", BOT_FILTER).sum()) for g in self.backtest.groups if not g.is_calendar)
+            bot = sum(int(g.filter_mask("Ambos", BOT_FILTER).sum()) for g in self.backtest.groups if not g.is_calendar and not g.is_crt)
             self.set_caption(f"backtest: {bot:,} ops".replace(",", "."))
         else:
             self.set_caption("sin backtest")

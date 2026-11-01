@@ -107,6 +107,7 @@ class Book(QFrame):
         head = QHBoxLayout()
         t = QLabel(title.upper())
         t.setObjectName("BookTitle")
+        self.title_label = t
         n = QLabel(note)
         n.setObjectName("CardNote")
         head.addWidget(t)
