@@ -38,6 +38,7 @@ class Rule:
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
     wait_c2: bool = False                                # sin look-ahead: espera al cierre de C2 y busca el CISD hasta el final de C3
     rr: float = 2.0
+    target_c1: bool = False                               # objetivo en el extremo opuesto de C1 (cortos: su mínimo) en vez de rr veces el riesgo
     be_at: float = 1.0                                   # el stop pasa a la entrada al llegar a este R (0 = sin BE)
 
 
@@ -207,7 +208,9 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
         risk0 = hx - zb
         if risk0 <= 0:
             return None
-        target0, cont, k, start = zb - rule.rr * risk0, False, jc + 1, None
+        target0, cont, k, start = (st["c1"][0] if rule.target_c1 else zb - rule.rr * risk0), False, jc + 1, None
+        if target0 >= zb:                                 # el extremo de C1 queda por encima de la entrada: no hay objetivo válido
+            return None
         while k < n and ts[k] < end and ts[k] - ts[k - 1] <= 2 * step:
             if cont and h[k] >= zb:
                 entry, start, fill = max(zb, o[k]), k, k
@@ -240,11 +243,13 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
     return {"entry": float(entry), "start": int(start), "fill": fill, "risk": float(risk), "end": int(end)}
 
 
-def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict:
+def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict | None:
     """Gestión de una entrada con las velas dadas: stop, objetivo, BE y cierre de sesión. Devuelve la fila del backtest."""
     ts, h, l, c, sp = L["ts"], L["high"], L["low"], L["close"], L["spread"]
     n, hx, entry, risk, start, fill, end = len(ts), st["stop"], ep["entry"], ep["risk"], ep["start"], ep["fill"], ep["end"]
-    target = entry - rule.rr * risk
+    target = st["c1"][0] if rule.target_c1 else entry - rule.rr * risk
+    if target >= entry:                                   # objetivo en C1 ya alcanzado o por encima de la entrada: no se opera
+        return None
     cur_stop, how, exit_price, j = hx, None, None, start
     while j < n:
         if ts[j] >= end:

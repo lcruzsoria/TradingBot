@@ -18,8 +18,8 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
-from ..skills.stats.backtest import (BOT_FILTER, CRT_DEFAULT, CRT_ENTRIES, CRT_LTFS, CRT_MTF_NAMES, DAYS, MAIN_FILTERS, MONTHS,
-                                     PATTERNS, Backtest, Group, Ops, summarize, verdict)
+from ..skills.stats.backtest import (BOT_FILTER, CRT_DEFAULT, CRT_ENTRIES, CRT_LTFS, CRT_MTF_NAMES, CRT_NEAR, CRT_TARGETS, CRT_TBR,
+                                     DAYS, MAIN_FILTERS, MONTHS, PATTERNS, Backtest, Group, Ops, summarize, verdict)
 from . import theme
 from .fmt import miles
 from .stats_dialog import Book, Tile
@@ -232,7 +232,8 @@ class BacktestDialog(QDialog):
         self.hours: set[int] = set()
         self.months: set[int] = set()                # 1 enero ... 12 diciembre
         self.days: set[int] = set()                  # 0 lunes ... 6 domingo
-        self.crt_mtf, self.crt_ltf, self.crt_entry = CRT_DEFAULT      # CRT: TF del FVG (0 = todos), LTF y modelo de entrada
+        (self.crt_mtf, self.crt_ltf, self.crt_entry, self.crt_tbr, self.crt_near,
+         self.crt_target) = CRT_DEFAULT          # CRT: TF del FVG (0 = todos), LTF, entrada, TBR, hora y objetivo
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
@@ -287,10 +288,12 @@ class BacktestDialog(QDialog):
         outer.addLayout(self.pattern_labelled)
         self._chips_for = ""                                                    # grupo para el que están hechos los chips
         # CRT: en qué TF se produce el FVG (MTF), en cuál el iFVG + CISD (LTF) y qué modelo de entrada se usa
-        self.crt_rows = {"mtf": QHBoxLayout(), "ltf": QHBoxLayout(), "entry": QHBoxLayout()}
+        self.crt_rows = {"mtf": QHBoxLayout(), "ltf": QHBoxLayout(), "entry": QHBoxLayout(), "target": QHBoxLayout(), "tbr": QHBoxLayout(),
+                         "near": QHBoxLayout()}
         self.crt_btns: dict[str, dict[str, QPushButton]] = {}
         self.crt_layouts = []
-        for key, label in (("mtf", "FVG MTF"), ("ltf", "LTF"), ("entry", "Entrada")):
+        for key, label in (("mtf", "FVG MTF"), ("ltf", "LTF"), ("entry", "Entrada"), ("target", "Objetivo"), ("tbr", "TBR"),
+                           ("near", "Hora")):
             self.crt_rows[key].setSpacing(6)
             self.crt_layouts.append(self._labelled(label, self.crt_rows[key]))
             outer.addLayout(self.crt_layouts[-1])
@@ -373,6 +376,10 @@ class BacktestDialog(QDialog):
         self.by_side = Book("Por lado", "largos contra cortos", ("Lado",) + METRIC_HEADERS)
         self.by_filter = Book("Por filtro", "el mismo patrón con cada filtro del backtest", ("Filtro",) + METRIC_HEADERS)
         self.by_mtf = Book("Por TF del FVG (MTF)", "una operación cuenta en cada TF cuyo FVG toca la mecha", ("TF",) + METRIC_HEADERS)
+        self.by_near = Book("Por cercanía a la hora en punto", "entradas a ±15 min de una hora exacta, dentro y fuera de TBR",
+                            ("Entrada",) + METRIC_HEADERS)
+        self.by_round = Book("Por hora en punto (±15 min)", "03:00 = de 02:45 a 03:15 · solo las horas con operaciones",
+                             ("Hora",) + METRIC_HEADERS)
         self.crt_funnel = Book("Embudo CRT", "de los sweeps de H3 / H4 a las entradas, por mercado y LTF",
                                ("Mercado · LTF", "Sweeps", "FVG sin mitigar", "Mecha toca FVG", "iFVG", "CISD", "Entrada 1", "Entrada 2",
                                 "Entrada 3"))
@@ -387,7 +394,7 @@ class BacktestDialog(QDialog):
         self.outcomes = Book("Cómo terminan", "", ("Patrón", "Objetivo", "Stop", "Breakeven", "Tiempo", "MAE", "MFE",
                                                    "Velas", "Riesgo %", "Coste"))
         self.data_book = Book("Datos", "velas M15 de MT5 usadas", ("Mercado", "Velas", "Desde", "Hasta", "TBR"))
-        for book in (self.by_year, self.by_month, self.by_weekday, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter, self.by_mtf,
+        for book in (self.by_year, self.by_month, self.by_weekday, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter, self.by_mtf, self.by_near, self.by_round,
                      self.by_day, self.halves, self.sensitivity, self.outcomes, self.improvements, self.funnel, self.crt_funnel, self.data_book):
             lay.addWidget(book)
         self.method = Book("Metodología", "cómo se hizo", ())
@@ -453,7 +460,14 @@ class BacktestDialog(QDialog):
                   "TF donde aparece el iFVG y el CISD, y en el que se entra"),
                  ("entry", [str(k) for k in CRT_ENTRIES], self.set_crt_entry, str(self.crt_entry),
                   {str(k): f"{k} · {v}" for k, v in CRT_ENTRIES.items()},
-                  "Modelo de entrada: cierre del CISD, retesteo del iFVG o primera vela sin mecha"))
+                  "Modelo de entrada: cierre del CISD, retesteo del iFVG o primera vela sin mecha"),
+                 ("target", [str(k) for k in CRT_TARGETS], self.set_crt_target, str(self.crt_target),
+                  {str(k): v for k, v in CRT_TARGETS.items()},
+                  "Objetivo: 1R, 2R (el del bot, con BE a 1R) o el extremo opuesto de C1. Cada uno es su propio backtest"),
+                 ("tbr", list(CRT_TBR), self.set_crt_tbr, self.crt_tbr, {},
+                  "TBR en cuyo horario cae la hora de entrada (Asia 20-00, London 02-05, NY Open 10-12 NY)"),
+                 ("near", list(CRT_NEAR), self.set_crt_near, self.crt_near, {},
+                  "Entradas a 15 min o menos de una hora en punto (03:00 vale de 02:45 a 03:15) o el resto"))
         for key, keys, slot, current, names, hint in specs:
             row = self.crt_rows[key]
             self.crt_btns[key] = self._chips(row, keys, slot, current, names)
@@ -636,9 +650,21 @@ class BacktestDialog(QDialog):
         self.crt_entry = int(key)
         self.refresh()
 
+    def set_crt_target(self, key) -> None:
+        self.crt_target = int(key)
+        self.refresh()
+
+    def set_crt_tbr(self, key) -> None:
+        self.crt_tbr = str(key)
+        self.refresh()
+
+    def set_crt_near(self, key) -> None:
+        self.crt_near = str(key)
+        self.refresh()
+
     @property
-    def crt(self) -> tuple[int, int, int]:
-        return self.crt_mtf, self.crt_ltf, self.crt_entry
+    def crt(self) -> tuple:
+        return self.crt_mtf, self.crt_ltf, self.crt_entry, self.crt_tbr, self.crt_near, self.crt_target
 
     def set_pattern(self, pattern: str) -> None:
         self.pattern = pattern
@@ -706,7 +732,8 @@ class BacktestDialog(QDialog):
         self._show_layout(self.pattern_labelled, not crt)
         for layout in self.crt_layouts:
             self._show_layout(layout, crt)
-        for key, current in (('mtf', self.crt_mtf), ('ltf', self.crt_ltf), ('entry', self.crt_entry)):
+        for key, current in (('mtf', self.crt_mtf), ('ltf', self.crt_ltf), ('entry', self.crt_entry), ('target', self.crt_target),
+                             ('tbr', self.crt_tbr), ('near', self.crt_near)):
             for k, btn in self.crt_btns[key].items():
                 btn.setChecked(k == str(current))
         if not crt and self._chips_for != g.key:
@@ -720,7 +747,7 @@ class BacktestDialog(QDialog):
             btn.setChecked(key == self.pattern)
         for key, btn in self.filter_btns.items():
             btn.setChecked(key == self.filter)
-        self.subtitle.setText(g.description)
+        self.subtitle.setText(g.description + (f" · objetivo {CRT_TARGETS[self.crt_target]}" if crt else ""))
         start, end = g.dates_of(self.crt_ltf)
         span = f"{_date(start)} – {_date(end)}" if start else g.period_of(self.crt_ltf)
         self.generated.setText(f"{span} · actualizado {g.updated}" if g.updated else span)
@@ -739,6 +766,8 @@ class BacktestDialog(QDialog):
         self._fill_ops(self.by_filter, view.filters,
                        lambda k: f"<b>{g.all_filters.get(k, k)}</b>" if k == mine else g.all_filters.get(k, k))
         self._fill_ops(self.by_mtf, view.extra.get('mtf', []))
+        self._fill_ops(self.by_near, view.extra.get('cercania', []))
+        self._fill_ops(self.by_round, view.extra.get('horas', []))
         self._fill_ops(self.by_day, view.days, lambda k: DAYS[k].capitalize())
         self._fill_ops(self.halves, view.halves)
         self._fill_rows(self.sensitivity, [(label, summarize(_clean(net))) for label, net in view.sensitivity])
@@ -749,12 +778,14 @@ class BacktestDialog(QDialog):
         self.method_text.setText("<br>".join(f"<b>{t}</b>: {e}" for t, e in g.table("metodologia")))
         cal = g.is_calendar
         self.by_mtf.setVisible(crt)
+        self.by_near.setVisible(crt)
+        self.by_round.setVisible(crt)
         self.crt_funnel.setVisible(crt)
         self._fill_crt_funnel(g)
         self.by_filter.title_label.setText(('Por LTF y entrada' if crt else 'Por filtro').upper())
         self.by_filter.note.setText('las 9 combinaciones, con los mismos mercados, TF del FVG y selección' if crt else
                                     'el mismo patrón con cada filtro del backtest')
-        self.by_zone.note.setText('la TBR en cuyo horario cae la entrada (Asia 20-00, London 02-05, NY Open 10-12 NY) o ninguna' if crt else
+        self.by_zone.note.setText('la TBR en cuyo horario cae la entrada (Asia 20-00, London 02-05, NY Open 10-12 NY) o ninguna · sin el filtro de TBR' if crt else
                                   'la TBR donde se dio la entrada')
         self.by_zone.setVisible(not cal)
         self.funnel.setVisible(bool(g.table("embudo")))
@@ -834,7 +865,12 @@ class BacktestDialog(QDialog):
         per_100 = f"{(r.get('mean') or 0) * 100:+.1f} R cada 100 operaciones"
         filt = g.all_filters.get(self.filter, self.filter)
         if g.is_crt:
-            where = f"CRT {g.name.lower()}, FVG {CRT_MTF_NAMES[self.crt_mtf]}, M{self.crt_ltf}, entrada {self.crt_entry} ({CRT_ENTRIES[self.crt_entry]})"
+            where = (f"CRT {g.name.lower()}, FVG {CRT_MTF_NAMES[self.crt_mtf]}, M{self.crt_ltf}, entrada {self.crt_entry} "
+                     f"({CRT_ENTRIES[self.crt_entry]}), objetivo {CRT_TARGETS[self.crt_target]}")
+            if self.crt_tbr != CRT_TBR[0]:
+                where += f", {self.crt_tbr}"
+            if self.crt_near != CRT_NEAR[0]:
+                where += f", {self.crt_near.lower()}"
         else:
             where = f"{self.pattern}, {filt if g.is_calendar else filt.lower()}" + ("" if g.is_calendar else f", {g.name.lower()}")
         if self._filtered:
@@ -844,9 +880,13 @@ class BacktestDialog(QDialog):
         b["n"].set_value(miles(int(r["n"])), f"{markets} mercado{'s' if markets != 1 else ''}" +
                          (" · selección" if self._filtered else f" · {g.period_of(self.crt_ltf)}"))
         wr = r.get("wr")
-        b["wr"].set_value("-" if wr is None else f"{wr:.1f} %",
-                          "con R neto positivo" if g.is_calendar else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R",
-                          None if g.is_calendar else theme.BULL if wr and wr > BREAKEVEN_2R + 1 else None)
+        even = {1: 50.0, 2: BREAKEVEN_2R}.get(self.crt_target) if g.is_crt else BREAKEVEN_2R      # acierto de equilibrio con ese objetivo
+        if g.is_crt:
+            hint = f"equilibrio {even:.1f} % con {CRT_TARGETS[self.crt_target]}" if even else "equilibrio según la distancia a C1"
+        else:
+            hint = "con R neto positivo" if g.is_calendar else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R"
+        b["wr"].set_value("-" if wr is None else f"{wr:.1f} %", hint,
+                          None if g.is_calendar or not even else theme.BULL if wr and wr > even + 1 else None)
         b["mean"].set_value(_r(r.get("mean")), f"t {_num(r.get('t'), 2, sign=True)}", _tone(r.get("mean")))
         b["total"].set_value(f"{r['total']:+.0f} R", "suma de todas", _tone(r.get("total")))
         b["pf"].set_value(_num(r.get("pf")), "ganado / perdido", _pf_tone(r.get("pf")))
@@ -923,7 +963,7 @@ class BacktestDialog(QDialog):
             gross = float((ops["r"] + ops["k"]).mean()) if len(ops) else None
             rows.append((market, group_name, s, gross, str(int(ops.year.min())) if g.is_crt and len(ops) else since.get(market, "")))
         rows.sort(key=lambda x: -(x[2].get("mean") if x[2].get("n") else -9))
-        what = (f"FVG {CRT_MTF_NAMES[self.crt_mtf]}, M{self.crt_ltf}, entrada {self.crt_entry}" if g.is_crt
+        what = (f"FVG {CRT_MTF_NAMES[self.crt_mtf]}, M{self.crt_ltf}, entrada {self.crt_entry}, objetivo {CRT_TARGETS[self.crt_target]}, TBR {self.crt_tbr.lower()}, {self.crt_near.lower()}" if g.is_crt
                 else f"{g.all_filters.get(self.filter, self.filter).lower()}, ambos patrones")
         self.compare.note.setText(f"{what} · en negrita, {g.name.lower()}" + (" · filtrado" if self._filtered else ""))
         out = []

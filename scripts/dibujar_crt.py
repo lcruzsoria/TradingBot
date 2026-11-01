@@ -300,7 +300,9 @@ def main() -> None:
     f_bot, f_top = (px(L["high"][kf - 2]), px(L["low"][kf])) if up else (px(L["low"][kf]), px(L["high"][kf - 2]))
     level = px(st["level"])
     base_fvg = f_bot if up else f_top                                                   # la base del FVG que se invierte
-    ch = Chart(bars, a, b, (40, 100, 1120, 500), extra=(entry, hx, target, be, level), pad=0.13)
+    c1x = px(st["c1"][0])                                                              # extremo opuesto de C1: el tercer objetivo posible
+    c1_in_scale = abs(c1x - entry) <= 4 * risk                                         # si está muy lejos no se dibuja (se anota abajo)
+    ch = Chart(bars, a, b, (40, 100, 1120, 500), extra=(entry, hx, target, be, level) + ((c1x,) if c1_in_scale else ()), pad=0.13)
     ch.frame()
     ch.band(sa, se, GREY, 0.2)
     ch.zone(kf - 2, mi + 1, min(f_bot, f_top), max(f_bot, f_top), PURPLE, 0.22)
@@ -311,6 +313,8 @@ def main() -> None:
     ch.hline(entry, start, jx, BLUE, "", 1.8, f"Entrada {entry:,.2f}")
     ch.hline(be, start, jx, AMBER, "5 4", 1.3, f"1R · BE {be:,.2f}")
     ch.hline(target, start, jx, GREEN, "", 1.8, f"TP 2R {target:,.2f}")
+    if c1_in_scale:
+        ch.hline(c1x, start, jx, PURPLE, "2 4", 1.6, f"Extremo C1 {c1x:,.2f}")
     sgn_y = 1 if up else -1                                                             # +1: los textos "bajo la vela" van hacia abajo
     ch.text(ch.X((sa + se) / 2), ch.y0 + (ch.h - 40 if up else 36), f"secuencia {'alcista' if up else 'bajista'}\ndel sweep ({fmt_ny(ts[sa], '%H:%M')}–{fmt_ny(ts[se], '%H:%M')})", MUTED, 12, "700", "middle")
     ch.dot(ih, hx, RED, 6, ring=True)
@@ -352,7 +356,7 @@ def main() -> None:
                                f"A las {fmt_ny(ts[jc], '%H:%M')} una vela cierra {'por debajo' if up else 'por encima'} ({cy:,.2f}): cambio de entrega. "
                                f"Se mide en el mismo TF (M5).", PURPLE),
              ("Paso 5 · entrada y gestión", f"Entrada 1 en M5: a mercado en {entry:,.2f}. Stop en el extremo del sweep ({hx:,.2f}), riesgo {risk:,.2f} pts. "
-                                            f"TP 2R en {target:,.2f}; a 1R ({be:,.2f}) el stop pasa a la entrada. "
+                                            f"Objetivos posibles: 1R {be:,.2f}, 2R {target:,.2f} y extremo de C1 {c1x:,.2f} ({abs(entry - c1x) / risk:.1f} R). Con 2R, a 1R el stop pasa a la entrada. "
                                             f"Resultado: {res['cómo']}, {res['gross']:+.2f} R bruto ({res['gross'] - res['cost']:+.2f} R con spread).", BLUE)]
     (out / "3_entrada_ltf.svg").write_text(page("3 · LTF (M5): iFVG, CISD y entrada", head, ch, cards, 840), encoding="utf-8")
     print(f"escritos en {out}")

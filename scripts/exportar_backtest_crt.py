@@ -38,6 +38,8 @@ TRADES = ROOT / "analisis" / "crt_operaciones.pkl"
 PROFILE, PROFILE_NAME = "crt", "CRT"
 LTFS = (5, 3, 1)
 ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha"}
+# Objetivos: código -> (nombre, regla). 1R sin BE; 2R con BE a 1R (el del bot); extremo opuesto de C1 con BE a 1R
+TARGETS = {1: ("1R", engine.Rule(rr=1.0, be_at=0.0)), 2: ("2R", engine.Rule()), 3: ("Extremo de C1", engine.Rule(target_c1=True))}
 GROUPS = {"indices": ("Índices", [("puprime", "NAS100"), ("puprime", "SP500"), ("puprime", "DJ30")]),
           "forex": ("Forex", [("puprime", "EURUSD"), ("puprime", "GBPUSD")])}
 ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
@@ -55,6 +57,12 @@ def tbr_zone(ts: pd.Series) -> pd.Series:
     for name, a, b in TBR_HOURS:
         out[(minute >= a) & (minute < b)] = name
     return out
+
+
+def near_hour(ts: pd.Series) -> pd.Series:
+    """Hora en punto (0-23) a la que está pegada la hora de entrada si dista 15 min o menos (03:00 vale de 02:45 a 03:15); si no, -1."""
+    minute, hour = ts.dt.minute, ts.dt.hour
+    return pd.Series(np.where(minute <= 15, hour, np.where(minute >= 45, (hour + 1) % 24, -1)), index=ts.index).astype(int)
 
 
 def mtf_bits(text: str) -> int:
@@ -79,20 +87,20 @@ def simulate() -> pd.DataFrame:
     rows, funnels, data = [], [], []
     for gkey, (gname, symbols) in GROUPS.items():
         bc.configure("indices" if gkey == "indices" else "forex")                    # fija el mercado (H3 / H4 y cierre de sesión)
-        rule = engine.Rule()
         for profile, want in symbols:
             sym, base = pd.read_pickle(bc.cache_path(profile, want, 5))
             for tf in LTFS:
                 _, ltf = pd.read_pickle(bc.cache_path(profile, want, tf))
                 t0 = time.time()
-                setups, funnel = bc.find_setups(base, ltf, tf, rule)
+                setups, funnel = bc.find_setups(base, ltf, tf, engine.Rule())          # los setups no dependen del objetivo
                 row = {"grupo": gkey, "mercado": sym, "ltf": tf, **funnel}
                 for entry in ENTRIES:
-                    t = bc.run_variant(ltf, setups, entry, tf, rule)
-                    row[f"entrada {entry}"] = len(t)
-                    if len(t):
-                        t = t.assign(grupo=gkey, mercado=sym, ltf=tf, entrada_modelo=entry)
-                        rows.append(t)
+                    for code, (_, rule) in TARGETS.items():
+                        t = bc.run_variant(ltf, setups, entry, tf, rule)
+                        if code == 2:
+                            row[f"entrada {entry}"] = len(t)
+                        if len(t):
+                            rows.append(t.assign(grupo=gkey, mercado=sym, ltf=tf, entrada_modelo=entry, objetivo_cod=code))
                 funnels.append(row)
                 data.append({"grupo": gkey, "mercado": sym, "ltf": tf, "velas": len(ltf),
                              "desde": pd.Timestamp(int(ltf["ts"].iloc[0]) - AHEAD, unit="s"),
@@ -130,7 +138,8 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
             "d": (t["dirección"] == "short").astype(int).tolist(),
             "e": minutes(t["entrada (NY)"]), "x": minutes(t["cierre (NY)"]),
             "l": t["ltf"].astype(int).tolist(), "n": t["entrada_modelo"].astype(int).tolist(),
-            "t": t["FVG MTF"].map(mtf_bits).astype(int).tolist(),
+            "t": t["FVG MTF"].map(mtf_bits).astype(int).tolist(), "q": t["objetivo_cod"].astype(int).tolist(),
+            "h": near_hour(pd.to_datetime(t["entrada (NY)"])).tolist(),
             "r": floats(t["R neto"]), "k": floats(t["coste (R)"]), "rk": floats(t["riesgo %"], 3), "v": held.round().astype(int).tolist()}
     combos = {f"{ltf}:{e}": f"M{ltf} · {e}. {name}" for ltf in LTFS for e, name in ENTRIES.items()}
     funnel = saved["embudo"][saved["embudo"]["grupo"] == gkey]
@@ -138,7 +147,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
     return {
         "key": f"{PROFILE}:{gkey}", "nombre": gname, "tipo": "crt", "perfil": PROFILE, "perfil_nombre": PROFILE_NAME,
         "fichero": TRADES.name, "cats": cats, "ops": cols, "patrones": ["CRT"], "filtros": combos, "actualizado": updated,
-        "descripcion": "CRT variante B · sweep H3 (H4 en forex) → FVG de MTF → iFVG + CISD en LTF · objetivo 2R, BE a 1R · spread real",
+        "descripcion": "CRT variante B · sweep H3 (H4 en forex) → FVG de MTF → iFVG + CISD en LTF · stop en el extremo del sweep · spread real",
         "ltf": list(LTFS), "entradas": {str(e): n for e, n in ENTRIES.items()},
         "datos": [{"mercado": f"{r['mercado']} · M{r['ltf']}", "velas M15": int(r["velas"]), "desde (NY)": r["desde"].strftime("%Y-%m-%d"),
                    "hasta (NY)": r["hasta"].strftime("%Y-%m-%d"), "TBR evaluadas": None} for _, r in data.iterrows()],
@@ -161,10 +170,13 @@ def methodology(gkey: str) -> list[list[str]]:
                   "de la secuencia que hizo el sweep (CISD)."],
         ["Entradas", "1: a mercado en la apertura de la vela siguiente a la del CISD. 2: retesteo del iFVG tras una continuación (orden "
                      "límite en su base). 3: primera vela sin mecha tras el CISD, entrando en la siguiente apertura. Cada una es un backtest."],
-        ["Gestión", f"Stop en el extremo del sweep, objetivo 2R, a 1R el stop pasa a la entrada. A las {close} NY no se abren entradas y lo "
+        ["Objetivos", "Tres variantes, cada una con su backtest: 1R (sin BE), 2R (a 1R el stop pasa a la entrada, el que usa el bot) y el "
+                      "extremo opuesto de C1 (también con BE a 1R). Si ese extremo ya está alcanzado o por encima de la entrada, no hay operación."],
+        ["Gestión", f"Stop en el extremo del sweep, objetivo 2R (por defecto), a 1R el stop pasa a la entrada. A las {close} NY no se abren entradas y lo "
                     "abierto se cierra. Una operación a la vez por mercado, entrada y LTF. Stop y objetivo en la misma vela: cuenta el stop."],
         ["TBR", "Una entrada está «dentro de una TBR» si su hora cae en el horario de Asia (20:00-00:00), London (02:00-05:00) o NY Open "
                 "(10:00-12:00), hora de Nueva York; si no, «Fuera de TBR». Es la hora de la entrada, no del sweep."],
+        ["Hora en punto", "Cada entrada lleva además la hora en punto a la que está pegada si dista 15 min o menos (03:00 vale de 02:45 a 03:15; 04:00, de 03:45 a 04:15). Se puede combinar con la TBR para ver las entradas en TBR y cerca de una hora exacta."],
         ["TF del FVG", "Una operación cuenta en cada timeframe de MTF (M15, M30, H1) cuyo FVG toca el extremo del sweep: puede tocar varios."],
         ["Costes", "Spread real de MT5 en la vela de entrada, una vez por operación (R neto = R bruto - spread / riesgo)."],
         ["Datos", "Velas M5, M3 y M1 de MT5 (PUPrime). El HTF y el MTF salen de las M5; M1 solo llega a 2024 por el tope de velas del terminal."],

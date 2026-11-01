@@ -30,15 +30,19 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
-# CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3) y t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
+# CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3), t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
+# y h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no)
 CRT_MTF_BITS = {15: 1, 30: 2, 60: 4}
 CRT_MTF_NAMES = {0: "Todos", 15: "M15", 30: "M30", 60: "H1"}
 CRT_LTFS = (5, 3, 1)
 CRT_ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha"}
 CRT_ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
-CRT_DEFAULT = (0, 5, 1)                             # (TF del FVG: 0 = todos, LTF, entrada)
+CRT_TBR = ("Todas", "Dentro de TBR", "Asia", "London", "NY Open", "Fuera de TBR")          # filtro por la TBR de la hora de entrada
+CRT_NEAR = ("Todas", "±15 min de la hora", "Resto")                                          # y por la cercanía a una hora en punto
+CRT_TARGETS = {1: "1R", 2: "2R", 3: "Extremo de C1"}   # columna q: el objetivo con el que se simuló cada operación (cada uno su backtest)
+CRT_DEFAULT = (0, 5, 1, CRT_TBR[0], CRT_NEAR[0], 2)   # (TF del FVG: 0 = todos, LTF, entrada, TBR, cercanía a la hora en punto, objetivo)
 # Sensibilidad de los patrones: columna de cada operación -> variante
 SENSITIVITY = (("tp1", "objetivo 1R"), ("tp15", "objetivo 1.5R"), ("tp2", "objetivo 2R"), ("tp25", "objetivo 2.5R"),
                ("tp3", "objetivo 3R"), ("h12", "objetivo 2R, máx. 12 h"), ("r", "objetivo 2R, máx. 24 h"),
@@ -284,34 +288,68 @@ class Group:
         if self.is_calendar:
             return self._calendar_view(filt, years, hours, days, months)
         if self.is_crt:
-            return self._crt_view(years, hours, days, months, crt or CRT_DEFAULT)
+            return self._crt_view(years, hours, days, months, tuple(crt or ()) + CRT_DEFAULT[len(crt or ()):])
         return self._pattern_view(pattern, filt, years, hours, days, months)
 
-    def crt_mask(self, mtf: int, ltf: int, entry: int, ops: Ops | None = None) -> np.ndarray:
-        """Operaciones CRT de un LTF y una entrada, y (mtf != 0) con un FVG de ese timeframe de MTF tocado por el extremo del sweep."""
+    def crt_mask(self, mtf: int, ltf: int, entry: int, ops: Ops | None = None, target: int = 2) -> np.ndarray:
+        """Operaciones CRT de un LTF, una entrada y un objetivo (1R, 2R o extremo de C1) y, si mtf != 0, con un FVG de ese timeframe
+        de MTF tocado por el extremo del sweep. Los ficheros anteriores a los objetivos no traen la columna q: todo es 2R."""
         ops = ops or self.ops
         mask = (ops["l"] == ltf) & (ops["n"] == entry)
+        if "q" in (self.raw.get("ops") or {}):
+            mask &= ops["q"] == target
         if mtf:
             mask &= (ops["t"] & CRT_MTF_BITS[mtf]) != 0
         return mask
 
+    @staticmethod
+    def crt_tbr_mask(ops: Ops, tbr: str) -> np.ndarray:
+        """Entradas dentro de una TBR (cualquiera, o la elegida) o fuera de todas."""
+        zone = ops.names("z")
+        if tbr == "Todas":
+            return np.ones(len(ops), dtype=bool)
+        if tbr == "Dentro de TBR":
+            return zone != CRT_ZONES[-1]
+        return zone == tbr
+
+    @staticmethod
+    def crt_near_mask(ops: Ops, near: str) -> np.ndarray:
+        """Entradas a 15 min o menos de una hora en punto (o el resto)."""
+        if near == CRT_NEAR[0]:
+            return np.ones(len(ops), dtype=bool)
+        return (ops["h"] >= 0) if near == CRT_NEAR[1] else (ops["h"] < 0)
+
     def _crt_view(self, years, hours, days, months, crt: tuple) -> View:
         """CRT: una entrada y un LTF a la vez (si no, la misma operación contaría varias veces); el timeframe del FVG filtra."""
-        mtf, ltf, entry = crt
+        mtf, ltf, entry, tbr, near, target = crt
         ops = self.ops
         y, h = self._in(ops.year, years), self._in(ops.hour, hours)
         d, mo = self._in(ops.weekday, days), self._in(ops.month, months)
         chosen = y & h & d & mo
-        base = self.crt_mask(mtf, ltf, entry)
+        core = self.crt_mask(mtf, ltf, entry, target=target)
+        in_tbr, in_near = self.crt_tbr_mask(ops, tbr), self.crt_near_mask(ops, near)
+        base = core & in_tbr & in_near
         main = ops.take(base & chosen)
-        inside = main.take(main.names("z") != CRT_ZONES[-1])
-        zones = main.split(main.names("z"), list(CRT_ZONES)) + [("Dentro de alguna TBR", inside), ("Todas", main)]
-        no_mtf = self.crt_mask(0, ltf, entry) & chosen
+        # las tablas de zona y de hora en punto llevan el filtro del otro pero no el suyo, para poder compararlas
+        by_zone = ops.take(core & in_near & chosen)
+        inside = by_zone.take(by_zone.names("z") != CRT_ZONES[-1])
+        zones = by_zone.split(by_zone.names("z"), list(CRT_ZONES)) + [("Dentro de alguna TBR", inside), ("Todas", by_zone)]
+        by_hour_tbr = ops.take(core & in_tbr & chosen)
+        near_rows = [("±15 min de la hora en punto", by_hour_tbr.take(by_hour_tbr["h"] >= 0)),
+                     ("Resto de horas", by_hour_tbr.take(by_hour_tbr["h"] < 0))]
+        inside_all = ops.take(core & chosen)
+        cross = []
+        for name, zmask in (("En TBR", inside_all.names("z") != CRT_ZONES[-1]), ("Fuera de TBR", inside_all.names("z") == CRT_ZONES[-1])):
+            part = inside_all.take(zmask)
+            cross += [(f"{name} · ±15 min de la hora", part.take(part["h"] >= 0)), (f"{name} · resto", part.take(part["h"] < 0))]
+        round_hours = [(f"{hh:02d}:00", by_hour_tbr.take(by_hour_tbr["h"] == hh)) for hh in range(24)]
+        round_hours = [(k, o) for k, o in round_hours if len(o)]
+        no_mtf = self.crt_mask(0, ltf, entry, target=target) & in_tbr & in_near & chosen
         mtf_rows = [(CRT_MTF_NAMES[tf], ops.take(no_mtf & ((ops["t"] & bit) != 0))) for tf, bit in CRT_MTF_BITS.items()]
         combos = {}
         for key in self.all_filters:
             lt, en = (int(x) for x in key.split(":"))
-            combos[key] = ops.take(self.crt_mask(mtf, lt, en) & chosen)
+            combos[key] = ops.take(self.crt_mask(mtf, lt, en, target=target) & in_tbr & in_near & chosen)
         return View(
             main=main,
             years=self._split(ops, base & h & d & mo, "year"),
@@ -325,7 +363,7 @@ class Group:
             halves=main.halves(),
             sensitivity=[("Sin costes (R bruto)", main["r"] + main["k"])],
             outcomes=[("CRT", main)],
-            extra={"mtf": mtf_rows})
+            extra={"mtf": mtf_rows, "cercania": near_rows + cross, "horas": round_hours})
 
     @staticmethod
     def _split(ops: Ops, mask, key: str, order: list | None = None) -> list:
@@ -438,8 +476,9 @@ class Backtest:
             if not g.is_crt:
                 continue
             ops = g.ops
-            mtf, ltf, entry = crt
-            sel = (g.crt_mask(mtf, ltf, entry) & g._in(ops.year, years) & g._in(ops.hour, hours)
+            mtf, ltf, entry, tbr, near, target = tuple(crt) + CRT_DEFAULT[len(crt):]
+            sel = (g.crt_mask(mtf, ltf, entry, target=target) & g.crt_tbr_mask(ops, tbr) & g.crt_near_mask(ops, near)
+                   & g._in(ops.year, years) & g._in(ops.hour, hours)
                    & g._in(ops.weekday, days) & g._in(ops.month, months))
             chosen = ops.take(sel)
             names = chosen.names("m")

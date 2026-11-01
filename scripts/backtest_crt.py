@@ -147,6 +147,8 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
     if ep is None:
         return None
     mg = engine.manage(L, st, ep, rule)
+    if mg is None:
+        return None
     ts, sgn, start, j, entry, hx, risk = L["ts"], st["sign"], ep["start"], mg["exit_index"], ep["entry"], st["stop"], ep["risk"]
     return {"entrada (NY)": pd.Timestamp(int(ts[start]) - AHEAD, unit="s"), "cierre (NY)": pd.Timestamp(int(ts[j]) - AHEAD, unit="s"),
             "dirección": st["dirección"], "FVG MTF": st["mtf"], "C2 cierra dentro": st["inside"], "entrada": sgn * entry,
