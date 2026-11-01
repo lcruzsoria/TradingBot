@@ -22,14 +22,14 @@ D1_FVG = int(pd.Timestamp("2026-10-12 12:00").value // 10**9 // 60)             
 def raw(ops: list[tuple]) -> dict:
     """Operaciones CRT en NAS100: (inicio de C2, dirección 0 largo / 1 corto, LTF, entrada, resultado, máscara de FVG de MTF)."""
     keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt",
-            "f15a", "f15b", "f15t", "f30a", "f30b", "f30t", "f60a", "f60b", "f60t")
+            "f5a", "f5b", "f5t", "f15a", "f15b", "f15t")
     cols = {k: [] for k in keys}
     for c2, d, ltf, entry, out, mtf in ops:
         # el corto del escenario: entra en 103.1 a las 06:55 (C2 + 55 min), stop 108.5 (extremo de las 06:35), objetivo 92.3, iFVG 106.1-107.3
         # (de las 06:25 a la inversión de las 06:45), CISD en 103.2 a las 06:50 con la secuencia desde las 06:15
         vals = (c2, d, ltf, entry, out, mtf, 0, 2, 3, c2 + 55, c2 + 70, 1.9, 0.1, -1, 103.1, 108.5, 92.3, 106.1, 107.3, 103.2,
                 c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15, c2 + 35,
-                107.5, 110.0, D1_FVG, float("nan"), float("nan"), -1, float("nan"), float("nan"), -1)     # FVG de M15 del día 1; M30 y H1 no
+                float("nan"), float("nan"), -1, 107.5, 110.0, D1_FVG)     # FVG de M15 del día 1; el de M5 no
         for k, v in zip(keys, vals):
             cols[k].append(v)
     return {"key": "crt:indices", "nombre": "Índices", "tipo": "crt", "perfil": "crt", "perfil_nombre": "CRT",
@@ -39,7 +39,7 @@ def raw(ops: list[tuple]) -> dict:
 
 
 def backtest(ops=None, invalid=None) -> Backtest:
-    ops = ops or [(C2, 1, 5, 1, 0, 1), (C2, 1, 3, 1, 1, 3), (C2, 1, 5, 2, 2, 1)]
+    ops = ops or [(C2, 1, 5, 1, 0, 2), (C2, 1, 3, 1, 1, 3), (C2, 1, 5, 2, 2, 2)]
     group = raw(ops)
     if invalid:                                                                        # (C2, dirección, hora del extremo, precio, motivo)
         group["invalidos"] = {"m": [0] * len(invalid), "c": [x[0] for x in invalid], "d": [x[1] for x in invalid], "th": [x[2] for x in invalid],
@@ -57,7 +57,7 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert (mark["x0"], mark["x1"], mark["xc1"]) == (x0, x0 + 36, x0 - 36)
     assert mark["direction"] == "short" and mark["state"] == "objetivo" and mark["label"] == "CRT"          # el M5 · entrada 1 es TP
     assert mark["c1"] == (100.0, 105.0) and mark["c2"] == (91.5, 108.5) and mark["htf"] == 180
-    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, ["M15"], ["M15", "M30"])
+    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, ["M15"], ["M5", "M15"])
     assert mark["others"] == [(5, 2, "be"), (3, 1, "stop")] or sorted(mark["others"]) == [(3, 1, "stop"), (5, 2, "be")]
     assert mark["when"] == "13/10 06:00"
     i = lambda hhmm: int(np.searchsorted(ts, int(pd.Timestamp(f"2026-10-13 {hhmm}").value // 10**9) + AHEAD))          # noqa: E731
@@ -67,7 +67,7 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     first = int(np.searchsorted(ts, int(pd.Timestamp("2026-10-12 12:00").value // 10**9) + AHEAD))
     assert mark["fvgs"] == [{"tf": 15, "name": "M15", "x0": first, "x1": i("06:35"), "bottom": 107.5, "top": 110.0}]      # solo el M15 lo toca
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
-    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15", "M30"])
+    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M5", "M15"])
 
 
 def test_un_sweep_invalidado_se_marca_sin_operacion_y_con_su_motivo():
@@ -175,8 +175,8 @@ def test_la_etiqueta_de_un_invalidado_lo_dice(tmp_path, monkeypatch):
 def test_un_crt_alcista_lleva_la_etiqueta_debajo_y_en_verde(tmp_path, monkeypatch):
     from tradingbot.ui.chart import CRT_COLORS
     win = window(tmp_path, monkeypatch)
-    win.backtest = backtest([(C2, 0, 5, 1, 1, 4)])                                       # largo, SL, FVG de H1
+    win.backtest = backtest([(C2, 0, 5, 1, 1, 1)])                                       # largo, SL, FVG de M5
     win._on_candles(candles_event())
     pill = win.chart._crt_pills[0]
     assert "CRT alcista" in pill.toPlainText() and pill.result == "SL" and pill._bar.name().upper() == CRT_COLORS["long"]
-    assert win.chart._crts[0]["mtf"] == ["H1"]
+    assert win.chart._crts[0]["mtf"] == ["M5"]

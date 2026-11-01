@@ -17,13 +17,13 @@ DAY = 1440
 
 
 def raw_group() -> dict:
-    """Seis operaciones CRT a mano: mercado (m), LTF (l), entrada (n), FVG de MTF tocados (t: 1 M15, 2 M30, 4 H1), TBR (z), R neto (r)."""
+    """Seis operaciones CRT a mano: mercado (m), LTF (l), entrada (n), FVG de MTF tocados (t: 1 M5, 2 M15), TBR (z), R neto (r)."""
     e0 = int(pd.Timestamp("2025-03-03 03:00").value // 10**9 // 60)               # minutos desde 1970 (hora NY)
     n = 6
     return {"key": "crt:indices", "nombre": "Índices", "tipo": "crt", "perfil": "crt", "perfil_nombre": "CRT",
             "cats": {"m": ["NAS100.s", "SP500.s"], "o": ["objetivo", "stop", "breakeven", "tiempo"], "z": list(CRT_ZONES), "p": ["CRT"]},
             "patrones": ["CRT"], "filtros": {"5:1": "M5 · 1", "5:2": "M5 · 2", "3:1": "M3 · 1"},
-            "ops": {"m": [0, 0, 1, 1, 0, 1], "l": [5, 5, 5, 3, 5, 5], "n": [1, 1, 1, 1, 2, 1], "t": [1, 2, 4, 1, 3, 1],
+            "ops": {"m": [0, 0, 1, 1, 0, 1], "l": [5, 5, 5, 3, 5, 5], "n": [1, 1, 1, 1, 2, 1], "t": [2, 1, 3, 2, 3, 2],
                     "z": [0, 3, 1, 3, 2, 3], "d": [0, 1, 0, 1, 0, 1], "o": [0, 1, 0, 1, 0, 1], "h": [3, -1, 4, -1, 3, 4], "q": [2] * 6,
                     "e": [e0 + i * DAY for i in range(n)], "x": [e0 + i * DAY + 60 for i in range(n)],
                     "r": [1.9, -1.0, 1.9, -1.0, 1.9, -1.0], "k": [0.1] * n, "rk": [0.2] * n, "v": [10] * n},
@@ -37,9 +37,9 @@ def test_el_grupo_crt_filtra_por_ltf_entrada_y_tf_del_fvg():
     n = lambda **kw: len(g.view("CRT", "5:1", crt=(kw.get("mtf", 0), kw.get("ltf", 5), kw.get("entry", 1))).main)        # noqa: E731
     assert n() == 4                                   # M5, entrada 1: operaciones 0, 1, 2 y 5
     assert n(ltf=3) == 1 and n(entry=2) == 1
-    assert n(mtf=15) == 2 and n(mtf=30) == 1 and n(mtf=60) == 1                      # FVG tocado en M15 (ops. 0 y 5), M30 (op. 1) y H1 (op. 2)
-    assert g.crt_mask(15, 5, 2).sum() == 1                                           # la op. 4 toca M15 y M30 (máscara 3)
-    assert g.crt_mask(30, 5, 2).sum() == 1 and g.crt_mask(60, 5, 2).sum() == 0
+    assert n(mtf=15) == 3 and n(mtf=5) == 2                                          # FVG tocado en M15 (ops. 0, 2 y 5) y en M5 (ops. 1 y 2)
+    assert g.crt_mask(15, 5, 2).sum() == 1                                           # la op. 4 toca M5 y M15 (máscara 3)
+    assert g.crt_mask(5, 5, 2).sum() == 1
 
 
 def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos():
@@ -48,7 +48,7 @@ def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos()
     zones = {k: o.stats().get("n", 0) for k, o in v.zones}
     assert zones == {"Asia": 1, "London": 1, "NY Open": 0, "Fuera de TBR": 1 + 1, "Dentro de alguna TBR": 2, "Todas": 4}
     assert sum(zones[z] for z in CRT_ZONES) == zones["Todas"]                        # no se pierde ninguna operación
-    assert [k for k, _ in v.extra["mtf"]] == ["M15", "M30", "H1"]
+    assert [k for k, _ in v.extra["mtf"]] == ["M5", "M15"]
     near = {k: o.stats().get("n", 0) for k, o in v.extra["cercania"]}                 # ops. 0, 1, 2 y 5 (M5, entrada 1): h = 3, -1, 4, 4
     assert near == {"±15 min de la hora en punto": 3, "Resto de horas": 1, "En TBR · ±15 min de la hora": 2, "En TBR · resto": 0,
                     "Fuera de TBR · ±15 min de la hora": 1, "Fuera de TBR · resto": 1}
@@ -92,7 +92,7 @@ def test_zona_tbr_de_la_hora_de_entrada():
                             "2025-03-03 10:00", "2025-03-03 11:59", "2025-03-03 12:00", "2025-03-03 19:59"])
     got = ex.tbr_zone(pd.Series(hours)).tolist()
     assert got == ["Asia", "Fuera de TBR", "London", "London", "Fuera de TBR", "NY Open", "NY Open", "Fuera de TBR", "Fuera de TBR"]
-    assert ex.mtf_bits("M15/M60") == 5 and ex.mtf_bits("M30") == 2
+    assert ex.mtf_bits("M5/M15") == 3 and ex.mtf_bits("M15") == 2
     near = ex.near_hour(pd.Series(pd.to_datetime(["2025-03-03 02:44", "2025-03-03 02:45", "2025-03-03 03:00", "2025-03-03 03:15",
                                                     "2025-03-03 03:16", "2025-03-03 23:50", "2025-03-03 00:10"])))
     assert near.tolist() == [-1, 3, 3, 3, -1, 0, 0]                              # 03:00 vale de 02:45 a 03:15; 23:50 es la hora 0
@@ -111,7 +111,7 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 5, 1)
     g = bt.group("crt:indices")
     first = dlg.blocks["n"].value.text()
-    assert first != "-" and len(dlg.by_filter.rows) == 12 and len(dlg.by_mtf.rows) == 3
+    assert first != "-" and len(dlg.by_filter.rows) == 12 and len(dlg.by_mtf.rows) == 2
     assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
     for ltf in (5, 3, 1):                                                           # los 3 LTF y los 4 modelos de entrada se pintan
         dlg.set_crt_ltf(ltf)

@@ -35,10 +35,11 @@ def test_el_escenario_da_un_unico_corto_con_todos_los_pasos():
     assert funnel["velas HTF con sweep"] >= 1                                         # (el relleno del día 1 también tiene sweeps sin FVG)
     assert [funnel[k] for k in list(funnel)[1:5]] == [1, 1, 1, 1]
     st = setups[0]
-    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M15"
+    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M5"
     assert ny(df["ts"][st["ih"]]) == "2026-10-13 06:35"                               # el extremo del sweep
-    assert ny(df["ts"][st["jt"]]) == "2026-10-13 07:15"                               # la vuelta al FVG de M15 (formado a las 07:15)
-    assert [z[:3] for z in st["zones"]] == [(15, 103.2, 107.3)]
+    assert ny(df["ts"][st["jt"]]) == "2026-10-13 07:10"                               # la vuelta al FVG de M5 103.0-103.5 (formado a las 07:05)
+    assert [z[:3] for z in st["zones"]] == [(5, 103.0, 103.5)]
+    assert st["kf"] > st["jt"]                                                        # el iFVG de LTF se forma después del toque
     assert ny(df["ts"][st["jc"]]) == "2026-10-13 07:30"                               # el cierre bajo la base del iFVG es el CISD
     assert (st["z_bottom"], st["z_top"], st["level"]) == (103.4, 104.9, 103.4)
     assert st["inside"] is False                                                      # C2 acaba fuera de C1 y el setup vale igual
@@ -134,25 +135,18 @@ def test_el_largo_es_el_espejo_del_corto():
 
 def test_sin_hueco_de_mtf_tras_el_extremo_no_hay_setup():
     df = scenario()
-    i = int(df.index[df["ts"] == at("07:10")][0])
-    df.loc[i, "high"] = 107.5                                                    # la vela 3 llega al mínimo de la vela 1 (107.3): no hay FVG
+    t = (df["ts"] >= at("06:45")) & (df["ts"] <= at("07:15"))
+    df.loc[t, "high"] = df.loc[t, "high"].clip(lower=108.0)                       # el desplazamiento no deja hueco ni en M5 ni en M15
     assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
 
 
 def test_si_el_precio_no_vuelve_al_fvg_no_hay_setup():
     df = scenario()
-    c2 = df["ts"] >= at("07:15")
+    c2 = df["ts"] >= at("07:10")
     cols = ["open", "high", "low", "close"]
-    df.loc[c2, cols] = df.loc[c2, cols].clip(upper=103.0)                          # tras formarse el FVG (103.2-107.3) ya no lo toca
+    df.loc[c2, cols] = df.loc[c2, cols].clip(upper=102.9)                          # tras formarse los FVG (el más bajo, 103.0-103.5) ya no los toca
     setups, funnel = engine.find_setups(df, df, 5, RULE, CFG)
     assert setups == [] and funnel["con FVG de MTF formado tras el extremo"] == 1 and funnel["con vuelta al FVG"] == 0
-
-
-def test_un_ifvg_formado_antes_del_toque_no_cuenta():
-    df = scenario()
-    i = int(df.index[df["ts"] == at("07:10")][0])
-    df.loc[i, "high"] = 106.0                                                    # el FVG de M15 pasa a 106.0-107.3: el precio solo lo toca a las 07:25
-    assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []                     # el FVG de M5 (07:15-07:25) ya estaba formado en el toque
 
 
 def test_un_extremo_nuevo_reinicia_el_setup():

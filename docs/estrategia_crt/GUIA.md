@@ -13,7 +13,7 @@ Se describe el corto (barrido de un máximo). El largo es el espejo exacto.
 | Papel | Índices | Forex |
 |---|---|---|
 | HTF (sweep) | H3 | H4 |
-| MTF (FVG de confirmación) | M15, M30 o H1 | M15, M30 o H1 |
+| MTF (FVG de confirmación) | M5 o M15 | M5 o M15 |
 | LTF (iFVG, CISD y entrada) | M5 o M3 | M5 o M3 |
 
 - Primer mercado: **NAS100**. Forex en una segunda fase.
@@ -31,7 +31,7 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade. 
 - Máximo barrido → **corto**. Mínimo barrido → **largo**.
 
 ### Paso 2 · FVG de MTF que nace del desplazamiento, y vuelta a él
-- Tras el extremo del sweep, el desplazamiento deja un **FVG de M15, M30 o H1** en la dirección contraria al sweep (corto: FVG **bajista**; largo: FVG alcista). El FVG tiene que nacer **después** del extremo: su primera vela termina después de él. Vale cualquiera de los tres timeframes.
+- Tras el extremo del sweep, el desplazamiento deja un **FVG de M5 o M15** en la dirección contraria al sweep (corto: FVG **bajista**; largo: FVG alcista). El FVG tiene que nacer **después** del extremo: su primera vela termina después de él. Vale cualquiera de los dos timeframes (el M5 y el M15 no se mezclan: cada uno tiene sus propios FVG).
 - El precio **vuelve** a ese FVG: basta con que lo toque una mecha (no hace falta cerrar dentro).
 - Sin vuelta al FVG: no hay trade.
 

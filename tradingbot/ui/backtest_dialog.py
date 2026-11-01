@@ -455,7 +455,7 @@ class BacktestDialog(QDialog):
     def _build_crt_chips(self) -> None:
         """Botones de CRT: TF del FVG de MTF (el que toca la mecha), TF del iFVG + CISD (LTF) y modelo de entrada."""
         specs = (("mtf", [str(k) for k in CRT_MTF_NAMES], self.set_crt_mtf, str(self.crt_mtf), {str(k): v for k, v in CRT_MTF_NAMES.items()},
-                  "TF del FVG de MTF que toca la mecha del sweep (Todos: cualquiera de M15, M30 y H1)"),
+                  "TF del FVG de MTF que toca la mecha del sweep (Todos: M5 o M15)"),
                  ("ltf", [str(k) for k in CRT_LTFS], self.set_crt_ltf, str(self.crt_ltf), {str(k): f"M{k}" for k in CRT_LTFS},
                   "TF donde aparece el iFVG y el CISD, y en el que se entra"),
                  ("entry", [str(k) for k in CRT_ENTRIES], self.set_crt_entry, str(self.crt_entry),

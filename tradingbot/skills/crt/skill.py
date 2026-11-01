@@ -24,7 +24,7 @@ DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # lo
 class CrtSkill(Skill):
     title = "CRT"
     description = ("Estrategia CRT (Candle Range Theory, variante B), dentro de C2: una vela H3 (índices) o H4 (forex) barre con "
-                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M15, M30 o H1 y el precio vuelve a él; "
+                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M5 o M15 y el precio vuelve a él; "
                    "en las velas del gráfico (M1, M3 o M5) el precio invierte un FVG (iFVG, el CISD) antes de que cierre C2. Entra con "
                    "una de las cuatro variantes de entrada, con stop en el extremo del sweep y objetivo 2R (el breakeven a 1R lo lleva Setup). "
                    "Avisa a Cortex, que le da la orden a Setup; solo simulación. Solo actúa en el perfil CRT. Ojo: en el backtest "

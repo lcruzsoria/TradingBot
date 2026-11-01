@@ -47,7 +47,7 @@ ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
 TBR_HOURS = (("Asia", 20 * 60, 24 * 60), ("London", 2 * 60, 5 * 60), ("NY Open", 10 * 60, 12 * 60))     # TBR de tradingbot.env
 OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}
-MTF_BITS = {"M15": 1, "M30": 2, "M60": 4}
+MTF_BITS = {"M5": 1, "M15": 2}
 EPOCH = pd.Timestamp("1970-01-01")
 
 
@@ -206,7 +206,7 @@ def methodology(gkey: str) -> list[list[str]]:
                    f"(tradingbot/skills/crt/engine.py), sin sesgo ni TBR: las TBR solo sirven para clasificar cada entrada."],
         ["Pasos", f"Dentro de C2 (C1 = rango, C2 = manipulación, C3 = expansión). 1) Una vela {htf} (C2) toma con una mecha el máximo (mínimo) "
                   "de la anterior; si ya había tomado el otro extremo antes, el sweep es el del otro lado. 2) Tras el extremo nace un FVG de MTF "
-                  "(M15, M30 o H1) y el precio vuelve a él (basta tocarlo). 3) En el LTF (M5, M3 o M1) se forma después del toque un FVG que el "
+                  "(M5 o M15) y el precio vuelve a él (basta tocarlo). 3) En el LTF (M5, M3 o M1) se forma después del toque un FVG que el "
                   "precio invierte con un cierre al otro lado de su base: iFVG = CISD. 4) Entrada antes de que cierre C2."],
         ["Invalidados", "Si el precio llega al extremo opuesto de C1 (el objetivo) sin haber completado los pasos 2 y 3, el setup queda invalidado: "
                         "no se opera y se marca en el gráfico («Invalidado»). La columna Invalidados del embudo los cuenta."],
@@ -219,7 +219,7 @@ def methodology(gkey: str) -> list[list[str]]:
         ["TBR", "Una entrada está «dentro de una TBR» si su hora cae en el horario de Asia (20:00-00:00), London (02:00-05:00) o NY Open "
                 "(10:00-12:00), hora de Nueva York; si no, «Fuera de TBR». Es la hora de la entrada, no del sweep."],
         ["Hora en punto", "Cada entrada lleva además la hora en punto a la que está pegada si dista 15 min o menos (03:00 vale de 02:45 a 03:15; 04:00, de 03:45 a 04:15). Se puede combinar con la TBR para ver las entradas en TBR y cerca de una hora exacta."],
-        ["TF del FVG", "Una operación cuenta en cada timeframe de MTF (M15, M30, H1) cuyo FVG toca el extremo del sweep: puede tocar varios."],
+        ["TF del FVG", "Una operación cuenta en cada timeframe de MTF (M5, M15) cuyo FVG toca el extremo del sweep: puede tocar varios."],
         ["Costes", "Spread real de MT5 en la vela de entrada, una vez por operación (R neto = R bruto - spread / riesgo)."],
         ["Datos", "Velas M5, M3 y M1 de MT5 (PUPrime). El HTF y el MTF salen de las M5; M1 solo llega a 2024 por el tope de velas del terminal."],
         ["Límites", "Cada entrada y LTF es una prueba distinta sobre los mismos setups: con tantas combinaciones algún resultado "

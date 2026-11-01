@@ -5,9 +5,9 @@ REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS A
   expansión. Sweep: una vela H3 (C2) supera con una mecha el máximo (o mínimo) de la anterior (C1). Máximo barrido -> corto; mínimo
   barrido -> largo. El largo se calcula como el corto con los precios cambiados de signo (mismo código para las dos direcciones).
   Si C2 supera los dos extremos de C1 antes de la entrada, ese setup se descarta. No se espera a que C2 cierre: todo ocurre dentro de C2.
-- MTF = M15, M30 y H1 (se agregan de M5). Paso 2 del setup: tras el extremo del sweep (el más alto de C2 hasta el momento), el
+- MTF = M5 y M15 (el M15 se agrega de M5). Paso 2 del setup: tras el extremo del sweep (el más alto de C2 hasta el momento), el
   desplazamiento deja un FVG bajista de MTF que nace DESPUÉS del extremo (su primera vela termina después de él), y el precio vuelve a
-  él: basta con que lo toque la mecha. Vale cualquier FVG de M15, M30 o H1 formado tras el extremo. Un extremo nuevo reinicia todo.
+  él: basta con que lo toque la mecha. Vale cualquier FVG de M5 o M15 formado tras el extremo. Un extremo nuevo reinicia todo.
     * FVG: tres velas con hueco entre el mínimo de la 1.ª y el máximo de la 3.ª (bajista) o al revés (alcista).
 - LTF = M5, M3 y M1 (backtests separados; el TF donde aparece el iFVG es el TF de entrada).
     * iFVG (cortos): FVG alcista de LTF (3.ª vela desde 120 min antes de la vuelta al FVG de MTF) posterior al extremo, sin cerrar por
@@ -290,7 +290,7 @@ def main() -> None:
                             "**Pasa**" if ok1 and ok2 and ok3 else "No pasa"])
     n_pass = sum(all(x) for x in summ.values())
 
-    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15/M30/H1 → {'/'.join(f'M{x}' for x in ltfs)}" + (
+    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M5/M15 → {'/'.join(f'M{x}' for x in ltfs)}" + (
                (" · objetivo en el extremo de C1" if args.objetivo_c1 else "")), "",
            *(["**Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; "
               "las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.", ""]

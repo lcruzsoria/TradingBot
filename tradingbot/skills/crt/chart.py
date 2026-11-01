@@ -20,7 +20,7 @@ from ..stats.backtest import CRT_ENTRIES, CRT_MTF_BITS, CRT_MTF_NAMES
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
-MTF_TFS = {15: "M15", 30: "M30", 60: "H1"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
+MTF_TFS = {5: "M5", 15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado"}
 LTF_ORDER = (5, 3, 1)
