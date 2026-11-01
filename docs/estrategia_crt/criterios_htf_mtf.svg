@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1200" height="800" fill="#f8fafc"/>
+  <text x="40" y="56" font-size="32" font-weight="700" fill="#0f172a">CRT · los dos criterios previos (HTF y MTF)</text>
+  <text x="40" y="86" font-size="16" fill="#475569">Ejemplo de un corto (se barre un máximo). El largo es el espejo. Hacen falta los dos; si falta uno, no se sigue.</text>
+
+  <!-- Panel HTF -->
+  <rect x="40" y="110" width="540" height="450" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <circle cx="72" cy="142" r="16" fill="#2563eb"/><text x="72" y="148" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">1</text>
+  <text x="98" y="148" font-size="18" font-weight="700" fill="#0f172a">HTF · H3 (índices) / H4 (forex)</text>
+  <g transform="translate(40,170)" font-size="13">
+    <!-- niveles -->
+    <line x1="20" y1="150" x2="520" y2="150" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="24" y="143" fill="#2563eb" font-weight="700">máximo de C1</text>
+    <line x1="20" y1="330" x2="520" y2="330" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/>
+    <text x="24" y="347" fill="#64748b">mínimo de C1</text>
+    <!-- C1 -->
+    <line x1="150" y1="150" x2="150" y2="330" stroke="#94a3b8" stroke-width="2.5"/>
+    <rect x="136" y="180" width="28" height="120" fill="#cbd5e1" stroke="#94a3b8"/>
+    <text x="150" y="372" text-anchor="middle" fill="#475569" font-weight="600">C1</text>
+    <text x="150" y="390" text-anchor="middle" fill="#64748b" font-size="12">vela de referencia</text>
+    <!-- C2 sweep -->
+    <line x1="260" y1="80" x2="260" y2="235" stroke="#dc2626" stroke-width="2.5"/>
+    <rect x="246" y="160" width="28" height="55" fill="#dc2626"/>
+    <rect x="253" y="80" width="14" height="70" fill="#dc2626" opacity="0.25"/>
+    <text x="260" y="372" text-anchor="middle" fill="#dc2626" font-weight="600">C2</text>
+    <text x="260" y="390" text-anchor="middle" fill="#dc2626" font-size="12">vela del sweep</text>
+    <!-- anotaciones -->
+    <text x="292" y="100" fill="#dc2626" font-weight="700">Supera el máximo de C1</text>
+    <text x="292" y="118" fill="#dc2626">= liquidez externa tomada</text>
+    <line x1="290" y1="106" x2="268" y2="106" stroke="#dc2626" stroke-width="1.2"/>
+    <text x="292" y="228" fill="#0f172a" font-weight="700">Cierra dentro del rango de C1</text>
+    <text x="292" y="246" fill="#475569">si cierra fuera es una rotura, no un sweep</text>
+    <line x1="290" y1="214" x2="276" y2="214" stroke="#0f172a" stroke-width="1.2"/>
+    <!-- C3 esperada -->
+    <line x1="400" y1="262" x2="400" y2="325" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 3"/>
+    <rect x="388" y="270" width="24" height="45" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <path d="M450 266 L450 316" stroke="#64748b" stroke-width="1.8" marker-end="url(#g)"/>
+    <text x="462" y="296" fill="#64748b">objetivo</text>
+  </g>
+
+  <!-- Panel MTF -->
+  <rect x="620" y="110" width="540" height="450" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <circle cx="652" cy="142" r="16" fill="#7c3aed"/><text x="652" y="148" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">2</text>
+  <text x="678" y="148" font-size="18" font-weight="700" fill="#0f172a">MTF · M15 / M30 / H1 (zoom del máximo de C2)</text>
+  <g transform="translate(620,170)" font-size="13">
+    <!-- FVG previo -->
+    <rect x="20" y="100" width="500" height="36" fill="#fb923c" opacity="0.32"/>
+    <rect x="20" y="100" width="500" height="36" fill="none" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="5 3"/>
+    <text x="30" y="92" fill="#c2410c" font-weight="700">FVG bajista de MTF, ya formado</text>
+    <!-- CRH -->
+    <line x1="20" y1="200" x2="520" y2="200" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="24" y="218" fill="#2563eb" font-weight="700">máximo de C1</text>
+    <!-- velas -->
+    <line x1="170" y1="255" x2="170" y2="310" stroke="#16a34a" stroke-width="2"/>
+    <rect x="162" y="268" width="16" height="36" fill="#16a34a"/>
+    <line x1="230" y1="215" x2="230" y2="280" stroke="#16a34a" stroke-width="2"/>
+    <rect x="222" y="225" width="16" height="48" fill="#16a34a"/>
+    <line x1="290" y1="182" x2="290" y2="240" stroke="#16a34a" stroke-width="2"/>
+    <rect x="282" y="196" width="16" height="38" fill="#16a34a"/>
+    <!-- sweep -->
+    <line x1="350" y1="112" x2="350" y2="212" stroke="#dc2626" stroke-width="2"/>
+    <rect x="342" y="170" width="16" height="30" fill="#16a34a"/>
+    <circle cx="350" cy="112" r="6" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+    <line x1="410" y1="150" x2="410" y2="250" stroke="#dc2626" stroke-width="2"/>
+    <rect x="402" y="165" width="16" height="70" fill="#dc2626"/>
+    <line x1="470" y1="215" x2="470" y2="300" stroke="#dc2626" stroke-width="2"/>
+    <rect x="462" y="225" width="16" height="62" fill="#dc2626"/>
+    <!-- anotaciones -->
+    <path d="M395 60 L358 106" stroke="#dc2626" stroke-width="1.5" marker-end="url(#r)"/>
+    <text x="400" y="52" fill="#dc2626" font-weight="700" text-anchor="start">El máximo del sweep</text>
+    <text x="400" y="68" fill="#dc2626" font-weight="700">toca el FVG</text>
+    <text x="30" y="330" fill="#7c3aed" font-weight="700">= liquidez interna tomada</text>
+    <text x="30" y="350" fill="#475569">Además del máximo de C1, el precio llega a un</text>
+    <text x="30" y="368" fill="#475569">desequilibrio que ya existía en MTF.</text>
+  </g>
+
+  <!-- Conector zoom -->
+  <path d="M330 250 C 460 120, 520 120, 618 290" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#g)"/>
+  
+  <!-- Tarjetas de criterio -->
+  <rect x="40" y="580" width="540" height="116" rx="14" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="60" y="610" font-size="17" font-weight="700" fill="#1e40af">Criterio 1 · HTF (liquidez externa)</text>
+  <text x="60" y="638" font-size="14.5" fill="#334155">La vela H3/H4 supera el máximo (o mínimo) de la vela anterior</text>
+  <text x="60" y="658" font-size="14.5" fill="#334155">y cierra de nuevo dentro de su rango. Fija la dirección:</text>
+  <text x="60" y="678" font-size="14.5" fill="#334155">máximo barrido → corto · mínimo barrido → largo.</text>
+
+  <rect x="620" y="580" width="540" height="116" rx="14" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="640" y="610" font-size="17" font-weight="700" fill="#6d28d9">Criterio 2 · MTF (liquidez interna)</text>
+  <text x="640" y="638" font-size="14.5" fill="#334155">El extremo del sweep toca un FVG de M15, M30 o H1 ya formado:</text>
+  <text x="640" y="658" font-size="14.5" fill="#334155">bajista en cortos, alcista en largos. Sin FVG tocado,</text>
+  <text x="640" y="678" font-size="14.5" fill="#334155">no hay trade.</text>
+
+  <rect x="40" y="716" width="1120" height="52" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="60" y="747" font-size="15" fill="#334155">Con los dos criterios cumplidos se baja a M5/M3 y se busca el <tspan font-weight="700">iFVG</tspan>, después el <tspan font-weight="700">CISD</tspan> y por último la <tspan font-weight="700">entrada</tspan> (3 opciones).</text>
+
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#dc2626"/></marker>
+  </defs>
+</svg>
