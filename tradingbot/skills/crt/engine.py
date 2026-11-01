@@ -4,8 +4,8 @@ C1 = rango, C2 = manipulación, C3 = expansión. Corto (el largo es el espejo, v
   1. C2 supera el máximo de C1 con una mecha (el extremo del sweep, que va subiendo mientras C2 sigue haciendo máximos).
   2. Tras ese extremo, el desplazamiento a la baja deja un FVG BAJISTA de MTF (M15/M30/H1) que nace DESPUÉS del extremo, y el precio
      vuelve a él (basta con que lo toque la mecha).
-  3. En LTF (M5/M3/M1) el tramo de vuelta deja un FVG ALCISTA que el precio invierte con un cierre por debajo de su base: es el iFVG y esa
-     inversión es el CISD.
+  3. En LTF (M5/M3/M1), después del toque, el precio deja un FVG ALCISTA (su 3.ª vela cierra tras el toque; sin plazo) que invierte con un
+     cierre por debajo de su base: es el iFVG y esa inversión es el CISD.
   4. Entrada en corto, con el stop en el extremo del sweep. Todo ocurre antes de que cierre C2: no se espera a saber si C2 cierra dentro.
 Lo usan la skill CRT (en directo) y scripts/backtest_crt.py (histórico): es el mismo código, así lo probado es lo que se opera.
 Reglas completas en docs/estrategia_crt/GUIA.md.
@@ -35,7 +35,6 @@ FOREX = Cfg(240, 17 * 3600, 17 * 3600)
 
 @dataclass(frozen=True)
 class Rule:
-    leg_min: int = 120                                   # minutos hacia atrás (desde la vuelta al FVG de MTF) para buscar el FVG LTF a invertir
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
     rr: float = 2.0
     target_c1: bool = False                               # objetivo en el extremo opuesto de C1 (cortos: su mínimo) en vez de rr veces el riesgo
@@ -90,7 +89,6 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
     mtf = {m: aggregate(base, m, cfg) for m in MTF}
     funnel = {"velas HTF con sweep": 0, "con FVG de MTF formado tras el extremo": 0, "con vuelta al FVG": 0, "con iFVG": 0, "con CISD": 0}
-    leg_bars = max(rule.leg_min // ltf_min, 3)
     setups = []
     for sign, name in ((1, "short"), (-1, "long")):
         L, H = view(ltf, sign), view(htf, sign)
@@ -138,7 +136,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
                     if not hit:
                         continue
                     jt, seen_touch = j, True
-                ks = ks_all[(ks_all < j) & (ks_all - 2 >= ih) & (ks_all >= jt - leg_bars)]
+                ks = ks_all[(ks_all < j) & (ks_all > jt)]                       # FVG de LTF cuya 3.ª vela cierra después del toque
                 alive = [int(k) for k in ks if cl_[k + 1:j].size == 0 or cl_[k + 1:j].min() >= hi_[k - 2]]      # aún sin invertir
                 seen_ifvg |= bool(alive)
                 done = [k for k in alive if cl_[j] < hi_[k - 2]]                # el cierre de esta vela lo invierte: CISD

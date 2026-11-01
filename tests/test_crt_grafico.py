@@ -121,12 +121,9 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert not chart._card.isVisible()                                                   # la etiqueta sola es discreta: sin detalle
     violet = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#B388FF"]
     assert len(violet) == 1                                                              # el iFVG invertido, pintado en el LTF
-    texts = " ".join(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText"))
-    assert "TP 92.3" in texts and "SL 108.5" in texts and "Entrada 103.1" in texts and "iFVG invertido" in texts and "CISD" in texts
-    assert "FVG M15" in texts and "FVG M30" not in texts
+    assert [it for it in chart._crt_items if hasattr(it, "toPlainText")] == [pill]          # el dibujo no lleva más texto que la etiqueta: sin nombres de vela ni de zonas
     orange = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
     assert len(orange) == 1                                                              # el FVG de MTF del paso 2, en naranja
-    assert "C1 · H3" in texts and "C2 · H3" in texts                                     # las velas HTF se nombran debajo de su caja
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
     assert len(boxes) == 2                                                               # C1 y C2 en gris claro, no del color de las velas

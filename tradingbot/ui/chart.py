@@ -1015,13 +1015,12 @@ class ChartView(pg.PlotWidget):
             c2lo, c2hi = crt["c2"]
             short = crt["direction"] == "short"
             tone = CRT_COLORS[crt["direction"]]
-            htf = f"H{int(crt.get('htf', 180)) // 60}"
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
-            boxes = [(c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0, "C1 · rango"),
-                     (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1, "C2 · manipulación")]
+            boxes = [(c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0),
+                     (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]
             if c3:
-                boxes.append((c3[0], c3[1], _alpha(HTF_BOX, 10), _alpha(HTF_BOX, 160), 1.2, x1, float(crt["x2"]), "C3 · expansión"))
-            for lo, hi, brush, pen_color, width, left, right, name in boxes:
+                boxes.append((c3[0], c3[1], _alpha(HTF_BOX, 10), _alpha(HTF_BOX, 160), 1.2, x1, float(crt["x2"])))
+            for lo, hi, brush, pen_color, width, left, right in boxes:
                 box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
                 box.setBrush(brush)
                 pen = QPen(pen_color, width)
@@ -1030,12 +1029,6 @@ class ChartView(pg.PlotWidget):
                 box.setZValue(-7)
                 pi.addItem(box, ignoreBounds=True)
                 self._crt_items.append(box)
-                label = pg.TextItem(anchor=(0.5, -0.15))                    # el nombre de la vela, debajo de su caja
-                label.setHtml(f'<span style="font-size:8pt; color:{HTF_BOX}">{name.split(" · ")[0]} · {htf} · {name.split(" · ")[1]}</span>')
-                label.setPos((left + right) / 2, lo)
-                label.setZValue(7)
-                pi.addItem(label, ignoreBounds=True)
-                self._crt_items.append(label)
             swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
             line = pg.PlotCurveItem(x=np.array([xc1, x1]), y=np.array([swept, swept]),
                                     pen=pg.mkPen(HTF_BOX, width=1, style=Qt.PenStyle.DashLine))
@@ -1062,12 +1055,6 @@ class ChartView(pg.PlotWidget):
             pi.addItem(item, ignoreBounds=True)
             self._crt_items.append(item)
 
-        def tag(x: float, price: float, text: str, color: str) -> None:
-            label = pg.TextItem(anchor=(0, 0.5))
-            label.setHtml(f'<span style="font-size:7pt; color:{color}">{html.escape(text)}</span>')
-            label.setPos(x, price)
-            add(label, 7)
-
         fvg, cisd, ext, pos = crt.get("ifvg"), crt.get("cisd"), crt.get("extreme"), crt.get("pos")
         if fvg:
             left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
@@ -1077,7 +1064,6 @@ class ChartView(pg.PlotWidget):
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -3)
-            tag(left, fvg["top"], "iFVG invertido", violet)
         amber = "#FFA726"
         for zone in crt.get("fvgs") or []:                      # el FVG de MTF que toca el extremo del sweep (paso 2), en cada TF
             left, right = float(zone["x0"]), float(zone["x1"]) + 1
@@ -1087,12 +1073,10 @@ class ChartView(pg.PlotWidget):
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -4)
-            tag(left, zone["top"], f"FVG {zone['name']}", amber)
         if cisd:
             line = pg.PlotCurveItem(x=np.array([float(cisd["x0"]), float(cisd["x1"]) + 1]), y=np.array([cisd["level"]] * 2),
                                     pen=pg.mkPen(violet, width=1, style=Qt.PenStyle.DotLine))
             add(line, -3)
-            tag(float(cisd["x1"]) + 1, cisd["level"], "CISD", violet)
         if ext:
             dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(CRT_COLORS["short"], width=1.5),
                                      brush=pg.mkBrush(None))
@@ -1107,9 +1091,6 @@ class ChartView(pg.PlotWidget):
                 box.setPen(QPen(Qt.PenStyle.NoPen))
                 add(box, -5)
             add(pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.TEXT, width=1.2)), -4)
-            for price, text, color in ((target, f"TP {fmt_price(target)}", "#26A69A"), (entry, f"Entrada {fmt_price(entry)}", theme.TEXT),
-                                       (stop, f"SL {fmt_price(stop)}", "#EF5350")):
-                tag(x1, price, text, color)
 
     @property
     def crt_count(self) -> int:

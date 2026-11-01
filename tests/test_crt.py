@@ -134,6 +134,13 @@ def test_si_el_precio_no_vuelve_al_fvg_no_hay_setup():
     assert setups == [] and funnel["con FVG de MTF formado tras el extremo"] == 1 and funnel["con vuelta al FVG"] == 0
 
 
+def test_un_ifvg_formado_antes_del_toque_no_cuenta():
+    df = scenario()
+    i = int(df.index[df["ts"] == at("07:10")][0])
+    df.loc[i, "high"] = 106.0                                                    # el FVG de M15 pasa a 106.0-107.3: el precio solo lo toca a las 07:25
+    assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []                     # el FVG de M5 (07:15-07:25) ya estaba formado en el toque
+
+
 def test_un_extremo_nuevo_reinicia_el_setup():
     df = scenario()
     i = int(df.index[df["ts"] == at("07:20")][0])

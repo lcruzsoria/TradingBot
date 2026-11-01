@@ -35,8 +35,8 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade. 
 - Sin vuelta al FVG: no hay trade.
 
 ### Paso 3 · iFVG en LTF = CISD
-- En M5, M3 o M1, el tramo de vuelta al FVG deja un FVG de LTF en la dirección del sweep (corto: alcista). Una vela que **cierra al otro lado de su base** lo invierte (iFVG). **Esa inversión es el CISD.**
-- El FVG de LTF tiene que ser posterior al extremo, no estar ya invertido, y su tercera vela caer como mucho 120 minutos antes de la vuelta al FVG de MTF.
+- En M5, M3 o M1, tras el toque al FVG de MTF aparece un FVG de LTF en la dirección del sweep (corto: alcista). Una vela que **cierra al otro lado de su base** lo invierte (iFVG). **Esa inversión es el CISD.**
+- El FVG de LTF se forma **después del toque** (su tercera vela cierra tras el toque), no está ya invertido y **no tiene plazo**: puede invertirse mucho después del toque.
 - El TF donde aparece el iFVG (M5, M3 o M1) es el **TF de entrada**.
 
 ### Paso 4 · Entrada
