@@ -107,6 +107,7 @@ class NoTradePill(_StripePill):
 
 
 CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) en verde, bajista (corto) en rojo
+HTF_BOX = "#C9CDD6"                                       # cajas de las velas C1 y C2 del HTF: gris claro, para no confundirlas con las velas
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo"}
 
@@ -119,7 +120,7 @@ class CrtPill(_StripePill):
     def __init__(self, crt: dict) -> None:
         result, color = RESULTS.get(str(crt["state"]), (str(crt["state"]), None))
         long = crt["direction"] == "long"
-        outside = -PILL_GAP if long else 1 + PILL_GAP
+        outside = -(PILL_GAP + 1.25) if long else 1 + PILL_GAP       # el alcista deja sitio debajo de la caja para el «C2»
         super().__init__(anchor=(0, outside), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
                          border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
         tone = CRT_COLORS[crt["direction"]]
@@ -998,7 +999,7 @@ class ChartView(pg.PlotWidget):
         self._draw_crts()
 
     def _draw_crts(self) -> None:
-        """Las velas C1 y C2 del HTF como dos cajas (C1 tenue, C2 del color del CRT), el nivel barrido de C1 y la etiqueta discreta."""
+        """Las velas C1 y C2 del HTF como dos cajas grises (con su nombre debajo), el nivel barrido de C1 y la etiqueta discreta."""
         pi = self.getPlotItem()
         for item in self._crt_items:
             pi.removeItem(item)
@@ -1013,10 +1014,10 @@ class ChartView(pg.PlotWidget):
             c2lo, c2hi = crt["c2"]
             short = crt["direction"] == "short"
             tone = CRT_COLORS[crt["direction"]]
-            border = BOX_BORDER.get(str(crt["state"]), RESULTS.get(str(crt["state"]), ("", None))[1] or tone)
-            for lo, hi, brush, pen_color, width, left, right in (
-                    (c1lo, c1hi, _alpha(theme.MUTED, 22), _alpha(theme.MUTED, 110), 1.0, xc1, x0),
-                    (c2lo, c2hi, _alpha(tone, 34), QColor(border), 1.5, x0, x1)):
+            htf = f"H{int(crt.get('htf', 180)) // 60}"
+            for lo, hi, brush, pen_color, width, left, right, name in (
+                    (c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0, "C1"),
+                    (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1, "C2")):
                 box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
                 box.setBrush(brush)
                 pen = QPen(pen_color, width)
@@ -1025,9 +1026,15 @@ class ChartView(pg.PlotWidget):
                 box.setZValue(-7)
                 pi.addItem(box, ignoreBounds=True)
                 self._crt_items.append(box)
+                label = pg.TextItem(anchor=(0.5, -0.15))                    # el nombre de la vela, debajo de su caja
+                label.setHtml(f'<span style="font-size:8pt; color:{HTF_BOX}">{name} · {htf}</span>')
+                label.setPos((left + right) / 2, lo)
+                label.setZValue(7)
+                pi.addItem(label, ignoreBounds=True)
+                self._crt_items.append(label)
             swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
             line = pg.PlotCurveItem(x=np.array([xc1, x1]), y=np.array([swept, swept]),
-                                    pen=pg.mkPen(tone, width=1, style=Qt.PenStyle.DashLine))
+                                    pen=pg.mkPen(HTF_BOX, width=1, style=Qt.PenStyle.DashLine))
             line.setZValue(-6)
             pi.addItem(line, ignoreBounds=True)
             self._crt_items.append(line)
