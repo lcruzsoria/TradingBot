@@ -273,8 +273,11 @@ def main() -> None:
     ch.dot(isw, hx, RED, 7, ring=True)
     ch.text(ch.X(i3 - 2) - 6, box_y - 54 if up else box_y + 70, f"FVG {'bajista' if up else 'alcista'} M{m}: {z_bot:,.2f}–{z_top:,.2f}\n"
             f"vela 3 cerrada {fmt_ny(z[3], '%d/%m %H:%M')}, sin mitigar", "#c2410c", 13, "700")
-    ch.arrow(ch.X(isw) - 56, ch.Y(hx) + (-34 if up else 34), ch.X(isw) - 9, ch.Y(hx) + (-5 if up else 5), RED)
-    ch.text(ch.X(isw) - 62, ch.Y(hx) + (-44 if up else 44), f"El {'máximo' if up else 'mínimo'} del sweep ({fmt_ny(ts[ih], '%H:%M')}, {hx:,.2f})\nentra en el FVG", RED, 13, "700", "end")
+    right = ch.X(isw) < ch.x0 + 0.62 * ch.pw                                              # hay sitio libre a la derecha del extremo
+    d = 1 if right else -1
+    ch.arrow(ch.X(isw) + d * 56, ch.Y(hx) + (-46 if up else 46), ch.X(isw) + d * 9, ch.Y(hx) + (-6 if up else 6), RED)
+    ch.text(ch.X(isw) + d * 62, ch.Y(hx) + (-52 if up else 52), f"El {'máximo' if up else 'mínimo'} del sweep ({fmt_ny(ts[ih], '%H:%M')}, {hx:,.2f})\nentra en el FVG",
+            RED, 13, "700", "start" if right else "end")
     ch.text(ch.x0 + 14, ch.y0 + ch.h - 12, f"MTF M{m} · {fmt_ny(mb['ts'][a], '%d/%m %H:%M')} – {fmt_ny(mb['ts'][b], '%d/%m %H:%M')} NY · franja ámbar: la vela C2 (H3)", MUTED, 12, "500")
     others = [f"M{o[0]} {min(px(o[1]), px(o[2])):,.2f}–{max(px(o[1]), px(o[2])):,.2f}" for o in zones if o[0] != m]
     cards = [("Paso 2 · FVG de MTF tocado (liquidez interna)",
@@ -312,20 +315,23 @@ def main() -> None:
     ch.text(ch.X((sa + se) / 2), ch.y0 + (ch.h - 40 if up else 36), f"secuencia {'alcista' if up else 'bajista'}\ndel sweep ({fmt_ny(ts[sa], '%H:%M')}–{fmt_ny(ts[se], '%H:%M')})", MUTED, 12, "700", "middle")
     ch.dot(ih, hx, RED, 6, ring=True)
     ch.text(ch.X(ih) - 12, ch.Y(hx) + (-10 if up else 22), f"extremo del sweep {fmt_ny(ts[ih], '%H:%M')}", RED, 12, "700", "end")
-    ch.text(ch.X(kf - 2) - 8, ch.Y(max(f_bot, f_top)) - 30 if up else ch.Y(min(f_bot, f_top)) + 44,
-            f"FVG {'alcista' if up else 'bajista'} M5 ({fmt_ny(ts[kf], '%H:%M')})\nse convertirá en iFVG", PURPLE, 12, "700", "end")
+    box_lo, box_hi = float(bars["low"][kf - 2:kf + 1].min()), float(bars["high"][kf - 2:kf + 1].max())
+    ch.text(ch.X(kf - 1), ch.Y(box_lo) + 26 if up else ch.Y(box_hi) - 22,
+            f"FVG {'alcista' if up else 'bajista'} M5 ({fmt_ny(ts[kf], '%H:%M')})\nse convertirá en iFVG", PURPLE, 12, "700", "middle")
     cy = bars["close"][jc]
+    ty = ch.y0 + 64 if up else ch.y0 + ch.h - 90                                        # zona libre sobre (o bajo) las velas
     if mi == jc:
         txt = (f"{fmt_ny(ts[jc], '%H:%M')} la vela cierra {'bajo' if up else 'sobre'} la base del FVG ({base_fvg:,.2f}) → iFVG\n"
                f"y {'bajo' if up else 'sobre'} la apertura de la secuencia ({level:,.2f}) → CISD")
-        ch.arrow(ch.X(jc) - 40, ch.Y(cy) + sgn_y * 46, ch.X(jc) - 4, ch.Y(cy) + sgn_y * 5, PURPLE)
-        ch.text(ch.X(jc) - 46, ch.Y(cy) + sgn_y * 52, txt, PURPLE, 12, "700", "end")
+        ch.arrow(ch.X(ih) - 30, ty + (22 if up else -6), ch.X(jc) - 4, ch.Y(cy) + (-4 if up else 4), PURPLE)
+        ch.text(ch.X(ih) - 36, ty, txt, PURPLE, 12, "700", "end")
     else:
         cm = bars["close"][mi]
-        ch.arrow(ch.X(mi) - 36, ch.Y(cm) + sgn_y * 40, ch.X(mi) - 3, ch.Y(cm) + sgn_y * 5, PURPLE)
-        ch.text(ch.X(mi) - 42, ch.Y(cm) + sgn_y * 46, f"{fmt_ny(ts[mi], '%H:%M')} cierra {'bajo' if up else 'sobre'} la base del FVG: iFVG", PURPLE, 12, "700", "end")
-        ch.arrow(ch.X(jc) - 36, ch.Y(cy) + sgn_y * 78, ch.X(jc) - 3, ch.Y(cy) + sgn_y * 5, PURPLE)
-        ch.text(ch.X(jc) - 42, ch.Y(cy) + sgn_y * 84, f"{fmt_ny(ts[jc], '%H:%M')} CISD: cierra {cy:,.2f}, {'bajo' if up else 'sobre'} {level:,.2f}", PURPLE, 12, "700", "end")
+        ch.arrow(ch.X(ih) - 30, ty + (22 if up else -6), ch.X(mi) - 3, ch.Y(cm) + (-4 if up else 4), PURPLE)
+        ch.text(ch.X(ih) - 36, ty, f"{fmt_ny(ts[mi], '%H:%M')} cierra {'bajo' if up else 'sobre'} la base del FVG: iFVG", PURPLE, 12, "700", "end")
+        ty2 = ty + (46 if up else -46)
+        ch.arrow(ch.X(ih) - 30, ty2 + (22 if up else -6), ch.X(jc) - 3, ch.Y(cy) + (-4 if up else 4), PURPLE)
+        ch.text(ch.X(ih) - 36, ty2, f"{fmt_ny(ts[jc], '%H:%M')} CISD: cierra {cy:,.2f}, {'bajo' if up else 'sobre'} {level:,.2f}", PURPLE, 12, "700", "end")
     ch.dot(jc, cy, PURPLE, 6)
     ch.arrow(ch.X(start) + 34, ch.Y(entry) + sgn_y * -40, ch.X(start) + 3, ch.Y(entry) + sgn_y * -4, BLUE)
     ch.text(ch.X(start) + 40, ch.Y(entry) + sgn_y * -50, f"{fmt_ny(ts[start], '%H:%M')} ENTRADA 1: a mercado en la\napertura de la vela siguiente\na la del CISD ({entry:,.2f})", BLUE, 12, "700")
