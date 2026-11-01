@@ -168,7 +168,7 @@
   <text x="62" y="1178" font-size="19" font-weight="700" fill="#b45309">Supuestos míos por confirmar antes de programar</text>
   <g font-size="14.5" fill="#334155">
     <text x="62" y="1212">a) FVG de MTF creado antes del sweep y más allá del extremo de C1: bajista y por encima en cortos; alcista y por debajo en largos.</text>
-    <text x="62" y="1240">b) El sweep de HTF debe cerrar dentro del rango de C1 (regla CRT original). Si cierra fuera, no hay patrón.</text>
+    <text x="62" y="1240">b) C2 debe cerrar dentro del rango de C1: solo se exige al esperar su cierre. El CISD solo pide cerrar más allá de la secuencia.</text>
     <text x="62" y="1268">c) A las 18:00 NY no se abren más entradas y lo que siga abierto se cierra. Hay que confirmarlo.</text>
     <text x="62" y="1296">d) Entrada ③: se entra a la apertura de la vela siguiente a la primera vela sin mecha.</text>
     <text x="62" y="1324">e) «Toca» = el máximo (mínimo) del sweep entra en la zona del FVG, aunque no la cruce entera.</text>

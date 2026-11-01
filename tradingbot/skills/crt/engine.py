@@ -35,6 +35,8 @@ class Rule:
                                                          # False = regla anterior: basta con que su zona llegue más allá de ese extremo
     touch_tol: float = 0.0                               # tolerancia al tocar el FVG, en fracción del precio
     leg_min: int = 120                                   # minutos hacia atrás para buscar el FVG LTF del tramo del sweep
+    inside_c1: bool = False                              # el CISD exige además un cierre dentro del rango de C1. Era una exigencia añadida
+                                                         # por el motor (no está en la definición del CISD) que retrasaba la entrada
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
     wait_c2: bool = False                                # sin look-ahead: espera al cierre de C2 y busca el CISD hasta el final de C3
     rr: float = 2.0
@@ -168,7 +170,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
                 while st - 1 >= 0 and cl_[st - 1] > op_[st - 1]:
                     st -= 1
                 level = op_[st]
-                if cl_[j] < level and cl_[j] < c1h and (not rule.wait_c2 or j >= b):
+                if cl_[j] < level and (not rule.inside_c1 or cl_[j] < c1h) and (not rule.wait_c2 or j >= b):
                     trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": float(hx), "level": float(level),
                             "z_bottom": float(hi_[kf - 2]), "z_top": float(lo_[kf]),
                             "mtf": "/".join(sorted({f"M{z[0]}" for z in hit}, key=lambda x: int(x[1:]))),

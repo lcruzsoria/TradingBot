@@ -83,7 +83,7 @@ Estas son las lecturas para el código. Se congelan antes de ver resultados.
 | Más allá de C1 | La base de la zona está estrictamente por encima del máximo de C1 (cortos) / el techo por debajo del mínimo (largos): `Rule.fvg_above` |
 | Antigüedad del FVG | Máximo 10 días (sensibilidad: 3 y 30) |
 | Toca | El extremo del sweep cae dentro de la zona del FVG (sensibilidad: con tolerancia del 0,05 %) |
-| Cierre dentro del rango | En vivo no se conoce hasta el final de C2: el CISD exige que el precio ya esté de nuevo dentro del rango de C1 |
+| Cierre dentro del rango | En vivo no se conoce hasta el final de C2. El CISD **no** lo exige: es solo el cierre más allá de la apertura de la secuencia (corrección del 03/11/2026: antes se exigía además un cierre dentro del rango de C1 y retrasaba la entrada; sigue como sensibilidad `inside_c1`). Para exigirlo de verdad: variante `--esperar-c2` |
 | Ventana del CISD | Dentro de C2 |
 | Entrada 2 (retesteo) | Orden límite en la base del iFVG tras una continuación (nuevo mínimo bajo el de la vela del CISD). Se cancela si toca el stop o el objetivo antes |
 | Entrada 3 (sin mecha) | Vela bajista con máximo = apertura (cortos); entrada en la apertura de la siguiente |

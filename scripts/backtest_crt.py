@@ -4,9 +4,10 @@ REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS A
 - HTF = H3 con las velas alineadas a las 18:00 NY (18, 21, 0, 3 ... 15). Sweep: una vela H3 (C2) supera el máximo (o mínimo) de la
   anterior (C1). Máximo barrido -> corto; mínimo barrido -> largo. El largo se calcula como el corto con los precios cambiados
   de signo, así que las dos direcciones usan exactamente el mismo código.
-- "Cierra dentro del rango": en vivo no se conoce hasta que C2 termina, así que el CISD exige que el precio ya esté de vuelta
-  dentro del rango de C1 (cierre LTF por debajo del máximo de C1, en cortos). Variante informativa, CON look-ahead: exigir además
-  que C2 cierre dentro del rango de C1.
+- "Cierra dentro del rango": en vivo no se conoce hasta que C2 termina. El CISD es solo el cierre más allá de la apertura de la
+  secuencia del sweep (antes se le exigía además un cierre dentro del rango de C1, que retrasaba la entrada: es la fila «CISD con
+  cierre dentro de C1» de la sensibilidad). Para exigir que C2 cierre dentro de C1: --esperar-c2 (sin look-ahead) o, con look-ahead
+  y solo informativo, la fila «C2 cierra dentro de C1».
 - Si C2 supera los dos extremos de C1 a la vez, ese setup se descarta.
 - MTF = M15, M30 y H1 (se agregan de M5). Criterio 2: el máximo del sweep (el más alto de C2 hasta el momento) está dentro de un
   FVG bajista de MTF (largos: el mínimo dentro de un FVG alcista). Definiciones operativas:
@@ -351,10 +352,12 @@ def main() -> None:
                         ("antigüedad del FVG 3 días", replace(base_rule, lookback_days=3)),
                         ("antigüedad del FVG 30 días", replace(base_rule, lookback_days=30)),
                         ("tolerancia al tocar el FVG 0,05 % del precio", replace(base_rule, touch_tol=0.0005)),
+                        ("CISD con cierre dentro de C1 (la versión anterior)", replace(base_rule, inside_c1=True)),
                         ("exigir que C2 cierre dentro de C1 (look-ahead)", replace(base_rule, close_inside=True)),
                         ("sin BE", replace(base_rule, be_at=0.0)), ("objetivo 3R", replace(base_rule, rr=3.0))):
         for tf in ltfs:
-            if (rule.lookback_days, rule.touch_tol, rule.fvg_above) != (base_rule.lookback_days, base_rule.touch_tol, base_rule.fvg_above):
+            if (rule.lookback_days, rule.touch_tol, rule.fvg_above, rule.inside_c1) != (base_rule.lookback_days, base_rule.touch_tol,
+                                                                                       base_rule.fvg_above, base_rule.inside_c1):
                 st, _ = find_setups(raw[(P, 5)][1], raw[(P, tf)][1], tf, rule)
             else:
                 st = setups_by[(P, tf)]

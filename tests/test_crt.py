@@ -215,3 +215,16 @@ def test_el_perfil_crt_trae_su_skill_y_quita_pattern_tbr_y_calendario(tmp_path):
     assert [s["type"] for s in kept] == ["cortex", "setup", "crt"]
     assert kept[-1]["slot"] == "aux2"
     assert strategy_skills([{"type": "cortex"}], "calendario") == [{"type": "cortex"}]      # CRT no se cuela en otros perfiles
+
+
+def test_el_cisd_es_solo_el_cierre_mas_alla_de_la_secuencia_sin_exigir_el_rango_de_c1():
+    """El nivel del CISD (103.2) queda por encima del máximo de C1 (aquí 102.5): el cierre de las 06:50 (103.1) pasa el nivel pero no está
+    dentro del rango de C1. Es lo que desfasaba la entrada en EURUSD: la exigencia añadida de «cierre dentro de C1» retrasaba el CISD."""
+    df = scenario()
+    c1 = (df["ts"] >= pd.Timestamp("2026-10-13 03:00").value // 10**9 + AHEAD) & (df["ts"] < pd.Timestamp("2026-10-13 06:00").value // 10**9 + AHEAD)
+    cols = ["open", "high", "low", "close"]
+    df.loc[c1, cols] = df.loc[c1, cols].clip(upper=102.5)
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0]
+    assert len(st) == 1 and ny(df["ts"][st[0]["jc"]]) == "2026-10-13 06:50"                 # el CISD es la primera vela que cierra bajo el nivel
+    old = engine.find_setups(df, df, 5, engine.Rule(inside_c1=True), CFG)[0]
+    assert len(old) == 1 and ny(df["ts"][old[0]["jc"]]) == "2026-10-13 06:55"               # la versión anterior esperaba una vela más
