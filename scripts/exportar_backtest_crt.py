@@ -85,7 +85,7 @@ def download_missing() -> None:
 
 
 def simulate() -> pd.DataFrame:
-    rows, funnels, data = [], [], []
+    rows, funnels, data, invalid, valid = [], [], [], [], []
     for gkey, (gname, symbols) in GROUPS.items():
         bc.configure("indices" if gkey == "indices" else "forex")                    # fija el mercado (H3 / H4 y cierre de sesión)
         for profile, want in symbols:
@@ -95,6 +95,9 @@ def simulate() -> pd.DataFrame:
                 t0 = time.time()
                 setups, funnel = bc.find_setups(base, ltf, tf, engine.Rule())          # los setups no dependen del objetivo
                 row = {"grupo": gkey, "mercado": sym, "ltf": tf, **funnel}
+                valid += [{"grupo": gkey, "mercado": sym, "C2": s["C2"], "d": int(s["sign"] > 0)} for s in setups]
+                invalid += [{"grupo": gkey, "mercado": sym, "ltf": tf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
+                             "t extremo": int(ltf["ts"].iloc[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.invalid]
                 for entry in ENTRIES:
                     for code, (_, rule) in TARGETS.items():
                         t = bc.run_variant(ltf, setups, entry, tf, rule)
@@ -111,7 +114,8 @@ def simulate() -> pd.DataFrame:
     trades = pd.concat(rows, ignore_index=True)
     trades["zona"] = tbr_zone(trades["entrada (NY)"])
     TRADES.parent.mkdir(exist_ok=True)
-    pd.to_pickle({"operaciones": trades, "embudo": pd.DataFrame(funnels), "datos": pd.DataFrame(data)}, TRADES)
+    pd.to_pickle({"operaciones": trades, "embudo": pd.DataFrame(funnels), "datos": pd.DataFrame(data),
+                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid)}, TRADES)
     print(f"{len(trades)} operaciones -> {TRADES}")
     return trades
 
@@ -168,8 +172,30 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
         "embudo_crt": [{"mercado": r["mercado"], "ltf": int(r["ltf"]), "sweeps": int(r["velas HTF con sweep"]),
                         "fvg": int(r["con FVG de MTF formado tras el extremo"]), "toque": int(r["con vuelta al FVG"]),
                         "ifvg": int(r["con iFVG"]), "cisd": int(r["con CISD"]), "e1": int(r["entrada 1"]), "e2": int(r["entrada 2"]),
-                        "e3": int(r["entrada 3"]), "e4": int(r["entrada 4"])} for _, r in funnel.iterrows()],
+                        "e3": int(r["entrada 3"]), "e4": int(r["entrada 4"]), "inv": int(r["invalidados"])} for _, r in funnel.iterrows()],
+        "invalidos": invalid_cols(saved, gkey, markets),
         "metodologia": methodology(gkey)}
+
+
+REASONS = ["sin FVG de MTF", "sin vuelta al FVG de MTF", "sin iFVG invertido"]
+
+
+def invalid_cols(saved: dict, gkey: str, markets: list[str]) -> dict:
+    """Sweeps invalidados (el precio llegó al extremo opuesto de C1 sin completar el setup), para marcarlos en el gráfico. Una fila por
+    vela C2 y dirección: solo si ningún LTF dio setup válido en ella (si varios los invalidan, vale el motivo del primero)."""
+    inv, val = saved.get("invalidos"), saved.get("validos")
+    if inv is None or not len(inv):
+        return {}
+    inv = inv[inv["grupo"] == gkey]
+    if val is not None and len(val):
+        ok = set(map(tuple, val[val["grupo"] == gkey][["mercado", "C2", "d"]].to_numpy().tolist()))
+        inv = inv[[(m, c, d) not in ok for m, c, d in inv[["mercado", "C2", "d"]].to_numpy().tolist()]]
+    inv = inv.sort_values(["mercado", "C2", "d", "ltf"]).drop_duplicates(["mercado", "C2", "d"]).reset_index(drop=True)
+    inv = inv[inv["mercado"].isin(markets)].reset_index(drop=True)
+    return {"m": inv["mercado"].map({m: i for i, m in enumerate(markets)}).astype(int).tolist(),
+            "c": ((inv["C2"].astype(np.int64) - AHEAD) // 60).tolist(), "d": inv["d"].astype(int).tolist(),
+            "th": ny_min(inv["t extremo"]), "ps": floats(inv["precio"], 5),
+            "mo": inv["motivo"].map({r: i for i, r in enumerate(REASONS)}).astype(int).tolist(), "motivos": REASONS}
 
 
 def methodology(gkey: str) -> list[list[str]]:
@@ -178,10 +204,12 @@ def methodology(gkey: str) -> list[list[str]]:
     return [
         ["Qué es", f"Candle Range Theory, variante B (docs/estrategia_crt/GUIA.md). Backtest con el mismo motor que la skill CRT "
                    f"(tradingbot/skills/crt/engine.py), sin sesgo ni TBR: las TBR solo sirven para clasificar cada entrada."],
-        ["Pasos", f"1) Una vela {htf} toma el máximo (mínimo) de la anterior y vuelve a entrar en su rango. 2) Esa mecha toca un FVG de MTF "
-                  "(M15, M30 o H1) creado antes: bajista y entero por encima del máximo de C1 en cortos; alcista y por debajo del mínimo en largos. "
-                  "3) En el LTF (M5, M3 o M1) el precio invierte un FVG del tramo del sweep (iFVG). 4) Una vela cierra más allá de la apertura "
-                  "de la secuencia que hizo el sweep (CISD)."],
+        ["Pasos", f"Dentro de C2 (C1 = rango, C2 = manipulación, C3 = expansión). 1) Una vela {htf} (C2) toma con una mecha el máximo (mínimo) "
+                  "de la anterior; si ya había tomado el otro extremo antes, el sweep es el del otro lado. 2) Tras el extremo nace un FVG de MTF "
+                  "(M15, M30 o H1) y el precio vuelve a él (basta tocarlo). 3) En el LTF (M5, M3 o M1) se forma después del toque un FVG que el "
+                  "precio invierte con un cierre al otro lado de su base: iFVG = CISD. 4) Entrada antes de que cierre C2."],
+        ["Invalidados", "Si el precio llega al extremo opuesto de C1 (el objetivo) sin haber completado los pasos 2 y 3, el setup queda invalidado: "
+                        "no se opera y se marca en el gráfico («Invalidado»). La columna Invalidados del embudo los cuenta."],
         ["Entradas", "1: a mercado en la apertura de la vela siguiente a la del CISD. 2: retesteo del iFVG tras una continuación (orden "
                      "límite en su base). 3: primera vela sin mecha tras el CISD, entrando en la siguiente apertura. Cada una es un backtest."],
         ["Objetivos", "Tres variantes, cada una con su backtest: 1R (sin BE), 2R (a 1R el stop pasa a la entrada, el que usa el bot) y el "

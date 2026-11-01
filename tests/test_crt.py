@@ -33,7 +33,7 @@ def test_el_escenario_da_un_unico_corto_con_todos_los_pasos():
     setups, funnel = engine.find_setups(df, df, 5, RULE, CFG)
     assert len(setups) == 1
     assert funnel["velas HTF con sweep"] >= 1                                         # (el relleno del día 1 también tiene sweeps sin FVG)
-    assert [funnel[k] for k in list(funnel)[1:]] == [1, 1, 1, 1]
+    assert [funnel[k] for k in list(funnel)[1:5]] == [1, 1, 1, 1]
     st = setups[0]
     assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M15"
     assert ny(df["ts"][st["ih"]]) == "2026-10-13 06:35"                               # el extremo del sweep
@@ -93,6 +93,20 @@ def test_regla_1_se_descarta_si_el_extremo_de_c1_da_menos_de_2r_y_se_anota_el_r_
     assert reach == pytest.approx((103.1 - L["low"][ep["start"]:].min()) / 5.4) and reach > 2.0   # el escenario baja a 92.3: 2 R, no 0.57
 
 
+def test_si_ya_hay_una_operacion_abierta_no_se_abre_otra_ni_en_sentido_contrario():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import backtest_crt as bt
+    bt.configure("indices")
+    df = scenario()
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
+    L = engine.view(df, 1)
+    ep = engine.entry_point(L, st, 1, 5, RULE, CFG)
+    segundo = dict(st, jc=ep["start"] + 1, sign=-1, dirección="long")             # otro setup, de sentido contrario, con la primera operación abierta
+    both = bt.run_variant(df, [st, segundo], 1, 5, RULE)
+    assert len(bt.run_variant(df, [segundo], 1, 5, RULE)) == 1                    # solo, sí daría operación
+    assert len(both) == 1 and both["dirección"].iloc[0] == "short"                 # no se abre; la primera sigue su curso
+
+
 def test_con_be_a_1r_un_retroceso_cierra_a_cero():
     df = scenario()
     st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
@@ -149,11 +163,32 @@ def test_un_extremo_nuevo_reinicia_el_setup():
     assert setups == []                                                          # el FVG y la vuelta eran del extremo anterior
 
 
-def test_si_c2_barre_los_dos_extremos_de_c1_antes_de_la_entrada_no_hay_setup():
+def c2_invalid(setups) -> list:
+    """Los invalidados de la C2 del escenario (06:00 NY); el relleno del día 1 también tiene sweeps."""
+    return [x for x in setups.invalid if x["C2"] == at("06:00")]
+
+
+def test_si_el_precio_llega_al_extremo_opuesto_de_c1_sin_completar_el_setup_queda_invalidado():
     df = scenario()
     i = int(df.index[df["ts"] == at("06:55")][0])
-    df.loc[i, "low"] = 99.0                                                      # C2 pasa también el mínimo de C1 (100) antes del CISD
-    assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
+    df.loc[i, "low"] = 99.0                                                      # C2 pasa el mínimo de C1 (100) antes de que haya FVG de MTF
+    setups, funnel = engine.find_setups(df, df, 5, RULE, CFG)
+    assert setups == []
+    [inv] = c2_invalid(setups)
+    assert (inv["dirección"], inv["motivo"], inv["stop"]) == ("short", "sin FVG de MTF", 108.5)
+    df2 = scenario()
+    j = int(df2.index[df2["ts"] == at("07:20")][0])
+    df2.loc[j, "low"] = 99.0                                                     # ahora lo alcanza con el FVG ya formado pero sin iFVG invertido
+    st2 = engine.find_setups(df2, df2, 5, RULE, CFG)[0]
+    assert st2 == [] and [x["motivo"] for x in c2_invalid(st2)] == ["sin iFVG invertido"]
+
+
+def test_si_c2_tomo_antes_el_otro_extremo_el_sweep_es_el_del_otro_lado():
+    df = scenario()
+    i = int(df.index[df["ts"] == at("06:05")][0])
+    df.loc[i, "low"] = 99.0                                                      # C2 toma antes el mínimo de C1: no es un corto
+    setups, _ = engine.find_setups(df, df, 5, RULE, CFG)
+    assert setups == [] and [x["dirección"] for x in c2_invalid(setups)] == ["long"]  # y el largo se invalida al llegar después al máximo de C1
 
 
 def test_el_cisd_es_la_inversion_del_ifvg_sin_mirar_la_secuencia_ni_el_rango_de_c1():

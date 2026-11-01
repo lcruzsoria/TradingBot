@@ -26,7 +26,8 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade. 
 
 ### Paso 1 · Sweep en HTF (liquidez externa)
 - Una vela HTF (C2) supera con una mecha el máximo (o mínimo) de la vela anterior (C1). El extremo del sweep es el máximo de C2 hasta el momento; si C2 hace un máximo nuevo, el setup se reinicia con ese extremo.
-- Si C2 supera también el otro extremo de C1 antes de la entrada, no hay sesgo y no se opera.
+- **El primer extremo que toma C2 manda:** si C2 ya había tomado el mínimo de C1 antes de tomar el máximo, el sweep es el del mínimo (largo), no un corto.
+- **Invalidado:** si el precio llega al extremo opuesto de C1 (el objetivo) sin haber encontrado el FVG de MTF, la vuelta a él o el iFVG invertido, el setup queda invalidado: no se opera, se cuenta en el backtest («Invalidados», con su motivo) y se marca en el gráfico («CRT bajista · Invalidado»).
 - Máximo barrido → **corto**. Mínimo barrido → **largo**.
 
 ### Paso 2 · FVG de MTF que nace del desplazamiento, y vuelta a él

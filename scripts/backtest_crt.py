@@ -61,6 +61,7 @@ CFG = engine.INDICES                                     # mercado en curso (lo 
 LTFS = (5, 3)
 VARIANTS = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha", 4: "cierre del CISD"}
 MIN_OPS, MIN_MEAN, MIN_T = 100, 0.05, 2.0
+INVALID_REASONS = ("sin FVG de MTF", "sin vuelta al FVG de MTF", "sin iFVG invertido")
 DATASETS = (("puprime", "NAS100"), ("metaquotes", "NAS100"))                          # el control, al final
 MARKETS = {
     "indices": dict(htf="H3", htf_min=180, origin=18 * 3600, session_end=18 * 3600, suffix="", unit=1.0, unit_name="pts",
@@ -170,7 +171,7 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
             "stop": sgn * hx, "objetivo": sgn * mg["target"], "salida": sgn * mg["exit_price"], "riesgo": risk,
             "riesgo %": 100 * risk / abs(entry), "cómo": mg["cómo"], "R bruto": mg["gross"], "coste (R)": mg["cost"],
             "R neto": mg["gross"] - mg["cost"], "R planificado": (ep["entry"] - mg["target"]) / risk, "R máx": reach,
-            "C2": st["C2"], "_ts_exit": int(ts[j]),
+            "C2": st["C2"], "_ts_entry": int(ts[start]), "_ts_exit": int(ts[j]),
             # para auditar el criterio en el gráfico: el iFVG invertido, el CISD y las horas de cada paso (hora de servidor)
             "iFVG bajo": min(sgn * st["z_bottom"], sgn * st["z_top"]), "iFVG alto": max(sgn * st["z_bottom"], sgn * st["z_top"]),
             "CISD": sgn * st["level"], "t iFVG": int(ts[st["kf"] - 2]), "t inversión": int(ts[st["m_inv"]]), "t CISD": int(ts[st["jc"]]),
@@ -179,18 +180,20 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
 
 def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rule: Rule) -> pd.DataFrame:
     views = {1: view(ltf, 1), -1: view(ltf, -1)}
-    rows, skipped, last_exit = [], [], 0
+    rows, skipped, cands = [], [], []
     for st in setups:
-        L = views[st["sign"]]
-        if int(L["ts"][st["jc"]]) < last_exit:             # sigue abierta la operación anterior
-            continue
-        r = execute(L, st, variant, ltf_min, rule)
+        r = execute(views[st["sign"]], st, variant, ltf_min, rule)
         if r is None:
             continue
         if r.get("_skip"):                                 # descartado: no se opera, solo se anota lo que habría dado
             skipped.append(r)
             continue
         if rule.close_inside and not r["C2 cierra dentro"]:
+            continue
+        cands.append(r)
+    last_exit = 0
+    for r in sorted(cands, key=lambda x: x["_ts_entry"]):   # por hora de entrada: si ya hay una operación abierta no se abre otra (tampoco en sentido contrario)
+        if r.pop("_ts_entry") <= last_exit:
             continue
         last_exit = r.pop("_ts_exit")
         rows.append(r)
@@ -310,7 +313,20 @@ def main() -> None:
     frows = []
     for (k, tf), fn in funnels.items():
         frows.append([f"{raw[(k, tf)][0]} M{tf}"] + [fn[x] for x in fn] + [len(setups_by[(k, tf)])])
-    out += [table(frows, ["Mercado", *list(next(iter(funnels.values())).keys()), "setups finales"]), ""]
+    out += [table(frows, ["Mercado", *list(next(iter(funnels.values())).keys()), "setups finales"]), "",
+            "## Invalidados", "",
+            "Un setup queda **invalidado** si el precio llega al extremo opuesto de C1 (el objetivo) antes de encontrar el FVG de MTF, la vuelta a él o "
+            "el iFVG invertido. No se opera; se anota por qué. Detalle en `analisis/backtest_crt_*_invalidados.csv`.", ""]
+    irows = []
+    for (k, tf) in funnels:
+        inv = pd.DataFrame(setups_by[(k, tf)].invalid)
+        by = inv["motivo"].value_counts() if len(inv) else pd.Series(dtype=int)
+        irows.append([f"{raw[(k, tf)][0]} M{tf}", len(inv)] + [int(by.get(m, 0)) for m in INVALID_REASONS])
+        if len(inv) and k == P:
+            inv["C2 (NY)"] = pd.to_datetime(inv["C2"] - AHEAD, unit="s")
+            inv[["C2 (NY)", "dirección", "motivo", "stop"]].to_csv(
+                ROOT / "analisis" / f"backtest_crt_{DATASETS[0][0]}_{DATASETS[0][1].lower()}_m{tf}_invalidados.csv", index=False)
+    out += [table(irows, ["Mercado", "Invalidados", *INVALID_REASONS]), ""]
     out += [f"## Resultados en {mk['primary']} (R neto, con spread)", ""]
     for tf in ltfs:
         rows = []

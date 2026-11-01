@@ -38,9 +38,14 @@ def raw(ops: list[tuple]) -> dict:
             "patrones": ["CRT"], "filtros": {"5:1": "M5 · 1"}, "ops": cols, "datos": []}
 
 
-def backtest(ops=None) -> Backtest:
+def backtest(ops=None, invalid=None) -> Backtest:
     ops = ops or [(C2, 1, 5, 1, 0, 1), (C2, 1, 3, 1, 1, 3), (C2, 1, 5, 2, 2, 1)]
-    return Backtest([Group("crt:indices", "Índices", raw(ops))], {})
+    group = raw(ops)
+    if invalid:                                                                        # (C2, dirección, hora del extremo, precio, motivo)
+        group["invalidos"] = {"m": [0] * len(invalid), "c": [x[0] for x in invalid], "d": [x[1] for x in invalid], "th": [x[2] for x in invalid],
+                              "ps": [x[3] for x in invalid], "mo": [x[4] for x in invalid],
+                              "motivos": ["sin FVG de MTF", "sin vuelta al FVG de MTF", "sin iFVG invertido"]}
+    return Backtest([Group("crt:indices", "Índices", group)], {})
 
 
 def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
@@ -63,6 +68,17 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert mark["fvgs"] == [{"tf": 15, "name": "M15", "x0": first, "x1": i("06:35"), "bottom": 107.5, "top": 110.0}]      # solo el M15 lo toca
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
     assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15", "M30"])
+
+
+def test_un_sweep_invalidado_se_marca_sin_operacion_y_con_su_motivo():
+    from tradingbot.skills.crt.chart import crt_marks
+    df = scenario()
+    ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
+    bt = backtest(invalid=[(C2, 0, C2 + 35, 108.5, 1), (C2, 1, C2 + 35, 108.5, 0)])      # el corto ya tiene operaciones: solo se marca el largo
+    marks = crt_marks(bt, "NAS100.r", ts, high, low, AHEAD, ltf=5, entry=1)
+    assert [(m["direction"], m["state"]) for m in marks] == [("long", "invalido"), ("short", "objetivo")] or         sorted((m["direction"], m["state"]) for m in marks) == [("long", "invalido"), ("short", "objetivo")]
+    inv = next(m for m in marks if m["state"] == "invalido")
+    assert inv["motivo"] == "sin vuelta al FVG de MTF" and inv["ltf"] is None and inv["extreme"]["price"] == 108.5
 
 
 def test_sin_velas_de_la_c2_o_de_otro_mercado_no_hay_marcas():
@@ -145,6 +161,15 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert chart.crt_count == 0 and not chart._crt_items
     win.crt_btn.setChecked(True)
     assert chart.crt_count == 1
+
+
+def test_la_etiqueta_de_un_invalidado_lo_dice(tmp_path, monkeypatch):
+    win = window(tmp_path, monkeypatch)
+    win.backtest = backtest(invalid=[(C2, 0, C2 + 35, 108.5, 2)])
+    win._on_candles(candles_event())
+    pills = win.chart._crt_pills
+    inv = next(p for p in pills if p.result == "Invalidado")
+    assert "CRT alcista" in inv.toPlainText() and inv.toPlainText().strip().endswith("Invalidado")
 
 
 def test_un_crt_alcista_lleva_la_etiqueta_debajo_y_en_verde(tmp_path, monkeypatch):

@@ -1,12 +1,14 @@
 """Motor de la estrategia CRT: el setup se define DENTRO de C2 (la vela HTF que manipula a C1).
 
 C1 = rango, C2 = manipulación, C3 = expansión. Corto (el largo es el espejo, ver `view`):
-  1. C2 supera el máximo de C1 con una mecha (el extremo del sweep, que va subiendo mientras C2 sigue haciendo máximos).
+  1. C2 supera el máximo de C1 con una mecha (el extremo del sweep, que va subiendo mientras C2 sigue haciendo máximos). Si C2 ya había
+     tomado el mínimo de C1 antes, el sweep es el del mínimo (un largo), no este.
   2. Tras ese extremo, el desplazamiento a la baja deja un FVG BAJISTA de MTF (M15/M30/H1) que nace DESPUÉS del extremo, y el precio
      vuelve a él (basta con que lo toque la mecha).
   3. En LTF (M5/M3/M1), después del toque, el precio deja un FVG ALCISTA (su 3.ª vela cierra tras el toque; sin plazo) que invierte con un
      cierre por debajo de su base: es el iFVG y esa inversión es el CISD.
   4. Entrada en corto, con el stop en el extremo del sweep. Todo ocurre antes de que cierre C2: no se espera a saber si C2 cierra dentro.
+Si el precio llega al extremo opuesto de C1 (el objetivo) sin haber completado los pasos 2 y 3, el setup queda INVALIDADO (`Setups.invalid`).
 Lo usan la skill CRT (en directo) y scripts/backtest_crt.py (histórico): es el mismo código, así lo probado es lo que se opera.
 Reglas completas en docs/estrategia_crt/GUIA.md.
 """
@@ -81,6 +83,14 @@ def session_end(ts: int, cfg: Cfg) -> int:
 
 # -- setups --------------------------------------------------------------------------------------------------------------
 
+class Setups(list):
+    """Lista de setups válidos; `invalid` guarda los invalidados (el precio llegó al extremo opuesto de C1 sin completar el setup)."""
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.invalid: list[dict] = []
+
+
 def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule, cfg: Cfg) -> tuple[list, dict]:
     """Todos los setups (sweep + FVG de MTF tras el extremo + vuelta + iFVG invertido) de las velas dadas, sin entrada todavía.
 
@@ -88,8 +98,9 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
     """
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
     mtf = {m: aggregate(base, m, cfg) for m in MTF}
-    funnel = {"velas HTF con sweep": 0, "con FVG de MTF formado tras el extremo": 0, "con vuelta al FVG": 0, "con iFVG": 0, "con CISD": 0}
-    setups = []
+    funnel = {"velas HTF con sweep": 0, "con FVG de MTF formado tras el extremo": 0, "con vuelta al FVG": 0, "con iFVG": 0, "con CISD": 0,
+              "invalidados": 0}
+    setups = Setups()
     for sign, name in ((1, "short"), (-1, "long")):
         L, H = view(ltf, sign), view(htf, sign)
         fv = {m: bearish_fvgs(view(mtf[m], sign), m) for m in MTF}
@@ -117,20 +128,27 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
             if not len(rel):
                 continue
             s0 = a + int(rel[0])
+            if s0 > a and lo_[a:s0].min() < c1l:                                # C2 tomó antes el otro extremo de C1: el sweep es el del otro lado
+                continue
             funnel["velas HTF con sweep"] += 1
             ks_all = 2 + a + np.flatnonzero(lo_[a + 2:b] > hi_[a:b - 2])        # velas 3 de los FVG alcistas de LTF (espacio del corto)
             hx, ih, jt, pool, hit = float(hi_[s0]), s0, None, None, []
             seen_zone = seen_touch = seen_ifvg = False
             trig = None
             for j in range(s0, b):
-                if lo_[j] < c1l:                                                # barre los dos extremos de C1
+                if lo_[j] < c1l:                                                # llega al extremo opuesto de C1 sin setup: invalidado
+                    reason = ("sin FVG de MTF" if not seen_zone else "sin vuelta al FVG de MTF" if not seen_touch
+                              else "sin iFVG invertido")
+                    setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "motivo": reason,
+                                           "c1": (c1l, c1h)})
+                    funnel["invalidados"] += 1
                     break
                 if hi_[j] > hx:                                                 # extremo nuevo: lo anterior ya no vale
                     hx, ih, jt, pool, hit = float(hi_[j]), j, None, None, []
                     continue
                 if pool is None:
                     pool = pool_after(int(lts[ih]), int(lts[b - 1]))
-                    seen_zone |= bool(pool)
+                seen_zone = seen_zone or any(z[3] <= lts[j] for z in pool)      # ya existe algún FVG de MTF nacido tras el extremo
                 if jt is None:                                                  # primera vuelta al FVG de MTF: lo toca la mecha
                     hit = [z for z in pool if z[3] <= lts[j] and hi_[j] >= z[1]]
                     if not hit:
