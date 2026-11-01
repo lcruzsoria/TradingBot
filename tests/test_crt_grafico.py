@@ -20,10 +20,14 @@ C2 = int(pd.Timestamp("2026-10-13 06:00").value // 10**9 // 60)                 
 
 def raw(ops: list[tuple]) -> dict:
     """Operaciones CRT en NAS100: (inicio de C2, dirección 0 largo / 1 corto, LTF, entrada, resultado, máscara de FVG de MTF)."""
-    cols = {k: [] for k in ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h")}
+    keys = ("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h", "pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq")
+    cols = {k: [] for k in keys}
     for c2, d, ltf, entry, out, mtf in ops:
-        for k, v in zip(("c", "d", "l", "n", "o", "t", "m", "q", "z", "e", "x", "r", "k", "h"),
-                        (c2, d, ltf, entry, out, mtf, 0, 2, 3, c2 + 60, c2 + 90, 1.9, 0.1, -1)):
+        # el corto del escenario: entra en 103.1 a las 06:55 (C2 + 55 min), stop 108.5 (extremo de las 06:35), objetivo 92.3, iFVG 106.1-107.3
+        # (de las 06:25 a la inversión de las 06:45), CISD en 103.2 a las 06:50 con la secuencia desde las 06:15
+        vals = (c2, d, ltf, entry, out, mtf, 0, 2, 3, c2 + 55, c2 + 70, 1.9, 0.1, -1, 103.1, 108.5, 92.3, 106.1, 107.3, 103.2,
+                c2 + 25, c2 + 45, c2 + 50, c2 + 35, c2 + 15)
+        for k, v in zip(keys, vals):
             cols[k].append(v)
     return {"key": "crt:indices", "nombre": "Índices", "tipo": "crt", "perfil": "crt", "perfil_nombre": "CRT",
             "cats": {"m": ["NAS100.s"], "o": ["objetivo", "stop", "breakeven", "tiempo"],
@@ -48,6 +52,10 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, ["M15"], ["M15", "M30"])
     assert mark["others"] == [(5, 2, "be"), (3, 1, "stop")] or sorted(mark["others"]) == [(3, 1, "stop"), (5, 2, "be")]
     assert mark["when"] == "13/10 06:00"
+    i = lambda hhmm: int(np.searchsorted(ts, int(pd.Timestamp(f"2026-10-13 {hhmm}").value // 10**9) + AHEAD))          # noqa: E731
+    assert mark["pos"] == {"x0": i("06:55"), "x1": i("07:10"), "entry": 103.1, "stop": 108.5, "target": 92.3}
+    assert mark["ifvg"] == {"x0": i("06:25"), "x1": i("06:45"), "bottom": 106.1, "top": 107.3}
+    assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
     assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15", "M30"])
 
@@ -106,6 +114,10 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     pill = chart._crt_pills[0]
     assert "CRT bajista" in pill.toPlainText() and pill.toPlainText().strip().endswith("TP") and pill.result == "TP"
     assert not chart._card.isVisible()                                                   # la etiqueta sola es discreta: sin detalle
+    violet = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#B388FF"]
+    assert len(violet) == 1                                                              # el iFVG invertido, pintado en el LTF
+    texts = " ".join(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText"))
+    assert "TP 92.3" in texts and "SL 108.5" in texts and "Entrada 103.1" in texts and "iFVG invertido" in texts and "CISD" in texts
     chart.resize(900, 500)
     vb = chart.getPlotItem().getViewBox()
     vb.setXRange(0, 80, padding=0)
@@ -115,7 +127,8 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     text = chart._card.toPlainText()
     assert chart._card.isVisible() and "CRT bajista" in text and "TP" in text
     assert "FVG en MTF" in text and "M15" in text and "M5" in text and "Vela siguiente al CISD" in text and "13/10 06:00" in text
-    assert "M3·1 SL" in text.replace(" ", " ") or "M3·1" in text                         # y los otros LTF del backtest
+    assert "M3·1" in text                                                                # y los otros LTF del backtest
+    assert "103.1" in text and "108.5" in text and "92.3" in text and "iFVG invertido" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
     chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not chart._card.isVisible()
     win.crt_btn.setChecked(False)                                                        # el botón las quita y las vuelve a poner

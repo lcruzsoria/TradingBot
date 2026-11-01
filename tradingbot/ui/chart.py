@@ -902,7 +902,12 @@ class ChartView(pg.PlotWidget):
                     + crt_row("FVG en MTF", " · ".join(data.get("mtf") or ["-"]))
                     + crt_row("iFVG + CISD (LTF)", f"M{data.get('ltf', '-')}")
                     + crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}")
-                    + crt_row("Resultado", word + " (objetivo 2R)") + '</table>')
+                    + crt_row("Resultado", word + " (objetivo 2R)")
+                    + (crt_row("Entrada · SL · TP", f"{fmt_price(data['pos']['entry'])} · {fmt_price(data['pos']['stop'])} · "
+                               f"{fmt_price(data['pos']['target'])}") if data.get("pos") else "")
+                    + (crt_row("iFVG invertido", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
+                       if data.get("ifvg") else "")
+                    + (crt_row("Nivel del CISD", fmt_price(data['cisd']['level'])) if data.get("cisd") else "") + '</table>')
             others = data.get("others") or []
             verdict = ''
             if others:
@@ -1026,6 +1031,7 @@ class ChartView(pg.PlotWidget):
             line.setZValue(-6)
             pi.addItem(line, ignoreBounds=True)
             self._crt_items.append(line)
+            self._draw_crt_trade(crt, tone)
             pill = CrtPill(crt)
             pill.setPos(x0, c2hi if short else c2lo)
             pi.addItem(pill, ignoreBounds=True)
@@ -1033,6 +1039,56 @@ class ChartView(pg.PlotWidget):
             self._crt_pills.append(pill)
         self._fit_pills()
         self._update_card()
+
+    def _draw_crt_trade(self, crt: dict, tone: str) -> None:
+        """La operación del CRT para auditar el criterio: el iFVG invertido (violeta), el nivel del CISD, el extremo del sweep y, como la
+        herramienta de posición, la zona verde hasta el objetivo y la roja hasta el stop con la entrada."""
+        pi = self.getPlotItem()
+        violet = "#B388FF"
+
+        def add(item, z: float) -> None:
+            item.setZValue(z)
+            pi.addItem(item, ignoreBounds=True)
+            self._crt_items.append(item)
+
+        def tag(x: float, price: float, text: str, color: str) -> None:
+            label = pg.TextItem(anchor=(0, 0.5))
+            label.setHtml(f'<span style="font-size:7pt; color:{color}">{html.escape(text)}</span>')
+            label.setPos(x, price)
+            add(label, 7)
+
+        fvg, cisd, ext, pos = crt.get("ifvg"), crt.get("cisd"), crt.get("extreme"), crt.get("pos")
+        if fvg:
+            left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
+            box = QGraphicsRectItem(QRectF(left, fvg["bottom"], right - left, max(fvg["top"] - fvg["bottom"], 1e-9)))
+            box.setBrush(_alpha(violet, 55))
+            pen = QPen(QColor(violet), 1.2, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            box.setPen(pen)
+            add(box, -3)
+            tag(left, fvg["top"], "iFVG invertido", violet)
+        if cisd:
+            line = pg.PlotCurveItem(x=np.array([float(cisd["x0"]), float(cisd["x1"]) + 1]), y=np.array([cisd["level"]] * 2),
+                                    pen=pg.mkPen(violet, width=1, style=Qt.PenStyle.DotLine))
+            add(line, -3)
+            tag(float(cisd["x1"]) + 1, cisd["level"], "CISD", violet)
+        if ext:
+            dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(CRT_COLORS["short"], width=1.5),
+                                     brush=pg.mkBrush(None))
+            add(dot, 6)
+        if pos:
+            x0, x1 = float(pos["x0"]), float(pos["x1"]) + 1
+            entry, stop, target = pos["entry"], pos["stop"], pos["target"]
+            for lo, hi, color in ((min(entry, target), max(entry, target), QColor(38, 166, 154, 60)),
+                                  (min(entry, stop), max(entry, stop), QColor(239, 83, 80, 60))):
+                box = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
+                box.setBrush(color)
+                box.setPen(QPen(Qt.PenStyle.NoPen))
+                add(box, -5)
+            add(pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.TEXT, width=1.2)), -4)
+            for price, text, color in ((target, f"TP {fmt_price(target)}", "#26A69A"), (entry, f"Entrada {fmt_price(entry)}", theme.TEXT),
+                                       (stop, f"SL {fmt_price(stop)}", "#EF5350")):
+                tag(x1, price, text, color)
 
     @property
     def crt_count(self) -> int:

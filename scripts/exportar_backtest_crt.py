@@ -116,6 +116,11 @@ def simulate() -> pd.DataFrame:
 
 
 # -- exportación ---------------------------------------------------------------------------------------
+def ny_min(s: pd.Series) -> list[int]:
+    """Minutos NY desde 1970 de una hora de servidor (segundos)."""
+    return ((s.astype(np.int64) - AHEAD) // 60).tolist()
+
+
 def minutes(s: pd.Series) -> list[int]:
     return ((pd.to_datetime(s) - EPOCH) // pd.Timedelta(minutes=1)).astype(np.int64).tolist()
 
@@ -139,6 +144,10 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
             "e": minutes(t["entrada (NY)"]), "x": minutes(t["cierre (NY)"]),
             "l": t["ltf"].astype(int).tolist(), "n": t["entrada_modelo"].astype(int).tolist(),
             "t": t["FVG MTF"].map(mtf_bits).astype(int).tolist(), "q": t["objetivo_cod"].astype(int).tolist(),
+            "pe": floats(t["entrada"], 5), "ps": floats(t["stop"], 5), "pt": floats(t["objetivo"], 5),        # entrada, stop y objetivo
+            "pa": floats(t["iFVG bajo"], 5), "pb": floats(t["iFVG alto"], 5), "pc": floats(t["CISD"], 5),     # iFVG invertido y nivel del CISD
+            "ti": ny_min(t["t iFVG"]), "tv": ny_min(t["t inversión"]), "tj": ny_min(t["t CISD"]), "th": ny_min(t["t extremo"]),
+            "tq": ny_min(t["t secuencia"]),                                                                    # horas de cada paso
             "c": ((t["C2"].astype(np.int64) - AHEAD) // 60).tolist(),                       # inicio de la vela HTF del sweep (minutos NY)
             "h": near_hour(pd.to_datetime(t["entrada (NY)"])).tolist(),
             "r": floats(t["R neto"]), "k": floats(t["coste (R)"]), "rk": floats(t["riesgo %"], 3), "v": held.round().astype(int).tolist()}

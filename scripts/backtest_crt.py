@@ -154,7 +154,11 @@ def execute(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule) -> dict |
             "dirección": st["dirección"], "FVG MTF": st["mtf"], "C2 cierra dentro": st["inside"], "entrada": sgn * entry,
             "stop": sgn * hx, "objetivo": sgn * mg["target"], "salida": sgn * mg["exit_price"], "riesgo": risk,
             "riesgo %": 100 * risk / abs(entry), "cómo": mg["cómo"], "R bruto": mg["gross"], "coste (R)": mg["cost"],
-            "R neto": mg["gross"] - mg["cost"], "C2": st["C2"], "_ts_exit": int(ts[j])}
+            "R neto": mg["gross"] - mg["cost"], "C2": st["C2"], "_ts_exit": int(ts[j]),
+            # para auditar el criterio en el gráfico: el iFVG invertido, el CISD y las horas de cada paso (hora de servidor)
+            "iFVG bajo": min(sgn * st["z_bottom"], sgn * st["z_top"]), "iFVG alto": max(sgn * st["z_bottom"], sgn * st["z_top"]),
+            "CISD": sgn * st["level"], "t iFVG": int(ts[st["kf"] - 2]), "t inversión": int(ts[st["m_inv"]]), "t CISD": int(ts[st["jc"]]),
+            "t extremo": int(ts[st["ih"]]), "t secuencia": int(ts[st["seq"][0]])}
 
 
 def run_variant(ltf: pd.DataFrame, setups: list, variant: int, ltf_min: int, rule: Rule) -> pd.DataFrame:
