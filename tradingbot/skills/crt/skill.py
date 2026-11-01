@@ -16,7 +16,7 @@ STRATEGY = "crt"
 LTF_MINUTES = (1, 3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
 MAX_LATE_BARS = 2                                 # una señal se da si la vela de entrada es una de las últimas 2
 MIN_BARS = 200
-ENTRY_NAMES = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha"}
+ENTRY_NAMES = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha", 4: "cierre del CISD"}
 DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
 
 
@@ -52,7 +52,7 @@ class CrtSkill(Skill):
         self.symbols = s.get_list("SYMBOLS", DEFAULT_SYMBOLS)
         self.entry = s.get_int("ENTRY", 1)
         if self.entry not in ENTRY_NAMES:
-            raise ValueError(f"CRT_ENTRY={self.entry}: usa 1 (vela siguiente al CISD), 2 (retesteo del iFVG) o 3 (primera vela sin mecha)")
+            raise ValueError(f"CRT_ENTRY={self.entry}: usa 1 (vela siguiente al CISD), 2 (retesteo del iFVG), 3 (primera vela sin mecha) o 4 (cierre del CISD)")
         rr = s.get_float("RR", 2.0)
         lookback = s.get_int("LOOKBACK_DAYS", 10)
         if rr <= 0 or lookback <= 0:

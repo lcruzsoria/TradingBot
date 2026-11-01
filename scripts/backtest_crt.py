@@ -1,4 +1,4 @@
-"""Backtest del CRT (variante B) en NAS100 (HTF H3) o forex (HTF H4, --mercado forex): sweep en el HTF, FVG tocado en MTF, iFVG en M5/M3, CISD y tres entradas.
+"""Backtest del CRT (variante B) en NAS100 (HTF H3) o forex (HTF H4, --mercado forex): sweep en el HTF, FVG tocado en MTF, iFVG en M5/M3, CISD y cuatro entradas.
 
 REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS ANTES DE VER LOS RESULTADOS:
 - HTF = H3 con las velas alineadas a las 18:00 NY (18, 21, 0, 3 ... 15). Sweep: una vela H3 (C2) supera el máximo (o mínimo) de la
@@ -66,7 +66,7 @@ from tradingbot.skills.crt.engine import Cfg, Rule, view                        
 DOC = ROOT / "docs" / "estrategia_crt" / "RESULTADOS.md"
 CFG = engine.INDICES                                     # mercado en curso (lo fija configure)
 LTFS = (5, 3)
-VARIANTS = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha"}
+VARIANTS = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha", 4: "cierre del CISD"}
 MIN_OPS, MIN_MEAN, MIN_T = 100, 0.05, 2.0
 DATASETS = (("puprime", "NAS100"), ("metaquotes", "NAS100"))                          # el control, al final
 MARKETS = {

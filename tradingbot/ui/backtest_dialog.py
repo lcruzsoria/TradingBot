@@ -382,7 +382,7 @@ class BacktestDialog(QDialog):
                              ("Hora",) + METRIC_HEADERS)
         self.crt_funnel = Book("Embudo CRT", "de los sweeps de H3 / H4 a las entradas, por mercado y LTF",
                                ("Mercado · LTF", "Sweeps", "FVG sin mitigar", "Mecha toca FVG", "iFVG", "CISD", "Entrada 1", "Entrada 2",
-                                "Entrada 3"))
+                                "Entrada 3", "Entrada 4"))
         self.by_day = Book("Días de la semana · detalle", "día de la entrada", ("Día",) + METRIC_HEADERS)
         self.halves = Book("Robustez", "el histórico partido en dos por la mediana de las fechas", ("Mitad",) + METRIC_HEADERS)
         self.sensitivity = Book("Sensibilidad", "otros objetivos y tiempos máximos con las mismas entradas",
@@ -1006,7 +1006,7 @@ class BacktestDialog(QDialog):
             rows.append([(f"{_short_market(r.get('mercado', ''))} · M{r['ltf']}", None), (_count(r.get("sweeps")), theme.MUTED),
                          (_count(r.get("fvg")), None), (_count(r.get("toque")), None), (_count(r.get("ifvg")), None),
                          (_count(r.get("cisd")), theme.ACCENT), (_count(r.get("e1")), None), (_count(r.get("e2")), None),
-                         (_count(r.get("e3")), None)])
+                         (_count(r.get("e3")), None), (_count(r.get("e4")), None)])
         self.crt_funnel.note.setText(f"M{self.crt_ltf} · no cambia con el filtro de años u horas")
         self.crt_funnel.set_rows(rows)
 

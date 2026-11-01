@@ -12,9 +12,11 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | M5 · 1. vela siguiente al CISD | 1157 ops, -0.051 R, t -1.50 | **no** | -0.011 R, t -0.23 / -0.096 R, t -1.96 | **no** | -0.097 R, t -2.00 | **no** | No pasa |
 | M5 · 2. retesteo del iFVG | 693 ops, -0.097 R, t -2.18 | **no** | -0.059 R, t -0.97 / -0.143 R, t -2.20 | **no** | -0.096 R, t -1.51 | **no** | No pasa |
 | M5 · 3. primera vela sin mecha | 664 ops, -0.017 R, t -0.41 | **no** | -0.014 R, t -0.25 / -0.020 R, t -0.33 | **no** | -0.094 R, t -1.60 | **no** | No pasa |
+| M5 · 4. cierre del CISD | 1160 ops, -0.050 R, t -1.47 | **no** | -0.004 R, t -0.09 / -0.101 R, t -2.08 | **no** | -0.091 R, t -1.89 | **no** | No pasa |
 | M3 · 1. vela siguiente al CISD | 1464 ops, -0.052 R, t -1.69 | **no** | -0.030 R, t -0.71 / -0.075 R, t -1.71 | **no** | -0.069 R, t -1.59 | **no** | No pasa |
 | M3 · 2. retesteo del iFVG | 855 ops, -0.068 R, t -1.67 | **no** | -0.026 R, t -0.47 / -0.118 R, t -1.99 | **no** | -0.105 R, t -1.78 | **no** | No pasa |
 | M3 · 3. primera vela sin mecha | 916 ops, -0.057 R, t -1.58 | **no** | -0.039 R, t -0.79 / -0.078 R, t -1.47 | **no** | -0.085 R, t -1.62 | **no** | No pasa |
+| M3 · 4. cierre del CISD | 1465 ops, -0.051 R, t -1.67 | **no** | -0.025 R, t -0.59 / -0.079 R, t -1.82 | **no** | -0.066 R, t -1.52 | **no** | No pasa |
 
 **0 de 6 combinaciones pasan.**
 
@@ -56,6 +58,12 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 |   sin costes (R bruto) | 664 | 33.7 % | +0.027 | +18.2 | 1.07 | -16.3 | +0.67 |
 |   largos | 375 | 36.3 % | +0.001 | +0.5 | 1.00 | -16.3 | +0.02 |
 |   cortos | 289 | 30.1 % | -0.040 | -11.6 | 0.91 | -20.1 | -0.64 |
+| M5 · 4. cierre del CISD | 1160 | 28.8 % | -0.050 | -57.7 | 0.90 | -80.2 | -1.47 |
+|   hasta 2022 | 614 | 30.3 % | -0.004 | -2.5 | 0.99 | -29.9 | -0.09 |
+|   2023 en adelante | 546 | 27.1 % | -0.101 | -55.2 | 0.81 | -61.1 | -2.08 |
+|   sin costes (R bruto) | 1160 | 29.1 % | +0.002 | +2.9 | 1.01 | -40.0 | +0.07 |
+|   largos | 618 | 30.1 % | -0.039 | -24.2 | 0.92 | -44.9 | -0.84 |
+|   cortos | 542 | 27.3 % | -0.062 | -33.5 | 0.88 | -57.9 | -1.24 |
 
 |  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -77,6 +85,12 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 |   sin costes (R bruto) | 916 | 32.4 % | -0.001 | -1.2 | 1.00 | -31.6 | -0.04 |
 |   largos | 496 | 34.9 % | -0.007 | -3.6 | 0.98 | -23.7 | -0.15 |
 |   cortos | 420 | 29.5 % | -0.116 | -48.7 | 0.78 | -56.3 | -2.14 |
+| M3 · 4. cierre del CISD | 1465 | 28.5 % | -0.051 | -74.6 | 0.90 | -96.1 | -1.67 |
+|   hasta 2022 | 766 | 29.6 % | -0.025 | -19.1 | 0.95 | -41.6 | -0.59 |
+|   2023 en adelante | 699 | 27.2 % | -0.079 | -55.5 | 0.85 | -57.9 | -1.82 |
+|   sin costes (R bruto) | 1465 | 28.7 % | +0.013 | +19.1 | 1.03 | -40.5 | +0.43 |
+|   largos | 746 | 31.9 % | +0.018 | +13.8 | 1.04 | -24.2 | +0.42 |
+|   cortos | 719 | 24.9 % | -0.123 | -88.3 | 0.77 | -96.2 | -2.89 |
 
 ## Control: NAS100 (USTEC) de MetaQuotes
 
@@ -91,6 +105,9 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | M5 · 3. primera vela sin mecha | 313 | 30.0 % | -0.094 | -29.4 | 0.79 | -34.0 | -1.60 |
 |   hasta 2022 | 52 | 25.0 % | -0.115 | -6.0 | 0.76 | -10.6 | -0.78 |
 |   2023 en adelante | 261 | 31.0 % | -0.090 | -23.4 | 0.80 | -25.9 | -1.40 |
+| M5 · 4. cierre del CISD | 568 | 26.9 % | -0.091 | -52.0 | 0.83 | -61.4 | -1.89 |
+|   hasta 2022 | 74 | 29.7 % | -0.015 | -1.1 | 0.97 | -9.9 | -0.11 |
+|   2023 en adelante | 494 | 26.5 % | -0.103 | -50.8 | 0.81 | -58.8 | -1.99 |
 | M3 · 1. vela siguiente al CISD | 726 | 26.4 % | -0.069 | -50.3 | 0.87 | -57.6 | -1.59 |
 |   hasta 2022 | 94 | 27.7 % | +0.003 | +0.3 | 1.01 | -7.0 | +0.03 |
 |   2023 en adelante | 632 | 26.3 % | -0.080 | -50.6 | 0.85 | -50.6 | -1.72 |
@@ -100,6 +117,9 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | M3 · 3. primera vela sin mecha | 435 | 29.9 % | -0.085 | -36.9 | 0.82 | -52.7 | -1.62 |
 |   hasta 2022 | 67 | 34.3 % | -0.044 | -2.9 | 0.91 | -11.2 | -0.32 |
 |   2023 en adelante | 368 | 29.1 % | -0.092 | -34.0 | 0.81 | -41.5 | -1.63 |
+| M3 · 4. cierre del CISD | 727 | 26.7 % | -0.066 | -48.2 | 0.87 | -54.6 | -1.52 |
+|   hasta 2022 | 94 | 27.7 % | -0.006 | -0.6 | 0.99 | -7.0 | -0.05 |
+|   2023 en adelante | 633 | 26.5 % | -0.075 | -47.6 | 0.86 | -47.6 | -1.62 |
 
 ## Cómo terminan y riesgo (NAS100 de PUPrime)
 
@@ -108,9 +128,11 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | M5 · 1 | stop 521, BE 246, objetivo 241, sesión 149 | 35.5 | 12.7 | 100.6 | 0.052 | 1 % |
 | M5 · 2 | stop 331, BE 162, objetivo 148, sesión 52 | 25.5 | 8.8 | 70.8 | 0.073 | 4 % |
 | M5 · 3 | stop 246, sesión 189, BE 116, objetivo 113 | 46.0 | 13.9 | 172.1 | 0.044 | 2 % |
+| M5 · 4 | stop 519, BE 250, objetivo 241, sesión 150 | 35.5 | 12.7 | 100.4 | 0.052 | 1 % |
 | M3 · 1 | stop 661, BE 333, objetivo 315, sesión 155 | 30.0 | 10.5 | 84.3 | 0.064 | 3 % |
 | M3 · 2 | stop 393, BE 212, objetivo 197, sesión 53 | 22.0 | 6.9 | 58.3 | 0.093 | 9 % |
 | M3 · 3 | stop 376, sesión 208, BE 170, objetivo 162 | 38.4 | 10.6 | 132.7 | 0.056 | 3 % |
+| M3 · 4 | stop 658, BE 336, objetivo 314, sesión 157 | 30.2 | 10.5 | 83.7 | 0.064 | 3 % |
 
 ## Por año (NAS100 de PUPrime)
 
@@ -156,6 +178,20 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | 2025 | 81 | 32.1 % | +0.079 | +6.4 | 1.21 | -7.4 | +0.65 |
 | 2026 | 64 | 28.1 % | -0.152 | -9.7 | 0.68 | -11.6 | -1.19 |
 
+**M5 · 4. cierre del CISD**
+
+|  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2018 | 46 | 39.1 % | +0.199 | +9.2 | 1.45 | -5.4 | +1.06 |
+| 2019 | 131 | 35.1 % | +0.062 | +8.2 | 1.15 | -9.9 | +0.63 |
+| 2020 | 153 | 24.8 % | -0.104 | -16.0 | 0.80 | -20.6 | -1.12 |
+| 2021 | 128 | 27.3 % | -0.009 | -1.2 | 0.98 | -24.0 | -0.09 |
+| 2022 | 156 | 31.4 % | -0.017 | -2.7 | 0.96 | -20.4 | -0.18 |
+| 2023 | 144 | 29.9 % | -0.024 | -3.5 | 0.95 | -13.9 | -0.25 |
+| 2024 | 132 | 25.8 % | -0.212 | -27.9 | 0.60 | -32.6 | -2.36 |
+| 2025 | 147 | 30.6 % | +0.005 | +0.7 | 1.01 | -14.4 | +0.05 |
+| 2026 | 123 | 21.1 % | -0.199 | -24.5 | 0.66 | -24.5 | -1.92 |
+
 **M3 · 1. vela siguiente al CISD**
 
 |  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
@@ -198,6 +234,20 @@ Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5
 | 2025 | 124 | 33.1 % | +0.000 | +0.0 | 1.00 | -11.2 | +0.00 |
 | 2026 | 87 | 33.3 % | -0.025 | -2.1 | 0.95 | -9.8 | -0.21 |
 
+**M3 · 4. cierre del CISD**
+
+|  | Ops | Acierto | R medio | R total | PF | Máx. DD | t |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2018 | 59 | 30.5 % | +0.019 | +1.1 | 1.04 | -5.2 | +0.13 |
+| 2019 | 169 | 34.9 % | +0.055 | +9.3 | 1.12 | -10.7 | +0.61 |
+| 2020 | 183 | 26.8 % | -0.054 | -9.9 | 0.89 | -17.3 | -0.63 |
+| 2021 | 167 | 28.7 % | -0.083 | -13.9 | 0.85 | -37.1 | -0.90 |
+| 2022 | 188 | 28.2 % | -0.030 | -5.7 | 0.94 | -19.1 | -0.35 |
+| 2023 | 181 | 32.0 % | -0.011 | -1.9 | 0.98 | -22.6 | -0.12 |
+| 2024 | 174 | 24.7 % | -0.214 | -37.3 | 0.63 | -40.3 | -2.57 |
+| 2025 | 182 | 30.8 % | +0.035 | +6.4 | 1.08 | -12.8 | +0.40 |
+| 2026 | 162 | 20.4 % | -0.140 | -22.7 | 0.73 | -29.9 | -1.61 |
+
 ## Sensibilidad (no cuenta para el veredicto)
 
 Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro» usa información futura (el cierre de C2).
@@ -207,48 +257,64 @@ Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro�
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M5 · 1 | 1224 | 28.7 % | -0.060 | -73.4 | 0.88 | -97.8 | -1.81 |
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M5 · 2 | 733 | 26.1 % | -0.104 | -76.4 | 0.81 | -80.4 | -2.41 |
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M5 · 3 | 698 | 33.0 % | -0.034 | -24.0 | 0.92 | -30.8 | -0.85 |
+| regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M5 · 4 | 1227 | 28.6 % | -0.059 | -72.1 | 0.88 | -98.7 | -1.78 |
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M3 · 1 | 1513 | 28.8 % | -0.051 | -76.4 | 0.90 | -94.2 | -1.67 |
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M3 · 2 | 891 | 27.5 % | -0.069 | -61.5 | 0.87 | -82.1 | -1.72 |
 | regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M3 · 3 | 944 | 32.2 % | -0.059 | -55.6 | 0.88 | -72.6 | -1.64 |
+| regla anterior: el FVG solo tiene que llegar más allá del extremo de C1: M3 · 4 | 1514 | 28.7 % | -0.049 | -74.5 | 0.90 | -95.1 | -1.63 |
 | antigüedad del FVG 3 días: M5 · 1 | 1022 | 29.3 % | -0.037 | -38.0 | 0.93 | -58.2 | -1.02 |
 | antigüedad del FVG 3 días: M5 · 2 | 611 | 27.7 % | -0.075 | -45.6 | 0.86 | -49.4 | -1.55 |
 | antigüedad del FVG 3 días: M5 · 3 | 595 | 33.4 % | -0.012 | -7.2 | 0.97 | -20.2 | -0.28 |
+| antigüedad del FVG 3 días: M5 · 4 | 1025 | 29.2 % | -0.035 | -35.7 | 0.93 | -58.0 | -0.96 |
 | antigüedad del FVG 3 días: M3 · 1 | 1266 | 29.2 % | -0.034 | -42.6 | 0.93 | -73.2 | -1.02 |
 | antigüedad del FVG 3 días: M3 · 2 | 739 | 27.7 % | -0.056 | -41.7 | 0.89 | -58.8 | -1.27 |
 | antigüedad del FVG 3 días: M3 · 3 | 797 | 32.4 % | -0.056 | -44.8 | 0.88 | -72.0 | -1.44 |
+| antigüedad del FVG 3 días: M3 · 4 | 1267 | 29.1 % | -0.034 | -42.7 | 0.93 | -76.1 | -1.02 |
 | antigüedad del FVG 30 días: M5 · 1 | 1216 | 28.7 % | -0.055 | -66.5 | 0.89 | -83.9 | -1.65 |
 | antigüedad del FVG 30 días: M5 · 2 | 735 | 26.5 % | -0.099 | -72.8 | 0.82 | -74.8 | -2.30 |
 | antigüedad del FVG 30 días: M5 · 3 | 701 | 33.7 % | -0.019 | -13.2 | 0.96 | -22.2 | -0.47 |
+| antigüedad del FVG 30 días: M5 · 4 | 1219 | 28.6 % | -0.054 | -65.2 | 0.89 | -84.8 | -1.62 |
 | antigüedad del FVG 30 días: M3 · 1 | 1546 | 28.5 % | -0.049 | -76.3 | 0.90 | -94.0 | -1.66 |
 | antigüedad del FVG 30 días: M3 · 2 | 908 | 27.2 % | -0.065 | -59.2 | 0.88 | -74.8 | -1.64 |
 | antigüedad del FVG 30 días: M3 · 3 | 970 | 32.5 % | -0.059 | -56.8 | 0.88 | -75.3 | -1.68 |
+| antigüedad del FVG 30 días: M3 · 4 | 1547 | 28.4 % | -0.050 | -77.3 | 0.90 | -95.8 | -1.69 |
 | tolerancia al tocar el FVG 0,05 % del precio: M5 · 1 | 2237 | 27.4 % | -0.079 | -175.9 | 0.85 | -190.2 | -3.23 |
 | tolerancia al tocar el FVG 0,05 % del precio: M5 · 2 | 1366 | 25.4 % | -0.126 | -171.6 | 0.77 | -184.0 | -3.96 |
 | tolerancia al tocar el FVG 0,05 % del precio: M5 · 3 | 1264 | 32.0 % | -0.045 | -56.9 | 0.90 | -56.9 | -1.49 |
+| tolerancia al tocar el FVG 0,05 % del precio: M5 · 4 | 2239 | 27.4 % | -0.078 | -175.3 | 0.85 | -190.7 | -3.22 |
 | tolerancia al tocar el FVG 0,05 % del precio: M3 · 1 | 2848 | 27.9 % | -0.070 | -199.1 | 0.87 | -231.3 | -3.17 |
 | tolerancia al tocar el FVG 0,05 % del precio: M3 · 2 | 1775 | 26.6 % | -0.099 | -175.8 | 0.82 | -204.2 | -3.48 |
 | tolerancia al tocar el FVG 0,05 % del precio: M3 · 3 | 1777 | 30.8 % | -0.055 | -97.2 | 0.89 | -125.9 | -2.07 |
+| tolerancia al tocar el FVG 0,05 % del precio: M3 · 4 | 2850 | 27.6 % | -0.071 | -203.1 | 0.86 | -237.3 | -3.24 |
 | CISD con cierre dentro de C1 (la versión anterior): M5 · 1 | 933 | 29.6 % | -0.041 | -38.3 | 0.92 | -55.5 | -1.10 |
 | CISD con cierre dentro de C1 (la versión anterior): M5 · 2 | 518 | 27.0 % | -0.081 | -41.9 | 0.85 | -41.9 | -1.58 |
 | CISD con cierre dentro de C1 (la versión anterior): M5 · 3 | 568 | 33.6 % | -0.012 | -6.8 | 0.97 | -22.7 | -0.27 |
+| CISD con cierre dentro de C1 (la versión anterior): M5 · 4 | 934 | 29.7 % | -0.038 | -35.8 | 0.92 | -57.2 | -1.03 |
 | CISD con cierre dentro de C1 (la versión anterior): M3 · 1 | 1026 | 30.0 % | -0.029 | -29.5 | 0.94 | -60.3 | -0.81 |
 | CISD con cierre dentro de C1 (la versión anterior): M3 · 2 | 513 | 26.9 % | -0.055 | -28.4 | 0.89 | -32.8 | -1.08 |
 | CISD con cierre dentro de C1 (la versión anterior): M3 · 3 | 703 | 33.9 % | -0.030 | -21.0 | 0.93 | -40.0 | -0.72 |
+| CISD con cierre dentro de C1 (la versión anterior): M3 · 4 | 1027 | 30.0 % | -0.030 | -30.5 | 0.94 | -61.1 | -0.84 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M5 · 1 | 569 | 35.3 % | +0.159 | +90.6 | 1.43 | -14.4 | +3.33 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M5 · 2 | 332 | 34.3 % | +0.138 | +45.7 | 1.33 | -9.4 | +2.09 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M5 · 3 | 393 | 32.6 % | +0.033 | +12.9 | 1.08 | -15.3 | +0.61 |
+| exigir que C2 cierre dentro de C1 (look-ahead): M5 · 4 | 570 | 35.4 % | +0.167 | +95.0 | 1.46 | -13.4 | +3.49 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M3 · 1 | 589 | 39.7 % | +0.297 | +174.9 | 1.96 | -7.8 | +6.27 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M3 · 2 | 304 | 38.2 % | +0.307 | +93.2 | 1.90 | -6.8 | +4.45 |
 | exigir que C2 cierre dentro de C1 (look-ahead): M3 · 3 | 440 | 36.8 % | +0.100 | +44.2 | 1.25 | -11.7 | +1.87 |
+| exigir que C2 cierre dentro de C1 (look-ahead): M3 · 4 | 590 | 39.5 % | +0.289 | +170.7 | 1.93 | -9.8 | +6.11 |
 | sin BE: M5 · 1 | 1147 | 37.6 % | -0.026 | -29.8 | 0.96 | -58.3 | -0.67 |
 | sin BE: M5 · 2 | 691 | 35.0 % | -0.087 | -60.0 | 0.87 | -62.8 | -1.70 |
 | sin BE: M5 · 3 | 661 | 39.5 % | -0.024 | -16.2 | 0.95 | -27.1 | -0.53 |
+| sin BE: M5 · 4 | 1150 | 37.5 % | -0.029 | -33.0 | 0.95 | -59.8 | -0.74 |
 | sin BE: M3 · 1 | 1458 | 37.0 % | -0.037 | -54.1 | 0.94 | -84.9 | -1.06 |
 | sin BE: M3 · 2 | 853 | 36.7 % | -0.046 | -39.6 | 0.93 | -64.2 | -0.98 |
 | sin BE: M3 · 3 | 911 | 38.5 % | -0.073 | -66.7 | 0.88 | -82.2 | -1.79 |
+| sin BE: M3 · 4 | 1459 | 36.9 % | -0.041 | -59.1 | 0.94 | -89.7 | -1.16 |
 | objetivo 3R: M5 · 1 | 1137 | 21.7 % | -0.096 | -109.5 | 0.81 | -118.5 | -2.60 |
 | objetivo 3R: M5 · 2 | 780 | 20.4 % | -0.085 | -66.0 | 0.85 | -69.0 | -1.75 |
 | objetivo 3R: M5 · 3 | 661 | 28.9 % | -0.001 | -0.6 | 1.00 | -24.1 | -0.02 |
+| objetivo 3R: M5 · 4 | 1141 | 21.8 % | -0.089 | -101.9 | 0.82 | -113.8 | -2.40 |
 | objetivo 3R: M3 · 1 | 1446 | 22.6 % | -0.049 | -70.2 | 0.91 | -113.0 | -1.39 |
 | objetivo 3R: M3 · 2 | 981 | 19.6 % | -0.079 | -77.4 | 0.85 | -88.5 | -1.83 |
 | objetivo 3R: M3 · 3 | 906 | 27.2 % | -0.058 | -52.6 | 0.88 | -70.1 | -1.42 |
+| objetivo 3R: M3 · 4 | 1448 | 22.7 % | -0.041 | -60.0 | 0.92 | -104.5 | -1.19 |

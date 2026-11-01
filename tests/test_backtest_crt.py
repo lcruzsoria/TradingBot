@@ -111,11 +111,11 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 5, 1)
     g = bt.group("crt:indices")
     first = dlg.blocks["n"].value.text()
-    assert first != "-" and len(dlg.by_filter.rows) == 9 and len(dlg.by_mtf.rows) == 3
+    assert first != "-" and len(dlg.by_filter.rows) == 12 and len(dlg.by_mtf.rows) == 3
     assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
-    for ltf in (5, 3, 1):                                                           # los 3 LTF y los 3 modelos de entrada se pintan
+    for ltf in (5, 3, 1):                                                           # los 3 LTF y los 4 modelos de entrada se pintan
         dlg.set_crt_ltf(ltf)
-        for entry in (1, 2, 3):
+        for entry in (1, 2, 3, 4):
             dlg.set_crt_entry(entry)
             n = len(g.view("CRT", "", crt=dlg.crt).main)
             assert n and dlg.blocks["n"].value.text().replace(".", "") == str(n)

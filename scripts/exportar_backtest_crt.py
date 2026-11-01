@@ -1,7 +1,7 @@
-"""Backtest completo de CRT para la ventana Backtest del bot: las 3 entradas, los 3 LTF (M5, M3, M1), índices y forex.
+"""Backtest completo de CRT para la ventana Backtest del bot: las 4 entradas, los 3 LTF (M5, M3, M1), índices y forex.
 
 Para cada mercado y LTF busca los setups con el motor (tradingbot/skills/crt/engine.py, el mismo que usa la skill) y simula las tres
-entradas (1 vela siguiente al CISD, 2 retesteo del iFVG, 3 primera vela sin mecha). A cada operación le pone la TBR en cuyo horario se da la
+entradas (1 vela siguiente al CISD, 2 retesteo del iFVG, 3 primera vela sin mecha, 4 cierre del CISD). A cada operación le pone la TBR en cuyo horario se da la
 entrada (Asia 20:00-00:00, London 02:00-05:00, NY Open 10:00-12:00 NY; el resto, «Fuera de TBR») y el timeframe del FVG de MTF que toca.
 Guarda las operaciones en analisis/crt_operaciones.pkl y AÑADE dos grupos (Índices y Forex, perfil «CRT») a
 tradingbot/skills/stats/backtest.json.gz sin tocar el resto del fichero.
@@ -37,7 +37,7 @@ OUT = ROOT / "tradingbot" / "skills" / "stats" / "backtest.json.gz"
 TRADES = ROOT / "analisis" / "crt_operaciones.pkl"
 PROFILE, PROFILE_NAME = "crt", "CRT"
 LTFS = (5, 3, 1)
-ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha"}
+ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha", 4: "Cierre del CISD"}
 # Objetivos: código -> (nombre, regla). 1R sin BE; 2R con BE a 1R (el del bot); extremo opuesto de C1 con BE a 1R
 TARGETS = {1: ("1R", engine.Rule(rr=1.0, be_at=0.0)), 2: ("2R", engine.Rule()), 3: ("Extremo de C1", engine.Rule(target_c1=True))}
 GROUPS = {"indices": ("Índices", [("puprime", "NAS100"), ("puprime", "SP500"), ("puprime", "DJ30")]),
@@ -167,7 +167,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
         "embudo_crt": [{"mercado": r["mercado"], "ltf": int(r["ltf"]), "sweeps": int(r["velas HTF con sweep"]),
                         "fvg": int(r["con FVG de MTF sin mitigar al alcance"]), "toque": int(r["con el extremo tocando el FVG"]),
                         "ifvg": int(r["con iFVG"]), "cisd": int(r["con CISD"]), "e1": int(r["entrada 1"]), "e2": int(r["entrada 2"]),
-                        "e3": int(r["entrada 3"])} for _, r in funnel.iterrows()],
+                        "e3": int(r["entrada 3"]), "e4": int(r["entrada 4"])} for _, r in funnel.iterrows()],
         "metodologia": methodology(gkey)}
 
 

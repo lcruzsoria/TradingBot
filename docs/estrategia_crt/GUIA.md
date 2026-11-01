@@ -52,11 +52,12 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade.
 - Se mide en el TF del iFVG.
 
 ### Regla 5 · Entrada
-Tres variantes, cada una con su propio backtest:
+Cuatro variantes, cada una con su propio backtest:
 
 1. **Vela siguiente al CISD:** entrada a mercado a la apertura de la vela posterior a la que cierra el CISD.
 2. **Retesteo del iFVG:** tras el CISD el precio continúa y vuelve a la zona del iFVG. Entrada al tocarla. Si no vuelve, no hay entrada.
 3. **Primera vela sin mecha:** la primera vela a favor, sin mecha, en el TF de entrada tras el CISD. Se entra a la apertura de la vela siguiente.
+4. **Cierre del CISD:** entrada a mercado al cierre de la propia vela que cierra el CISD, sin esperar a la siguiente. Es la más temprana: el precio está más cerca del extremo del sweep y el stop queda más corto (dibujo en `entrada_cisd_cierre.png`).
 
 ## 4. Gestión
 
@@ -105,7 +106,7 @@ Se evalúa cada variante de entrada. Se da por buena si:
 2. R neto positivo en el periodo de selección y en el de validación.
 3. R neto > 0 en el control (USTEC de MetaQuotes).
 
-Los criterios se congelan antes de ejecutar. Si no pasa, se documenta igual en `docs/estrategia_crt/RESULTADOS.md`, como se hizo con el TBR. Se compararán las tres entradas contando que probar tres variantes aumenta la probabilidad de un falso positivo.
+Los criterios se congelan antes de ejecutar. Si no pasa, se documenta igual en `docs/estrategia_crt/RESULTADOS.md`, como se hizo con el TBR. Se compararán las cuatro entradas contando que probar cuatro variantes aumenta la probabilidad de un falso positivo.
 
 ## 8. Riesgos conocidos
 

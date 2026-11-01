@@ -46,6 +46,21 @@ def test_entrada_1_a_la_apertura_de_la_vela_siguiente_al_cisd_y_gana_2r():
     assert res["target"] == pytest.approx(103.1 - 2 * 5.4)
 
 
+def test_entrada_4_al_cierre_de_la_vela_del_cisd_y_gana_2r():
+    df = scenario()
+    st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]
+    L = engine.view(df, 1)
+    ep = engine.entry_point(L, st, 4, 5, RULE, CFG)
+    assert ny(L["ts"][st["jc"]]) == "2026-10-13 06:50" and ny(L["ts"][ep["start"]]) == "2026-10-13 06:55"        # la hora de la entrada es el fin de esa vela
+    assert ep["entry"] == pytest.approx(L["close"][st["jc"]]) == pytest.approx(103.1)      # el cierre de la vela del CISD, que cerró bajo 103.2
+    assert ep["risk"] == pytest.approx(108.5 - 103.1)
+    L2 = engine.view(df.assign(open=df["open"].where(df.index != st["jc"] + 1, 102.0)), 1)      # si la siguiente abre más lejos del extremo
+    assert engine.entry_point(L2, st, 4, 5, RULE, CFG)["risk"] == pytest.approx(5.4)           # la entrada 4 no cambia...
+    assert engine.entry_point(L2, st, 1, 5, RULE, CFG)["risk"] == pytest.approx(108.5 - 102.0)   # ...y la 1 sí
+    res = engine.manage(L, st, ep, RULE)
+    assert res["cómo"] == "objetivo" and res["gross"] == pytest.approx(2.0)
+
+
 def test_con_be_a_1r_un_retroceso_cierra_a_cero():
     df = scenario()
     st = engine.find_setups(df, df, 5, RULE, CFG)[0][0]

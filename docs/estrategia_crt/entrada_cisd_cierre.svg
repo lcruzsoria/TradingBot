@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 680 430" font-family="Segoe UI, Arial, sans-serif">
+<rect width="680" height="430" fill="#ffffff"/>
+<text x="20" y="24" font-size="16" font-weight="600" fill="#222">Modelo 4: entrada al cierre de la vela del CISD (CRT corto, LTF)</text>
+<rect x="109" y="125" width="161" height="18" fill="#CECBF6" stroke="#7F77DD" stroke-width="0.8"/>
+<line x1="109" y1="175" x2="345" y2="175" stroke="#7F77DD" stroke-dasharray="3 3"/>
+<line x1="220" y1="80" x2="545" y2="80" stroke="#E24B4A" stroke-dasharray="5 4"/>
+<line x1="320" y1="386" x2="545" y2="386" stroke="#1D9E75" stroke-dasharray="5 4"/>
+<line x1="320" y1="182" x2="545" y2="182" stroke="#333"/>
+<g stroke="#333" stroke-width="1">
+<line x1="120" y1="143" x2="120" y2="180"/><line x1="170" y1="118" x2="170" y2="155"/><line x1="220" y1="80" x2="220" y2="125"/>
+<line x1="270" y1="95" x2="270" y2="152"/><line x1="320" y1="143" x2="320" y2="188"/><line x1="370" y1="184" x2="370" y2="220"/>
+<line x1="420" y1="210" x2="420" y2="266"/><line x1="470" y1="255" x2="470" y2="326"/><line x1="520" y1="315" x2="520" y2="392"/></g>
+<g fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.8">
+<rect x="109" y="150" width="22" height="25"/><rect x="159" y="125" width="22" height="25"/><rect x="209" y="100" width="22" height="27"/></g>
+<g fill="#F5C4B3" stroke="#993C1D" stroke-width="0.8">
+<rect x="259" y="102" width="22" height="46"/><rect x="309" y="148" width="22" height="34"/><rect x="359" y="188" width="22" height="27"/>
+<rect x="409" y="215" width="22" height="45"/><rect x="459" y="260" width="22" height="60"/><rect x="509" y="320" width="22" height="60"/></g>
+<circle cx="320" cy="182" r="5" fill="#EF9F27" stroke="#333"/>
+<circle cx="370" cy="188" r="4" fill="none" stroke="#333" stroke-dasharray="2 2"/>
+<line x1="320" y1="192" x2="305" y2="238" stroke="#888" stroke-dasharray="2 2"/>
+<g font-size="12" fill="#333">
+<text x="300" y="254" text-anchor="middle" font-size="14" font-weight="600">Entrada: cierre de la vela del CISD</text>
+<text x="362" y="166">Antes: apertura de la siguiente</text>
+<text x="220" y="66" text-anchor="middle">Sweep (extremo = SL)</text>
+<text x="102" y="138" text-anchor="end" fill="#534AB7">iFVG</text>
+<text x="102" y="196" text-anchor="end" fill="#534AB7">Nivel CISD</text>
+<text x="552" y="84" fill="#A32D2D">SL</text><text x="552" y="186">Entrada</text><text x="552" y="390" fill="#0F6E56">TP 2R</text>
+<text x="272" y="210" text-anchor="middle" fill="#534AB7">1 cierra bajo el iFVG</text>
+<text x="300" y="272" text-anchor="middle" fill="#534AB7">2 cierra bajo la apertura de la secuencia = CISD</text>
+</g></svg>

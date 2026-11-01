@@ -1,4 +1,4 @@
-"""Motor de la estrategia CRT (variante B): sweep en el HTF, FVG tocado en MTF, iFVG en LTF, CISD y tres entradas.
+"""Motor de la estrategia CRT (variante B): sweep en el HTF, FVG tocado en MTF, iFVG en LTF, CISD y cuatro entradas.
 
 Criterio 2 (FVG de MTF): en un corto, un FVG BAJISTA ya formado (creado antes, en la bajada) que queda POR ENCIMA del máximo de C1
 y que el extremo del sweep toca; en un largo, un FVG alcista por debajo del mínimo de C1.
@@ -226,6 +226,10 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
             k += 1
         if start is None:
             return None
+    elif variant == 4:                                    # al cierre de la vela del CISD: a mercado, sin esperar a la siguiente
+        if ts[jc] + step >= end:
+            return None
+        entry, start = c[jc], jc + 1
     else:
         k, start = jc + 1, None
         while k < min(n, closed) and ts[k] < end and ts[k] - ts[k - 1] <= 2 * step:

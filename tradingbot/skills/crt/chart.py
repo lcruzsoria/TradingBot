@@ -40,7 +40,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
     """Marcas (formato de ChartView.set_crts) de los CRT del backtest en `symbol` que caen dentro de las velas dadas.
 
     `ts`: horas de las velas (servidor); `ahead`: segundos que el servidor va por delante de Nueva York; `ltf` y `entry`: la operación
-    que se enseña de cada CRT (LTF en minutos y modelo de entrada 1, 2 o 3). Solo cuentan las operaciones con objetivo 2R, las del bot.
+    que se enseña de cada CRT (LTF en minutos y modelo de entrada 1, 2, 3 o 4). Solo cuentan las operaciones con objetivo 2R, las del bot.
     """
     ts = np.asarray(ts, dtype=np.int64)
     n = len(ts)
