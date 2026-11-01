@@ -1,4 +1,4 @@
-"""Backtest del CRT (variante B) en NAS100: sweep en H3, FVG tocado en MTF, iFVG en M5/M3, CISD y tres entradas.
+"""Backtest del CRT (variante B) en NAS100 (HTF H3) o forex (HTF H4, --mercado forex): sweep en el HTF, FVG tocado en MTF, iFVG en M5/M3, CISD y tres entradas.
 
 REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS ANTES DE VER LOS RESULTADOS:
 - HTF = H3 con las velas alineadas a las 18:00 NY (18, 21, 0, 3 ... 15). Sweep: una vela H3 (C2) supera el máximo (o mínimo) de la
@@ -69,6 +69,24 @@ LTFS = (5, 3)
 VARIANTS = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha"}
 MIN_OPS, MIN_MEAN, MIN_T = 100, 0.05, 2.0
 DATASETS = (("puprime", "NAS100"), ("metaquotes", "NAS100"))                          # el control, al final
+MARKETS = {
+    "indices": dict(htf="H3", htf_min=180, origin=18 * 3600, session_end=18 * 3600, suffix="", unit=1.0, unit_name="pts",
+                    datasets=(("puprime", "NAS100"), ("metaquotes", "NAS100")), title="NAS100",
+                    primary="NAS100 de PUPrime", control="NAS100 (USTEC) de MetaQuotes"),
+    # Forex: velas H4 alineadas a las 17:00 NY (las H4 nativas de MT5, servidor = NY + 7 h) y cierre de sesión a las 17:00 NY, el
+    # corte del día FX. Referencia EURUSD, control GBPUSD (los dos de PUPrime).
+    "forex": dict(htf="H4", htf_min=240, origin=17 * 3600, session_end=17 * 3600, suffix="_forex", unit=0.0001, unit_name="pips",
+                  datasets=(("puprime", "EURUSD"), ("puprime", "GBPUSD")), title="EURUSD y GBPUSD",
+                  primary="EURUSD de PUPrime", control="GBPUSD de PUPrime"),
+}
+
+
+def configure(name: str) -> dict:
+    """Aplica el mercado elegido a las constantes que usan el resto de funciones."""
+    global H3_MIN, H3_ORIGIN, SESSION_END, DATASETS
+    m = MARKETS[name]
+    H3_MIN, H3_ORIGIN, SESSION_END, DATASETS = m["htf_min"], m["origin"], m["session_end"], m["datasets"]
+    return m
 
 
 @dataclass(frozen=True)
@@ -170,7 +188,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule)
     """Todos los setups (sweep + FVG de MTF + iFVG + CISD) del histórico, sin entrada todavía."""
     h3 = aggregate(base, H3_MIN, H3_ORIGIN)
     mtf = {m: aggregate(base, m) for m in MTF}
-    funnel = {"velas H3 con sweep": 0, "con FVG de MTF sin mitigar al alcance": 0, "con el extremo tocando el FVG": 0,
+    funnel = {"velas HTF con sweep": 0, "con FVG de MTF sin mitigar al alcance": 0, "con el extremo tocando el FVG": 0,
               "con iFVG": 0, "con CISD": 0}
     leg_bars = max(rule.leg_min // ltf_min, 3)
     setups = []
@@ -193,7 +211,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule)
             if rule.wait_c2 and not (c1l <= H["close"][i] < c1h):             # C2 tiene que cerrar dentro del rango de C1
                 continue
             b_end = int(np.searchsorted(lts, s2 + 2 * H3_MIN * 60)) if rule.wait_c2 else b
-            funnel["velas H3 con sweep"] += 1
+            funnel["velas HTF con sweep"] += 1
             hall, t0 = hi_[a:b].max(), int(lts[s0])
             tol_all = rule.touch_tol * abs(hall)
             zones = []
@@ -368,12 +386,17 @@ def val(x: dict) -> str:
 
 # -- informe -------------------------------------------------------------------------------------------------------------
 
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--descargar", action="store_true", help="descarga las velas M5 y M3 de MT5 y termina")
+    ap.add_argument("--mercado", choices=sorted(MARKETS), default="indices",
+                    help="indices (NAS100, HTF H3) o forex (EURUSD/GBPUSD, HTF H4)")
     ap.add_argument("--esperar-c2", action="store_true", help="espera al cierre de C2 dentro del rango de C1 (sin look-ahead) y "
                                                                 "busca el CISD hasta el final de C3")
     args = ap.parse_args()
+    mk = configure(args.mercado)
+    htf, unit, unit_name = mk["htf"], mk["unit"], mk["unit_name"]
     if args.descargar:
         for profile, want in DATASETS:
             for tf in (5, 3):
@@ -383,32 +406,37 @@ def main() -> None:
                     print(f"  fallo {profile} {want} M{tf}: {err}", flush=True)
         return
     base_rule = Rule(wait_c2=args.esperar_c2)
-    suffix = "_esperar_c2" if args.esperar_c2 else ""
+    suffix = mk["suffix"] + ("_esperar_c2" if args.esperar_c2 else "")
     doc = DOC.with_name(f"RESULTADOS{suffix}.md")
+
+    def key(profile: str, want: str) -> str:
+        return f"{profile}/{want}"
+
     raw = {}
     for profile, want in DATASETS:
         for tf in (5, 3):
             sym, df = pd.read_pickle(cache_path(profile, want, tf))
-            raw[(profile, tf)] = (f"{sym} ({profile})", df)
+            raw[(key(profile, want), tf)] = (f"{sym} ({profile})", df)
+    P, C = key(*DATASETS[0]), key(*DATASETS[1])
 
     results, funnels, setups_by = {}, {}, {}
-    for profile, _ in DATASETS:
-        base = raw[(profile, 5)][1]
+    for profile, want in DATASETS:
+        k = key(profile, want)
+        base = raw[(k, 5)][1]
         for tf in LTFS:
-            st, fn = find_setups(base, raw[(profile, tf)][1], tf, base_rule)
-            setups_by[(profile, tf)], funnels[(profile, tf)] = st, fn
+            st, fn = find_setups(base, raw[(k, tf)][1], tf, base_rule)
+            setups_by[(k, tf)], funnels[(k, tf)] = st, fn
             for v in VARIANTS:
-                t = run_variant(raw[(profile, tf)][1], st, v, tf, base_rule)
-                results[(profile, tf, v)] = t
+                t = run_variant(raw[(k, tf)][1], st, v, tf, base_rule)
+                results[(k, tf, v)] = t
                 if len(t):
-                    t.to_csv(ROOT / "analisis" / f"backtest_crt_{profile}_nas100_m{tf}_e{v}{suffix}.csv", index=False)
-            print(f"{profile} M{tf}: {len(st)} setups", flush=True)
+                    t.to_csv(ROOT / "analisis" / f"backtest_crt_{profile}_{want.lower()}_m{tf}_e{v}{suffix}.csv", index=False)
+            print(f"{k} M{tf}: {len(st)} setups", flush=True)
 
-    nas = "puprime"
     verdict, summ = [], {}
     for tf in LTFS:
         for v, vname in VARIANTS.items():
-            t, ctrl = results[(nas, tf, v)], results[("metaquotes", tf, v)]
+            t, ctrl = results[(P, tf, v)], results[(C, tf, v)]
             s, c = summary(t), summary(ctrl)
             p1, p2 = by_period(t)
             s1, s2 = summary(p1), summary(p2)
@@ -421,63 +449,73 @@ def main() -> None:
                             "**Pasa**" if ok1 and ok2 and ok3 else "No pasa"])
     n_pass = sum(all(x) for x in summ.values())
 
-    out = ["# Backtest: CRT (variante B) en NAS100, H3 → M15/M30/H1 → M5/M3" + (
+    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15/M30/H1 → M5/M3" + (
                " · esperando al cierre de C2" if args.esperar_c2 else ""), "",
-           *(["**Variante sin look-ahead:** C2 tiene que haber cerrado dentro del rango de C1 (cierre H3 real) y el CISD y la entrada "
-              "se buscan desde el cierre de C2 hasta el final de C3. Si el precio supera el extremo del sweep en C3, el setup se "
-              "anula. Es una segunda tanda de pruebas sobre los mismos datos: el número de combinaciones probadas sube a 12.", ""]
-             if args.esperar_c2 else []),
-           "Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5 (PUPrime y MetaQuotes). Las reglas y "
-           "definiciones operativas están en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.", "",
-           f"- **Se da por buena (cada combinación LTF × entrada) si:** (1) NAS100 de PUPrime, todo el histórico: ≥ {MIN_OPS} "
-           f"operaciones y R neto > +{MIN_MEAN} con t > {MIN_T}; (2) R neto positivo en 2018-2022 y en 2023 en adelante; (3) R neto "
-           "> 0 en el control (NAS100 de MetaQuotes).",
+           *(["**Variante sin look-ahead:** C2 tiene que haber cerrado dentro del rango de C1 (cierre real del HTF) y el CISD y la "
+              "entrada se buscan desde el cierre de C2 hasta el final de C3. Si el precio supera el extremo del sweep en C3, el setup "
+              "se anula.", ""] if args.esperar_c2 else []),
+           *(["**Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; "
+              "las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.", ""]
+             if args.mercado == "forex" else []),
+           "Script: `scripts/backtest_crt.py`. Solo lee velas M5 y M3 descargadas de MT5. Las reglas y definiciones operativas están "
+           "en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.", "",
+           f"- **Se da por buena (cada combinación LTF × entrada) si:** (1) {mk['primary']}, todo el histórico: ≥ {MIN_OPS} "
+           f"operaciones y R neto > +{MIN_MEAN} con t > {MIN_T}; (2) R neto positivo hasta 2022 y en 2023 en adelante; (3) R neto "
+           f"> 0 en el control ({mk['control']}).",
            "- Son 6 combinaciones, así que algún t alto por azar es esperable: se mira la consistencia, no un solo número.", "",
            "## Veredicto", "",
-           table(verdict, ["Combinación", "NAS100 PUPrime", "(1)", "2018-2022 / 2023-", "(2)", "Control MetaQuotes", "(3)", "Resultado"]),
+           table(verdict, ["Combinación", mk["primary"], "(1)", "hasta 2022 / 2023-", "(2)", f"Control: {mk['control']}", "(3)",
+                           "Resultado"]),
            "", f"**{n_pass} de 6 combinaciones pasan.**", "",
            "## Datos", ""]
-    for (profile, tf), (name, df) in raw.items():
+    for (k, tf), (name, df) in raw.items():
         a, z = pd.Timestamp(int(df["ts"].iloc[0]) - AHEAD, unit="s"), pd.Timestamp(int(df["ts"].iloc[-1]) - AHEAD, unit="s")
         out.append(f"- {name} M{tf}: {len(df)} velas, {a:%Y-%m-%d} → {z:%Y-%m-%d} (NY).")
     out += ["", "## Embudo (cuántos pasos pasan)", ""]
     frows = []
-    for (profile, tf), fn in funnels.items():
-        frows.append([f"{raw[(profile, tf)][0]} M{tf}"] + [fn[k] for k in fn] + [len(setups_by[(profile, tf)])])
+    for (k, tf), fn in funnels.items():
+        frows.append([f"{raw[(k, tf)][0]} M{tf}"] + [fn[x] for x in fn] + [len(setups_by[(k, tf)])])
     out += [table(frows, ["Mercado", *list(next(iter(funnels.values())).keys()), "setups finales"]), ""]
-    out += ["## Resultados en NAS100 de PUPrime (R neto, con spread)", ""]
+    out += [f"## Resultados en {mk['primary']} (R neto, con spread)", ""]
     for tf in LTFS:
         rows = []
         for v, vname in VARIANTS.items():
-            t = results[(nas, tf, v)]
+            t = results[(P, tf, v)]
             p1, p2 = by_period(t)
-            rows += [row(f"M{tf} · {v}. {vname}", t), row("  2018-2022", p1), row("  2023 en adelante", p2),
+            rows += [row(f"M{tf} · {v}. {vname}", t), row("  hasta 2022", p1), row("  2023 en adelante", p2),
                      row("  sin costes (R bruto)", t, "R bruto")]
             if len(t):
                 rows += [row("  largos", t[t["dirección"] == "long"]), row("  cortos", t[t["dirección"] == "short"])]
         out += [table(rows), ""]
-    out += ["## Control: NAS100 de MetaQuotes", ""]
-    rows = [row(f"M{tf} · {v}. {vname}", results[("metaquotes", tf, v)]) for tf in LTFS for v, vname in VARIANTS.items()]
-    out += [table(rows), "", "## Cómo terminan y riesgo (NAS100 de PUPrime)", ""]
+    out += [f"## Control: {mk['control']}", ""]
     rows = []
     for tf in LTFS:
         for v, vname in VARIANTS.items():
-            t = results[(nas, tf, v)]
-            if not len(t):
-                continue
-            ends = ", ".join(f"{k} {n}" for k, n in t["cómo"].value_counts().items())
-            rows.append([f"M{tf} · {v}", ends, f"{t['riesgo'].median():.1f}", f"{t['riesgo'].quantile(.1):.1f}",
-                         f"{t['riesgo'].quantile(.9):.1f}", f"{t['coste (R)'].mean():.3f}", f"{(t['coste (R)'] > 0.2).mean() * 100:.0f} %"])
-    out += [table(rows, ["Combinación", "Cierres", "Riesgo mediano (pts)", "p10", "p90", "Coste medio (R)", "Coste > 0,2 R"]), "",
-            "## Por año (NAS100 de PUPrime)", ""]
+            t = results[(C, tf, v)]
+            p1, p2 = by_period(t)
+            rows += [row(f"M{tf} · {v}. {vname}", t), row("  hasta 2022", p1), row("  2023 en adelante", p2)]
+    out += [table(rows), "", f"## Cómo terminan y riesgo ({mk['primary']})", ""]
+    rows = []
     for tf in LTFS:
         for v, vname in VARIANTS.items():
-            t = results[(nas, tf, v)]
+            t = results[(P, tf, v)]
+            if not len(t):
+                continue
+            ends = ", ".join(f"{x} {n}" for x, n in t["cómo"].value_counts().items())
+            rows.append([f"M{tf} · {v}", ends, f"{t['riesgo'].median() / unit:.1f}", f"{t['riesgo'].quantile(.1) / unit:.1f}",
+                         f"{t['riesgo'].quantile(.9) / unit:.1f}", f"{t['coste (R)'].mean():.3f}",
+                         f"{(t['coste (R)'] > 0.2).mean() * 100:.0f} %"])
+    out += [table(rows, ["Combinación", "Cierres", f"Riesgo mediano ({unit_name})", "p10", "p90", "Coste medio (R)",
+                         "Coste > 0,2 R"]), "", f"## Por año ({mk['primary']})", ""]
+    for tf in LTFS:
+        for v, vname in VARIANTS.items():
+            t = results[(P, tf, v)]
             if len(t):
                 out += [f"**M{tf} · {v}. {vname}**", "",
                         table([row(str(y), g) for y, g in t.groupby(t["entrada (NY)"].dt.year)]), ""]
     out += ["## Sensibilidad (no cuenta para el veredicto)", "",
-            "Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro» usa información futura (el cierre de C2).", ""]
+            "Cada fila vuelve a buscar los setups con el cambio indicado. «C2 cierra dentro» usa información futura (el cierre de C2).",
+            ""]
     sens = []
     for label, rule in (("antigüedad del FVG 3 días", replace(base_rule, lookback_days=3)),
                         ("antigüedad del FVG 30 días", replace(base_rule, lookback_days=30)),
@@ -486,11 +524,11 @@ def main() -> None:
                         ("sin BE", replace(base_rule, be_at=0.0)), ("objetivo 3R", replace(base_rule, rr=3.0))):
         for tf in LTFS:
             if rule.lookback_days != base_rule.lookback_days or rule.touch_tol != base_rule.touch_tol:
-                st, _ = find_setups(raw[(nas, 5)][1], raw[(nas, tf)][1], tf, rule)
+                st, _ = find_setups(raw[(P, 5)][1], raw[(P, tf)][1], tf, rule)
             else:
-                st = setups_by[(nas, tf)]
+                st = setups_by[(P, tf)]
             for v in VARIANTS:
-                sens.append(row(f"{label}: M{tf} · {v}", run_variant(raw[(nas, tf)][1], st, v, tf, rule)))
+                sens.append(row(f"{label}: M{tf} · {v}", run_variant(raw[(P, tf)][1], st, v, tf, rule)))
     out += [table(sens)]
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("\n".join(out) + "\n", encoding="utf-8")
