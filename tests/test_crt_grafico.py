@@ -121,7 +121,7 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert not chart._card.isVisible()                                                   # la etiqueta sola es discreta: sin detalle
     violet = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#B388FF"]
     assert len(violet) == 1                                                              # el iFVG invertido, pintado en el LTF
-    assert [it for it in chart._crt_items if hasattr(it, "toPlainText")] == [pill]          # el dibujo no lleva más texto que la etiqueta: sin nombres de vela ni de zonas
+    assert sorted(it.toPlainText().split()[0] for it in chart._crt_items if hasattr(it, "toPlainText")) == ["CISD", "▼"]     # solo la etiqueta y el CISD: sin nombres de vela ni de zonas
     orange = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
     assert len(orange) == 1                                                              # el FVG de MTF del paso 2, en naranja
     from tradingbot.ui.chart import HTF_BOX

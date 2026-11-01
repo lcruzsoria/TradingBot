@@ -1077,6 +1077,10 @@ class ChartView(pg.PlotWidget):
             line = pg.PlotCurveItem(x=np.array([float(cisd["x0"]), float(cisd["x1"]) + 1]), y=np.array([cisd["level"]] * 2),
                                     pen=pg.mkPen(violet, width=1, style=Qt.PenStyle.DotLine))
             add(line, -3)
+            label = pg.TextItem(anchor=(0, 0.5))                  # lo único con texto en el dibujo: el nivel del CISD
+            label.setHtml(f'<span style="font-size:7pt; color:{violet}">CISD</span>')
+            label.setPos(float(cisd["x1"]) + 1, cisd["level"])
+            add(label, 7)
         if ext:
             dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(CRT_COLORS["short"], width=1.5),
                                      brush=pg.mkBrush(None))
