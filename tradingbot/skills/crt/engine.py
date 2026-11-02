@@ -377,7 +377,7 @@ def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool =
             if lim is None and mkt is None:
                 if deep or opposite:
                     reason = 3 if deep else (0 if not seen[0] else 1 if not seen[1] else 2)
-                    setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": ext, "motivo": C2_REASONS[reason],
+                    setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": ext if np.isfinite(ext) else float(hi_[s0]), "motivo": C2_REASONS[reason],
                                            "c1": (c1l, c1h)})
                     funnel["invalidados"] += 1
                 continue
