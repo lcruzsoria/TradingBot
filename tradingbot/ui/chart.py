@@ -46,7 +46,8 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 # Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
-           "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C")}
+           "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C"),
+           "sin_sweep": ("Sin sweep", None)}
 RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
@@ -111,7 +112,7 @@ CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) 
 HTF_BOX = "#C9CDD6"                                       # cajas de las velas C1 y C2 del HTF: gris claro, para no confundirlas con las velas
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
-                    "sin_setup": "Sin setup", "sin_operacion": "Sin operación"}
+                    "sin_setup": "Sin setup", "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep"}
 
 
 class CrtPill(_StripePill):
@@ -123,6 +124,14 @@ class CrtPill(_StripePill):
         result, color = RESULTS.get(str(crt["state"]), (str(crt["state"]), None))
         long = crt["direction"] == "long"
         outside = -(PILL_GAP + 1.25) if long else 1 + PILL_GAP       # el alcista deja sitio debajo de la caja para el «C2»
+        if crt["direction"] == "none":                               # vela sin sweep: etiqueta neutra, sin lado
+            super().__init__(anchor=(0, outside), fill=pg.mkPen(None) and pg.mkBrush(_alpha(theme.PANEL, 225)), border=pg.mkPen(theme.BORDER))
+            self._bar = QColor(theme.BORDER)
+            self.result = result
+            self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<span style="color:{theme.MUTED}">H{int(crt.get("htf", 180)) // 60} · sin sweep</span>&nbsp;</span>')
+            self.setZValue(8)
+            self.setOpacity(CRT_PILL_OPACITY)
+            return
         super().__init__(anchor=(0, outside), fill=pg.mkBrush(_alpha(theme.PANEL, 225)),
                          border=pg.mkPen(color, width=1.5) if color else pg.mkPen(theme.BORDER))
         tone = CRT_COLORS[crt["direction"]]
@@ -802,7 +811,7 @@ class ChartView(pg.PlotWidget):
         right = vb.sceneBoundingRect().right() - 2
         placed = [(float(p["x0"]), float(p["stop"]), pill) for p, pill in zip(self._positions, self._pos_pills)]
         placed += [(float(f["x0"]), float(f["levels"]["1"]), pill) for f, pill in self._fib_pills]
-        placed += [(float(c["x0"]), c["c2"][1] if c["direction"] == "short" else c["c2"][0], pill)
+        placed += [(float(c["x0"]), c["c2"][0] if c["direction"] == "long" else c["c2"][1], pill)
                    for c, pill in zip(self._crts, self._crt_pills)]
         left = vb.viewRange()[0][0]
         crt_pills = {id(pill): c for c, pill in zip(self._crts, self._crt_pills)}
@@ -897,14 +906,15 @@ class ChartView(pg.PlotWidget):
         elif kind == "crt":                                     # CRT del backtest: dónde estaba el FVG y dónde se entró
             long = data["direction"] == "long"
             word = CRT_RESULT_WORDS.get(str(data["state"]), str(data["state"]))
-            tone = CRT_COLORS[data["direction"]]
+            tone = CRT_COLORS.get(data["direction"], theme.MUTED)
             htf = f"H{int(data.get('htf', 180)) // 60}"
 
             def crt_row(name: str, value: str) -> str:
                 return (f'<tr><td style="color:{muted}; padding-right:14px">{name}</td>'
                         f'<td align="right" style="color:{theme.TEXT}">{html.escape(value)}</td></tr>')
 
-            head = f'<b style="color:{tone}">CRT {"alcista" if long else "bajista"}</b> · {"largo" if long else "corto"} · {html.escape(word)}'
+            head = (f'<b style="color:{tone}">CRT {"alcista" if long else "bajista"}</b> · {"largo" if long else "corto"} · {html.escape(word)}'
+                    if data["direction"] != "none" else f'<b>Vela {htf}</b> · sin sweep')
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                     + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
@@ -921,7 +931,10 @@ class ChartView(pg.PlotWidget):
             if others:
                 listed = ' · '.join(f"M{lt}·{en} {CRT_RESULT_WORDS.get(st, st)}" for lt, en, st in others[:8])
                 verdict = f'<div style="margin-top:4px; color:{muted}">Otros LTF y entradas del backtest: {html.escape(listed)}</div>'
-            if data["state"] == "sin_operacion":                # el patrón se dio en otro LTF u otra entrada del backtest, no en la elegida
+            if data["state"] == "sin_sweep":                    # la vela no barrió ningún extremo de C1: no hay CRT
+                body = '<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf}", f"{data.get('when', '')} NY") + '</table>'
+                verdict = f'<div style="margin-top:4px; color:{muted}">No barre el máximo ni el mínimo de la vela anterior: no hay CRT.</div>'
+            elif data["state"] == "sin_operacion":                # el patrón se dio en otro LTF u otra entrada del backtest, no en la elegida
                 body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                         + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
             elif data["state"] == "sin_setup":                  # sweep sin operación ni invalidación: el patrón no se completó antes de que acabara C2
@@ -1033,10 +1046,10 @@ class ChartView(pg.PlotWidget):
             c1lo, c1hi = crt["c1"]
             c2lo, c2hi = crt["c2"]
             short = crt["direction"] == "short"
-            tone = CRT_COLORS[crt["direction"]]
+            tone = CRT_COLORS.get(crt["direction"], HTF_BOX)
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
             boxes = [(c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]       # C2, la vela que lleva la etiqueta
-            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion")
+            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion", "sin_sweep")
             if operated:                                         # C1 y C3 solo en los CRT con operación, con el color de su lado
                 boxes.insert(0, (c1lo, c1hi, _alpha(tone, 12), _alpha(tone, 110), 1.0, xc1, x0))
                 if c3:
@@ -1050,15 +1063,16 @@ class ChartView(pg.PlotWidget):
                 box.setZValue(-7)
                 pi.addItem(box, ignoreBounds=True)
                 self._crt_items.append(box)
-            swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
-            line = pg.PlotCurveItem(x=np.array([xc1 if operated else x0, x1]), y=np.array([swept, swept]),    # sin caja de C1, la línea arranca en C2
-                                    pen=pg.mkPen(tone, width=1.5, style=Qt.PenStyle.DashLine))   # rojo: sweep de máximos; verde: de mínimos
-            line.setZValue(-6)
-            pi.addItem(line, ignoreBounds=True)
-            self._crt_items.append(line)
+            if crt["direction"] != "none":                        # la vela sin sweep no tiene nivel barrido
+                swept = c1hi if short else c1lo                   # el extremo de C1 que barre C2
+                line = pg.PlotCurveItem(x=np.array([xc1 if operated else x0, x1]), y=np.array([swept, swept]),    # sin caja de C1, la línea arranca en C2
+                                        pen=pg.mkPen(tone, width=1.5, style=Qt.PenStyle.DashLine))   # rojo: sweep de máximos; verde: de mínimos
+                line.setZValue(-6)
+                pi.addItem(line, ignoreBounds=True)
+                self._crt_items.append(line)
             self._draw_crt_trade(crt, tone)
             pill = CrtPill(crt)
-            pill.setPos(x0, c2hi if short else c2lo)
+            pill.setPos(x0, c2lo if crt["direction"] == "long" else c2hi)
             pi.addItem(pill, ignoreBounds=True)
             self._crt_items.append(pill)
             self._crt_pills.append(pill)

@@ -23,7 +23,7 @@ AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", 
 MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup",
-                "sin_operacion": "Sin operación"}
+                "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep"}
 LTF_ORDER = (3, 5)
 
 
@@ -134,6 +134,22 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
         if best[4]:
             mark.update(audit_marks(best[4], ts, ahead, n, best[1]))
         out.append(mark)
+    marked = {c for c, _ in set(trades) | set(invalid)}
+    origin = 18 * 60 if htf == 180 else 17 * 60                 # las velas HTF empiezan a las 18:00 NY (índices) o a las 17:00 NY (forex)
+    first_min, last_min = int(ts[0]) // 60 - ahead // 60, int(ts[-1]) // 60 - ahead // 60
+    for c2_min in range(((first_min - origin) // htf) * htf + origin, last_min + 1, htf):
+        if c2_min in marked:
+            continue
+        start = c2_min * 60 + ahead                              # las velas que no barren C1 también llevan caja: «sin sweep»
+        x0 = int(np.searchsorted(ts, start, "left"))
+        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
+        if x0 >= n or ts[x0] - start > htf * 60 or x1 <= x0:
+            continue
+        out.append({"x0": x0, "x1": x1, "xc1": x0, "direction": "none", "state": "sin_sweep", "label": "CRT",
+                    "c1": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+                    "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x1, "c3": None,
+                    "mtf": [], "ltf": None, "entry": None, "htf": htf, "motivo": "no barre ningún extremo de C1", "start": start,
+                    "fvg_all": [], "others": [], "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M")})
     return sorted(out, key=lambda m: m["x0"])
 
 
