@@ -747,6 +747,7 @@ class MainWindow(QMainWindow):
         """La skill Stats publica una copia de las cifras del forwardtest cada vez que cambian."""
         self.stats = p["stats"]
         self._paint_trades()
+        changed = False
         for t in self.stats.trades:                              # el GO de lo que el bot ya operó vale aunque se reinicie la app:
             o = t.order                                          # si no, el gráfico lo marcaría NO GO «posición abierta»
             if o.tbr_zone:
@@ -754,7 +755,9 @@ class MainWindow(QMainWindow):
                 if self._decisions.get(key, ("",))[0] != "GO":
                     self._decisions[key] = ("GO", short_reason(o.reason))
                     self._decision_text[key] = o.reason
-        self._apply_fibs()
+                    changed = True
+        if changed:                                              # redibujar solo si hay un GO nuevo: durante el replay llegan muchas copias
+            self._apply_fibs()
         if self.strategy == "calendario":
             self._apply_fibs()                                   # sus operaciones en directo salen en el gráfico
         if p.get("folder") and (self.stats_journal is None or str(self.stats_journal.folder) != p["folder"]):
