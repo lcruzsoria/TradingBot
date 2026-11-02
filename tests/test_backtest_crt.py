@@ -108,7 +108,7 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 3, 1)             # por defecto M3 y la orden límite
     g = bt.group("crt:indices")
     first = dlg.blocks["n"].value.text()
-    assert first != "-" and len(dlg.by_filter.rows) == 4 and len(dlg.by_mtf.rows) == 0
+    assert first != "-" and len(dlg.by_filter.rows) == 4 and not hasattr(dlg, 'by_mtf')
     assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
     for ltf in (5, 3):                                                              # los 2 LTF y los 2 modelos de entrada se pintan
         dlg.set_crt_ltf(ltf)
@@ -144,4 +144,4 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert dlg.years == {2024} and dlg.blocks["n"].value.text() != "-"
     dlg.set_group("puprime:indices")                                                # los patrones vuelven con sus botones
     assert not dlg.pattern_labelled.itemAt(0).widget().isHidden() and dlg.crt_layouts[0].itemAt(0).widget().isHidden()
-    assert dlg.profile_key == "puprime" and dlg.by_mtf.isHidden() and dlg.crt_funnel.isHidden()
+    assert dlg.profile_key == "puprime" and dlg.crt_funnel.isHidden()
