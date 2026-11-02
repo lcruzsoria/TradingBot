@@ -5,8 +5,8 @@ alguna operación. El backtest guarda de cada operación su mercado, el inicio d
 FVG de MTF que toca la mecha, el LTF y el modelo de entrada con los que entró y cómo acabó. Los rangos de C1 y C2 se rehacen con las
 velas cargadas: solo salen los CRT cuya C2 está entre ellas (FEED_MAX_BARS por mercado y timeframe).
 
-De cada CRT se enseña una operación, la del LTF y la entrada que se piden (el timeframe del gráfico y CRT_ENTRY); si el CRT no dio esa
-operación se usa otra de las que sí dio. En la ficha salen todas las demás.
+De cada CRT se enseña la operación del LTF y la entrada que se piden (el timeframe del gráfico y CRT_ENTRY); si el CRT no dio esa
+operación no se marca (en esa combinación no hubo operación: o ya había otra abierta o no se dio). En la ficha salen las demás.
 """
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ from ..stats.backtest import CRT_ENTRIES, CRT_MTF_BITS, CRT_MTF_NAMES
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
-MTF_TFS = {5: "M5", 15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
+MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado"}
-LTF_ORDER = (5, 3, 1)
+LTF_ORDER = (5, 3)
 
 
 def htf_minutes(symbol: str, indices=DEFAULT_US_INDICES) -> int:
@@ -106,6 +106,8 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
                 "extreme": {"x": n_ext, "price": price}})
             continue
         rows = sorted(rows, key=lambda r: (ltf_pref.index(r[0]), entry_pref.index(r[1])))
+        if (rows[0][0], rows[0][1]) != (ltf, entry):            # solo las operaciones del LTF y la entrada elegidos: cada combinación del
+            continue                                            # backtest tiene una sola operación abierta a la vez, y mezclarlas las solapaba
         best = rows[0]
         state = STATES.get(best[2], "tiempo")
         fvg = sorted({name for r in rows for name in mtf_names(r[3])}, key=lambda s: list(CRT_MTF_NAMES.values()).index(s))

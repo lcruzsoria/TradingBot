@@ -13,7 +13,7 @@ from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from . import engine
 
 STRATEGY = "crt"
-LTF_MINUTES = (1, 3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
+LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
 MAX_LATE_BARS = 2                                 # una señal se da si la vela de entrada es una de las últimas 2
 MIN_BARS = 200
 ENTRY_NAMES = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha", 4: "cierre del CISD"}
@@ -24,8 +24,8 @@ DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # lo
 class CrtSkill(Skill):
     title = "CRT"
     description = ("Estrategia CRT (Candle Range Theory, variante B), dentro de C2: una vela H3 (índices) o H4 (forex) barre con "
-                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M5 o M15 y el precio vuelve a él; "
-                   "en las velas del gráfico (M1, M3 o M5) el precio invierte un FVG (iFVG, el CISD) antes de que cierre C2. Entra con "
+                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M15 y el precio vuelve a él; "
+                   "en las velas del gráfico (M3 o M5) el precio invierte un FVG (iFVG, el CISD) antes de que cierre C2. Entra con "
                    "una de las cuatro variantes de entrada, con stop en el extremo del sweep y objetivo 2R (el breakeven a 1R lo lleva Setup). "
                    "Avisa a Cortex, que le da la orden a Setup; solo simulación. Solo actúa en el perfil CRT. Ojo: en el backtest "
                    "(docs/estrategia_crt) ninguna combinación pasó los criterios.")
@@ -76,7 +76,7 @@ class CrtSkill(Skill):
             caption(f"{symbol} no está en CRT_SYMBOLS")
             return
         if df is None or minutes(tf) not in LTF_MINUTES:
-            caption("necesita velas de M1, M3 o M5")
+            caption("necesita velas de M3 o M5")
             return
         if len(df) < MIN_BARS:
             caption(f"{symbol}: faltan velas ({len(df)})")

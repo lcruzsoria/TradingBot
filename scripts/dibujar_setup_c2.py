@@ -104,7 +104,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--simbolo", default="EURUSD", help="EURUSD, GBPUSD (H4) o NAS100 (H3); PUPrime")
     ap.add_argument("--c2", required=True, help="inicio de C2, hora NY (AAAA-MM-DD HH:MM)")
-    ap.add_argument("--ltf", type=int, choices=(1, 3, 5), default=5)
+    ap.add_argument("--ltf", type=int, choices=(3, 5), default=5)
     ap.add_argument("--entrada", type=int, choices=(1, 2, 3, 4), default=1)
     args = ap.parse_args()
     want = args.simbolo.upper()

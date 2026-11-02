@@ -35,10 +35,10 @@ def test_el_escenario_da_un_unico_corto_con_todos_los_pasos():
     assert funnel["velas HTF con sweep"] >= 1                                         # (el relleno del día 1 también tiene sweeps sin FVG)
     assert [funnel[k] for k in list(funnel)[1:5]] == [1, 1, 1, 1]
     st = setups[0]
-    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M5"
+    assert st["dirección"] == "short" and st["stop"] == 108.5 and st["mtf"] == "M15"
     assert ny(df["ts"][st["ih"]]) == "2026-10-13 06:35"                               # el extremo del sweep
-    assert ny(df["ts"][st["jt"]]) == "2026-10-13 07:10"                               # la vuelta al FVG de M5 103.0-103.5 (formado a las 07:05)
-    assert [z[:3] for z in st["zones"]] == [(5, 103.0, 103.5)]
+    assert ny(df["ts"][st["jt"]]) == "2026-10-13 07:15"                               # la vuelta al FVG de M15 103.2-107.3 (formado a las 07:15)
+    assert [z[:3] for z in st["zones"]] == [(15, 103.2, 107.3)]
     assert st["kf"] > st["jt"]                                                        # el iFVG de LTF se forma después del toque
     assert ny(df["ts"][st["jc"]]) == "2026-10-13 07:30"                               # el cierre bajo la base del iFVG es el CISD
     assert (st["z_bottom"], st["z_top"], st["level"]) == (103.4, 104.9, 103.4)
@@ -136,7 +136,7 @@ def test_el_largo_es_el_espejo_del_corto():
 def test_sin_hueco_de_mtf_tras_el_extremo_no_hay_setup():
     df = scenario()
     t = (df["ts"] >= at("06:45")) & (df["ts"] <= at("07:15"))
-    df.loc[t, "high"] = df.loc[t, "high"].clip(lower=108.0)                       # el desplazamiento no deja hueco ni en M5 ni en M15
+    df.loc[t, "high"] = df.loc[t, "high"].clip(lower=108.0)                       # el desplazamiento no deja hueco en M15
     assert engine.find_setups(df, df, 5, RULE, CFG)[0] == []
 
 

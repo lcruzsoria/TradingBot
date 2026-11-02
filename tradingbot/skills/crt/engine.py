@@ -3,7 +3,7 @@
 C1 = rango, C2 = manipulación, C3 = expansión. Corto (el largo es el espejo, ver `view`):
   1. C2 supera el máximo de C1 con una mecha (el extremo del sweep, que va subiendo mientras C2 sigue haciendo máximos). Si C2 ya había
      tomado el mínimo de C1 antes, el sweep es el del mínimo (un largo), no este.
-  2. Tras ese extremo, el desplazamiento a la baja deja un FVG BAJISTA de MTF (M5/M15) que nace DESPUÉS del extremo, y el precio
+  2. Tras ese extremo, el desplazamiento a la baja deja un FVG BAJISTA de MTF (M15) que nace DESPUÉS del extremo, y el precio
      vuelve a él (basta con que lo toque la mecha).
   3. En LTF (M5/M3/M1), después del toque, el precio deja un FVG ALCISTA (su 3.ª vela cierra tras el toque; sin plazo) que invierte con un
      cierre por debajo de su base: es el iFVG y esa inversión es el CISD.
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-MTF = (5, 15)                                            # timeframes del FVG de confirmación (minutos)
+MTF = (15,)                                              # timeframes del FVG de confirmación (minutos)
 
 
 @dataclass(frozen=True)

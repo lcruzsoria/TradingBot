@@ -13,7 +13,7 @@ Se describe el corto (barrido de un máximo). El largo es el espejo exacto.
 | Papel | Índices | Forex |
 |---|---|---|
 | HTF (sweep) | H3 | H4 |
-| MTF (FVG de confirmación) | M5 o M15 | M5 o M15 |
+| MTF (FVG de confirmación) | M15 | M15 |
 | LTF (iFVG, CISD y entrada) | M5 o M3 | M5 o M3 |
 
 - Primer mercado: **NAS100**. Forex en una segunda fase.
@@ -31,14 +31,14 @@ Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade. 
 - Máximo barrido → **corto**. Mínimo barrido → **largo**.
 
 ### Paso 2 · FVG de MTF que nace del desplazamiento, y vuelta a él
-- Tras el extremo del sweep, el desplazamiento deja un **FVG de M5 o M15** en la dirección contraria al sweep (corto: FVG **bajista**; largo: FVG alcista). El FVG tiene que nacer **después** del extremo: su primera vela termina después de él. Vale cualquiera de los dos timeframes (el M5 y el M15 no se mezclan: cada uno tiene sus propios FVG).
+- Tras el extremo del sweep, el desplazamiento deja un **FVG de M15** en la dirección contraria al sweep (corto: FVG **bajista**; largo: FVG alcista). El FVG tiene que nacer **después** del extremo: su primera vela termina después de él.
 - El precio **vuelve** a ese FVG: basta con que lo toque una mecha (no hace falta cerrar dentro).
 - Sin vuelta al FVG: no hay trade.
 
 ### Paso 3 · iFVG en LTF = CISD
-- En M5, M3 o M1, tras el toque al FVG de MTF aparece un FVG de LTF en la dirección del sweep (corto: alcista). Una vela que **cierra al otro lado de su base** lo invierte (iFVG). **Esa inversión es el CISD.**
+- En M5 o M3, tras el toque al FVG de MTF aparece un FVG de LTF en la dirección del sweep (corto: alcista). Una vela que **cierra al otro lado de su base** lo invierte (iFVG). **Esa inversión es el CISD.**
 - El FVG de LTF se forma **después del toque** (su tercera vela cierra tras el toque), no está ya invertido y **no tiene plazo**: puede invertirse mucho después del toque.
-- El TF donde aparece el iFVG (M5, M3 o M1) es el **TF de entrada**.
+- El TF donde aparece el iFVG (M5 o M3) es el **TF de entrada**.
 
 ### Paso 4 · Entrada
 Cuatro variantes, cada una con su propio backtest, siempre **antes de que cierre C2**:

@@ -5,11 +5,11 @@ REGLAS (las del usuario, ver docs/estrategia_crt/GUIA.md) Y CRITERIOS, FIJADOS A
   expansión. Sweep: una vela H3 (C2) supera con una mecha el máximo (o mínimo) de la anterior (C1). Máximo barrido -> corto; mínimo
   barrido -> largo. El largo se calcula como el corto con los precios cambiados de signo (mismo código para las dos direcciones).
   Si C2 supera los dos extremos de C1 antes de la entrada, ese setup se descarta. No se espera a que C2 cierre: todo ocurre dentro de C2.
-- MTF = M5 y M15 (el M15 se agrega de M5). Paso 2 del setup: tras el extremo del sweep (el más alto de C2 hasta el momento), el
+- MTF = M15 (se agrega de M5). Paso 2 del setup: tras el extremo del sweep (el más alto de C2 hasta el momento), el
   desplazamiento deja un FVG bajista de MTF que nace DESPUÉS del extremo (su primera vela termina después de él), y el precio vuelve a
-  él: basta con que lo toque la mecha. Vale cualquier FVG de M5 o M15 formado tras el extremo. Un extremo nuevo reinicia todo.
+  él: basta con que lo toque la mecha. Vale cualquier FVG de M15 formado tras el extremo. Un extremo nuevo reinicia todo.
     * FVG: tres velas con hueco entre el mínimo de la 1.ª y el máximo de la 3.ª (bajista) o al revés (alcista).
-- LTF = M5, M3 y M1 (backtests separados; el TF donde aparece el iFVG es el TF de entrada).
+- LTF = M5 y M3 (backtests separados; el TF donde aparece el iFVG es el TF de entrada).
     * iFVG (cortos): FVG alcista de LTF (3.ª vela desde 120 min antes de la vuelta al FVG de MTF) posterior al extremo, sin cerrar por
       debajo de su base antes. Se invierte cuando una vela cierra por debajo de su base: esa inversión es el CISD.
 - Entradas (cada una es un backtest), siempre antes de que cierre C2:
@@ -220,7 +220,7 @@ def main() -> None:
     ap.add_argument("--descargar", action="store_true", help="descarga las velas M5 y M3 de MT5 y termina")
     ap.add_argument("--mercado", choices=sorted(MARKETS), default="indices",
                     help="indices (NAS100, HTF H3) o forex (EURUSD/GBPUSD, HTF H4)")
-    ap.add_argument("--ltf", type=int, nargs="+", choices=(1, 3, 5), default=list(LTFS),
+    ap.add_argument("--ltf", type=int, nargs="+", choices=(3, 5), default=list(LTFS),
                     help="timeframes de entrada (iFVG, CISD y entrada). Con M1 el histórico de MT5 solo llega a 2024: el criterio (2) "
                          "usa dos mitades por fecha")
     ap.add_argument("--min-rr", type=float, default=2.0, help="con --objetivo-c1: se descarta el setup si el extremo de C1 da menos de este "
@@ -290,12 +290,12 @@ def main() -> None:
                             "**Pasa**" if ok1 and ok2 and ok3 else "No pasa"])
     n_pass = sum(all(x) for x in summ.values())
 
-    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M5/M15 → {'/'.join(f'M{x}' for x in ltfs)}" + (
+    out = [f"# Backtest: CRT (variante B) en {mk['title']}, {htf} → M15 → {'/'.join(f'M{x}' for x in ltfs)}" + (
                (" · objetivo en el extremo de C1" if args.objetivo_c1 else "")), "",
            *(["**Forex:** velas H4 alineadas a las 17:00 NY, sin entradas a las 17:00 NY y lo abierto se cierra (el corte del día FX; "
               "las 18:00 eran el cierre de los índices). Mismas reglas que en NAS100 para FVG, iFVG, CISD, entradas y gestión.", ""]
              if args.mercado == "forex" else []),
-           "Script: `scripts/backtest_crt.py`. Solo lee velas M1, M3 y M5 descargadas de MT5. Las reglas y definiciones operativas están "
+           "Script: `scripts/backtest_crt.py`. Solo lee velas M3 y M5 descargadas de MT5. Las reglas y definiciones operativas están "
            "en la cabecera del script y en `GUIA.md`; se fijaron antes de ver los resultados.", "",
            f"- **Se da por buena (cada combinación LTF × entrada) si:** (1) {mk['primary']}, todo el histórico: ≥ {MIN_OPS} "
            f"operaciones y R neto > +{MIN_MEAN} con t > {MIN_T}; (2) R neto positivo en los dos periodos ({lab1}; {lab2}); (3) R neto "

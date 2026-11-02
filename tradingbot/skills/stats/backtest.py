@@ -30,17 +30,17 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq", "tt", "f5t", "f15t"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq", "tt", "f15t"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
 # CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3), t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
 # h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no) y c (inicio de la vela H3 / H4 del
 # sweep, en minutos NY: con él el gráfico marca cada CRT). Para auditar cada operación en el gráfico: pe, ps, pt (entrada, stop y objetivo),
 # pa, pb (base y techo del iFVG invertido), pc (nivel del CISD) y las horas ti (inicio del FVG), tv (inversión), tj (CISD), th (extremo del
 # sweep), tq (inicio del iFVG) y tt (vuelta al FVG de MTF), en minutos NY. Y la zona del FVG de MTF tocado en cada timeframe: f15a / f15b (base y
-# techo) y f15t (primera vela, minutos NY; -1 si ese timeframe no lo toca), y lo mismo con f5.
-CRT_MTF_BITS = {5: 1, 15: 2}
-CRT_MTF_NAMES = {0: "Todos", 5: "M5", 15: "M15"}
-CRT_LTFS = (5, 3, 1)
+# techo) y f15t (primera vela, minutos NY; -1 si ese timeframe no lo toca), (el MTF es solo M15).
+CRT_MTF_BITS = {15: 1}
+CRT_MTF_NAMES = {0: "Todos", 15: "M15"}
+CRT_LTFS = (5, 3)
 CRT_ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha", 4: "Cierre del CISD"}
 CRT_ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
 CRT_TBR = ("Todas", "Dentro de TBR", "Asia", "London", "NY Open", "Fuera de TBR")          # filtro por la TBR de la hora de entrada
@@ -225,7 +225,7 @@ class Group:
         return (min(starts), max(ends)) if starts and ends else ("", "")
 
     def dates_of(self, ltf: int | None = None) -> tuple[str, str]:
-        """Como `dates`, pero en CRT solo de las velas del LTF (M5, M3 o M1) elegido: M1 llega mucho menos atrás."""
+        """Como `dates`, pero en CRT solo de las velas del LTF (M5 o M3) elegido."""
         if ltf is None or not self.is_crt:
             return self.dates
         rows = [m for m in self.markets if str(m.get("mercado") or "").endswith(f"M{ltf}")]
