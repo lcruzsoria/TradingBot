@@ -91,7 +91,8 @@ def test_solo_se_marcan_las_operaciones_del_ltf_y_la_entrada_elegidos():
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     bt = backtest([(C2, 1, 3, 2, 0, 1)])                                                # el CRT solo dio una operación, en M3 con la entrada 2
-    assert crt_marks(bt, "NAS100.r", ts, high, low, AHEAD, ltf=5, entry=1) == []         # en M5 · 1 no hubo: no se rellena con otra combinación
+    [none] = crt_marks(bt, "NAS100.r", ts, high, low, AHEAD, ltf=5, entry=1)             # en M5 · 1 no hubo: no se rellena con otra combinación,
+    assert none["state"] == "sin_operacion" and none["ltf"] is None and none["others"] == [(3, 2, "objetivo")]        # pero se marca, con las demás
     assert [m["ltf"] for m in crt_marks(bt, "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=2)] == [3]
 
 

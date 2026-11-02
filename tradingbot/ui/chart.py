@@ -46,8 +46,8 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 # Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
-           "sin_setup": ("Sin setup", "#78909C")}
-RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
+           "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C")}
+RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
 
@@ -111,7 +111,7 @@ CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) 
 HTF_BOX = "#C9CDD6"                                       # cajas de las velas C1 y C2 del HTF: gris claro, para no confundirlas con las velas
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
-                    "sin_setup": "Sin setup"}
+                    "sin_setup": "Sin setup", "sin_operacion": "Sin operación"}
 
 
 class CrtPill(_StripePill):
@@ -921,7 +921,10 @@ class ChartView(pg.PlotWidget):
             if others:
                 listed = ' · '.join(f"M{lt}·{en} {CRT_RESULT_WORDS.get(st, st)}" for lt, en, st in others[:8])
                 verdict = f'<div style="margin-top:4px; color:{muted}">Otros LTF y entradas del backtest: {html.escape(listed)}</div>'
-            if data["state"] == "sin_setup":                    # sweep sin operación ni invalidación: el patrón no se completó antes de que acabara C2
+            if data["state"] == "sin_operacion":                # el patrón se dio en otro LTF u otra entrada del backtest, no en la elegida
+                body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
+                        + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
+            elif data["state"] == "sin_setup":                  # sweep sin operación ni invalidación: el patrón no se completó antes de que acabara C2
                 body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                         + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
                 verdict = (f'<div style="margin-top:4px; color:{muted}">La vela C2 acabó sin completar el patrón (y sin llegar al extremo '
@@ -1033,7 +1036,8 @@ class ChartView(pg.PlotWidget):
             tone = CRT_COLORS[crt["direction"]]
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
             boxes = [(c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]       # C2, la vela que lleva la etiqueta
-            if crt["state"] not in ("invalido", "sin_setup"):        # C1 y C3 solo en los CRT con operación, con el color de su lado
+            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion")
+            if operated:                                         # C1 y C3 solo en los CRT con operación, con el color de su lado
                 boxes.insert(0, (c1lo, c1hi, _alpha(tone, 12), _alpha(tone, 110), 1.0, xc1, x0))
                 if c3:
                     boxes.append((c3[0], c3[1], _alpha(tone, 10), _alpha(tone, 110), 1.0, x1, float(crt["x2"])))
@@ -1047,7 +1051,7 @@ class ChartView(pg.PlotWidget):
                 pi.addItem(box, ignoreBounds=True)
                 self._crt_items.append(box)
             swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
-            line = pg.PlotCurveItem(x=np.array([xc1, x1]), y=np.array([swept, swept]),
+            line = pg.PlotCurveItem(x=np.array([xc1 if operated else x0, x1]), y=np.array([swept, swept]),    # sin caja de C1, la línea arranca en C2
                                     pen=pg.mkPen(tone, width=1.5, style=Qt.PenStyle.DashLine))   # rojo: sweep de máximos; verde: de mínimos
             line.setZValue(-6)
             pi.addItem(line, ignoreBounds=True)

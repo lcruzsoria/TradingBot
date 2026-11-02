@@ -22,7 +22,8 @@ HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
 MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
-RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup"}
+RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup",
+                "sin_operacion": "Sin operación"}
 LTF_ORDER = (3, 5)
 
 
@@ -108,8 +109,17 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
                 "extreme": {"x": n_ext, "price": price}})
             continue
         rows = sorted(rows, key=lambda r: (ltf_pref.index(r[0]), entry_pref.index(r[1])))
-        if (rows[0][0], rows[0][1]) != (ltf, entry):            # solo las operaciones del LTF y la entrada elegidos: cada combinación del
-            continue                                            # backtest tiene una sola operación abierta a la vez, y mezclarlas las solapaba
+        if (rows[0][0], rows[0][1]) != (ltf, entry):            # solo se dibuja la operación del LTF y la entrada elegidos: cada combinación del
+            out.append({                                        # backtest tiene una sola operación abierta a la vez, y mezclarlas las solapaba
+                "x0": x0, "x1": x1, "xc1": xc1, "direction": "short" if direction else "long", "state": "sin_operacion", "label": "CRT",
+                "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
+                "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
+                "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
+                "mtf": [], "ltf": None, "entry": None, "htf": htf, "start": start, "fvg_all": [],
+                "motivo": f"sin operación en M{ltf} · entrada {entry}",
+                "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
+                "others": [(r[0], r[1], STATES.get(r[2], "tiempo")) for r in rows]})
+            continue
         best = rows[0]
         state = STATES.get(best[2], "tiempo")
         fvg = sorted({name for r in rows for name in mtf_names(r[3])}, key=lambda s: list(CRT_MTF_NAMES.values()).index(s))
