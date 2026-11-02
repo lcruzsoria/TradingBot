@@ -291,12 +291,14 @@ def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict | None:
 # -- CRT-C2: el patrón del usuario (sin iFVG), con sesgo D1 y orden límite ---------------------------------------------------
 # Corto (el largo es el espejo): C2 supera el nivel de C1 y marca máximos (un máximo nuevo reinicia el patrón). La vela siguiente al máximo es
 # bajista y deja un FVG bajista en LTF; el precio cierra por debajo del nivel de C1 y vuelve a tocar el FVG (vela de retesteo).
-#   Entrada 1 (orden límite): venta límite EN el nivel de C1, se llena cuando el precio vuelve a subir hasta él tras cerrar por debajo.
+#   Tras el retesteo el precio tiene que continuar en la dirección contraria al sweep: si rompe por encima del máximo, el setup se invalida.
+#   Entrada 1 (orden en el nivel de C1): se activa al volver el precio al nivel de C1 tras el retesteo.
 #   Entrada 2 (a mercado): al cierre de la primera vela que cierra por debajo del mínimo de la vela de retesteo.
 # Stop en el máximo del sweep (sin límite de tamaño). Se invalida si la profundidad del sweep (máximo - nivel de C1) supera `cuartos` cuartos
 # de la altura de C1, redondeados al entero superior en pips/puntos, o si el precio llega al extremo opuesto de C1 sin completar el patrón.
 # Sesgo: solo C2 a favor de la tendencia D1 (cierre sobre/bajo la EMA30 y pendiente de 5 días; corto = bajista).
-C2_REASONS = ("sin FVG tras el extremo", "sin cierre dentro de C1", "sin retesteo", "sweep demasiado profundo")
+C2_REASONS = ("sin FVG tras el extremo", "sin cierre dentro de C1", "sin retesteo", "sweep demasiado profundo",
+              "rompió el máximo tras el retesteo")
 
 
 def d1_bias(base: pd.DataFrame, cfg: Cfg) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -342,17 +344,18 @@ def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool =
             limit = math.ceil(cuartos * 0.25 * (c1h - c1l) / cfg.unit - 1e-9) * cfg.unit      # profundidad máxima del sweep
             ext, ih, fvg, below, touch, lim, mkt = -np.inf, s0, None, None, None, None, None
             seen = [False, False, False]                                        # FVG, cierre dentro de C1, retesteo
-            deep, opposite = False, False
+            deep, opposite, broke = False, False, False
             for j in range(s0, b):
                 if lo_[j] < c1l:                                                # llega al extremo opuesto de C1
                     opposite = True
                     break
-                if lim is None and fvg is not None and below is not None and j > below and hi_[j] >= c1h + spe[j]:
-                    if ext - c1h > limit:
-                        deep = True
-                    else:                                                       # se llena la orden límite (puede ser la vela del máximo nuevo)
-                        lim = {"jl": j, "stop": ext, "ih": ih, "fvg": fvg, "below": below, "touch": touch}
-                if hi_[j] > ext:                                                # máximo nuevo: se reinicia el patrón
+                if fvg is not None and below is not None and touch is None and j > below and hi_[j] >= fvg[0]:
+                    touch = j                                                   # retesteo: el precio vuelve a tocar el FVG
+                    seen[2] = True
+                if touch is not None and hi_[j] > ext:                          # rompe por encima del máximo tras el retesteo: setup invalidado
+                    broke = True
+                    break
+                if hi_[j] > ext:                                                # máximo nuevo antes del retesteo: se reinicia el patrón
                     ext, ih, fvg, below, touch = float(hi_[j]), j, None, None, None
                     continue
                 if fvg is None and j == ih + 2 and op_[ih + 1] > cl_[ih + 1] and lo_[ih] > hi_[j]:
@@ -361,10 +364,15 @@ def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool =
                 if fvg is not None and below is None and j > fvg[2] and cl_[j] < c1h:
                     below = j
                     seen[1] = True
-                if fvg is not None and below is not None and touch is None and j > below and hi_[j] >= fvg[0]:
-                    touch = j
-                    seen[2] = True
-                elif touch is not None and mkt is None and j > touch and j + 1 < b and cl_[j] < lo_[touch]:
+                if touch is None or j <= touch:
+                    continue
+                # tras el retesteo: el precio continúa en la dirección contraria al sweep
+                if lim is None and lo_[j] <= c1h + spe[j]:                      # la orden en el nivel de C1 se activa al volver a él (el largo paga el spread)
+                    if ext - c1h > limit:
+                        deep = True
+                    else:
+                        lim = {"jl": j, "stop": ext, "ih": ih, "fvg": fvg, "below": below, "touch": touch}
+                if mkt is None and j + 1 < b and cl_[j] < lo_[touch]:
                     if ext - c1h > limit:
                         deep = True
                     else:
@@ -375,8 +383,8 @@ def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool =
             funnel["con entrada límite"] += lim is not None
             funnel["con entrada a mercado"] += mkt is not None
             if lim is None and mkt is None:
-                if deep or opposite:
-                    reason = 3 if deep else (0 if not seen[0] else 1 if not seen[1] else 2)
+                if deep or opposite or broke:
+                    reason = 3 if deep else 4 if broke else (0 if not seen[0] else 1 if not seen[1] else 2)
                     setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": ext if np.isfinite(ext) else float(hi_[s0]), "motivo": C2_REASONS[reason],
                                            "c1": (c1l, c1h)})
                     funnel["invalidados"] += 1
@@ -402,8 +410,9 @@ def c2_entry(L: dict, st: dict, mode: int, cfg: Cfg) -> dict | None:
     if sub is None:
         return None
     ts, cl = L["ts"], L["close"]
-    if mode == 1:
-        entry, start, fill = float(st["c1"][1]), sub["jl"], sub["jl"]
+    if mode == 1:                                                  # la orden espera por debajo del precio: si la vela abre ya más allá del nivel, se llena en la apertura
+        j = sub["jl"]
+        entry, start, fill = float(min(st["c1"][1], L["open"][j] - (L["spread"][j] if st["sign"] < 0 else 0.0))), j, j
     else:
         entry, start, fill = float(cl[sub["jm"]]), sub["jm"] + 1, None
     risk = sub["stop"] - entry
