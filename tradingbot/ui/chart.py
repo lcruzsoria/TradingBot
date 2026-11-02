@@ -804,10 +804,15 @@ class ChartView(pg.PlotWidget):
         placed += [(float(f["x0"]), float(f["levels"]["1"]), pill) for f, pill in self._fib_pills]
         placed += [(float(c["x0"]), c["c2"][1] if c["direction"] == "short" else c["c2"][0], pill)
                    for c, pill in zip(self._crts, self._crt_pills)]
+        left = vb.viewRange()[0][0]
+        crt_pills = {id(pill): c for c, pill in zip(self._crts, self._crt_pills)}
         for x0, stop, pill in placed:
             width = pill.boundingRect().width()                 # en píxeles: la píldora no se escala con el gráfico
             start = vb.mapViewToScene(QPointF(x0, stop)).x()
             x = vb.mapSceneToView(QPointF(right - width, 0)).x() if start + width > right else x0
+            crt = crt_pills.get(id(pill))
+            if crt is not None and x < left < float(crt["x1"]):  # el CRT empieza fuera de la vista pero sus cajas siguen en ella: la etiqueta se queda al borde
+                x = left
             pill.setPos(x, stop)
 
     @property
@@ -1027,10 +1032,11 @@ class ChartView(pg.PlotWidget):
             short = crt["direction"] == "short"
             tone = CRT_COLORS[crt["direction"]]
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
-            boxes = [(c1lo, c1hi, _alpha(HTF_BOX, 14), _alpha(HTF_BOX, 120), 1.0, xc1, x0),
-                     (c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]
-            if c3:
-                boxes.append((c3[0], c3[1], _alpha(HTF_BOX, 10), _alpha(HTF_BOX, 160), 1.2, x1, float(crt["x2"])))
+            boxes = [(c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]       # C2, la vela que lleva la etiqueta
+            if crt["state"] not in ("invalido", "sin_setup"):        # C1 y C3 solo en los CRT con operación, con el color de su lado
+                boxes.insert(0, (c1lo, c1hi, _alpha(tone, 12), _alpha(tone, 110), 1.0, xc1, x0))
+                if c3:
+                    boxes.append((c3[0], c3[1], _alpha(tone, 10), _alpha(tone, 110), 1.0, x1, float(crt["x2"])))
             for lo, hi, brush, pen_color, width, left, right in boxes:
                 box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
                 box.setBrush(brush)
@@ -1056,7 +1062,7 @@ class ChartView(pg.PlotWidget):
         self._update_card()
 
     def _draw_crt_trade(self, crt: dict, tone: str) -> None:
-        """Lo que se dibuja de la operación de un CRT: solo el FVG de LTF (ámbar) con su etiqueta. Sin cajas de la posición ni círculo del máximo."""
+        """Lo que se dibuja de la operación de un CRT: el FVG de LTF (ámbar) con su etiqueta y la posición (entrada, stop y objetivo). Sin círculo del máximo."""
         pi = self.getPlotItem()
         def add(item, z: float) -> None:
             item.setZValue(z)
@@ -1064,7 +1070,7 @@ class ChartView(pg.PlotWidget):
             self._crt_items.append(item)
 
         amber = "#FFA726"
-        fvg = crt.get("ifvg")
+        fvg, pos = crt.get("ifvg"), crt.get("pos")
         if fvg:                                                 # el FVG de LTF tras el máximo del sweep: siempre al lado del nivel barrido
             left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
             box = QGraphicsRectItem(QRectF(left, fvg["bottom"], right - left, max(fvg["top"] - fvg["bottom"], 1e-9)))
@@ -1085,6 +1091,16 @@ class ChartView(pg.PlotWidget):
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -4)
+        if pos:                                                 # la operación, como la herramienta de posición: zona verde hasta el objetivo, roja hasta el stop
+            x0, x1 = float(pos["x0"]), float(pos["x1"]) + 1
+            entry, stop, target = pos["entry"], pos["stop"], pos["target"]
+            for lo, hi, color in ((min(entry, target), max(entry, target), QColor(38, 166, 154, 60)),
+                                  (min(entry, stop), max(entry, stop), QColor(239, 83, 80, 60))):
+                box = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
+                box.setBrush(color)
+                box.setPen(QPen(Qt.PenStyle.NoPen))
+                add(box, -5)
+            add(pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.TEXT, width=1.2)), -4)
 
     @property
     def crt_count(self) -> int:

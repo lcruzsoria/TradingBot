@@ -157,7 +157,11 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert labels == ["FVG M5"]                                                          # solo su nombre con el timeframe: sin nombres de vela ni CISD
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
-    assert len(boxes) == 2                                                               # C1 y C2 en gris claro, no del color de las velas
+    assert len(boxes) == 1                                                               # C2 en gris claro, no del color de las velas
+    tinted = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == "#EF5350"]
+    assert len(tinted) >= 1                                                              # C1 (y C3) de un CRT con operación, del color de su lado (bajista: rojo)
+    zones = [it for it in chart._crt_items if hasattr(it, "rect") and hasattr(it, "brush") and it.brush().color().alpha() == 60]
+    assert len(zones) == 2                                                               # la operación: zona verde hasta el objetivo y roja hasta el stop
     chart.resize(900, 500)
     vb = chart.getPlotItem().getViewBox()
     vb.setXRange(0, 80, padding=0)
@@ -210,3 +214,19 @@ def test_un_sweep_sin_setup_se_marca_con_su_motivo_y_distinto_del_invalidado(tmp
     win.backtest = bt
     win._on_candles(candles_event())
     assert any(p.result == "Sin setup" and p.toPlainText().strip().endswith("Sin setup") for p in win.chart._crt_pills)
+
+
+def test_la_etiqueta_del_crt_se_queda_al_borde_si_su_c2_empieza_fuera_de_la_vista(tmp_path, monkeypatch):
+    win = window(tmp_path, monkeypatch)
+    win.backtest = backtest()
+    win._on_candles(candles_event())
+    chart = win.chart
+    crt, pill = chart._crts[0], chart._crt_pills[0]
+    vb = chart.getPlotItem().getViewBox()
+    left = float(crt["x0"]) + 5
+    vb.setXRange(left, left + 25, padding=0)                                             # la vista empieza dentro de C2
+    chart._fit_pills()
+    assert pill.pos().x() >= vb.viewRange()[0][0] - 1e-6                               # la etiqueta sigue a la vista (dice si es bajista o alcista)
+    vb.setXRange(float(crt["x0"]) - 3, float(crt["x0"]) + 30, padding=0)                 # C2 entera a la vista: la etiqueta, en su sitio
+    chart._fit_pills()
+    assert pill.pos().x() == float(crt["x0"])
