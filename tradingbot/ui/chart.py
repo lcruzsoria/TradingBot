@@ -1036,7 +1036,7 @@ class ChartView(pg.PlotWidget):
                 self._crt_items.append(box)
             swept = c1hi if short else c1lo                       # el extremo de C1 que barre C2
             line = pg.PlotCurveItem(x=np.array([xc1, x1]), y=np.array([swept, swept]),
-                                    pen=pg.mkPen(HTF_BOX, width=1, style=Qt.PenStyle.DashLine))
+                                    pen=pg.mkPen(tone, width=1.5, style=Qt.PenStyle.DashLine))   # rojo: sweep de máximos; verde: de mínimos
             line.setZValue(-6)
             pi.addItem(line, ignoreBounds=True)
             self._crt_items.append(line)
@@ -1087,7 +1087,7 @@ class ChartView(pg.PlotWidget):
             label.setPos(float(cisd["x1"]) + 1, cisd["level"])
             add(label, 7)
         if ext:
-            dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(CRT_COLORS["short"], width=1.5),
+            dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(tone, width=1.5),
                                      brush=pg.mkBrush(None))
             add(dot, 6)
         if pos:
