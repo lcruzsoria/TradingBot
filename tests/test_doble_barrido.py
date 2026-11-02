@@ -198,7 +198,7 @@ def test_el_breakeven_de_este_patron_salta_en_cuanto_el_precio_toca_1r():
     done = resolve(order, ts, high, low, close, 1.0, 300)
     assert (done.result, done.r, done.exit_ts, done.be_ts) == ("breakeven", 0.0, int(ts[3]), int(ts[1]))
     other = SimpleNamespace(**{**order.__dict__, "pattern_key": "continuacion"})
-    assert resolve(other, ts, high, low, close, 1.0, 300) is None      # los demás patrones siguen esperando al cierre de la vela de 15 min
+    assert resolve(other, ts, high, low, close, 1.0, 300).result == "breakeven"      # todos los patrones: el BE salta al tocar 1 R
 
 
 def test_la_toma_debe_cruzar_los_niveles_no_estar_ya_mas_alla():

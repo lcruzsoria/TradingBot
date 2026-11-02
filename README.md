@@ -310,7 +310,7 @@ en bloques comentados, uno por skill o parte del bot. Cada clave empieza por el 
 | **SETUP** — ejecutor | | |
 | `SETUP_SEND_ORDERS` | `false` | Enviar las órdenes de Cortex a MT5. Aún no implementado: `true` da error; ahora solo se simulan. |
 | `SETUP_RISK_PCT` | `1` | Riesgo de cada operación simulada, en % del saldo virtual del perfil (resultado en dinero = R x riesgo). |
-| `SETUP_BE_TRIGGER_PCT` | `1` | Ganancia flotante, en % del saldo, que al cierre de una vela de 15 min pasa el stop a la entrada (breakeven). `0`: sin breakeven. |
+| `SETUP_BE_TRIGGER_PCT` | `1` | Ganancia flotante, en % del saldo, que en cuanto el precio la toca (con el máximo o mínimo de una vela, sin esperar al cierre) pasa el stop a la entrada (breakeven). `0`: sin breakeven. |
 | `SETUP_CONSOLIDATE_INDEX_HOURS` / `SETUP_CONSOLIDATE_HOURS` | `3` / `4` | Las cerradas del Forwardtest pasan al saldo virtual del perfil al terminar la vela de estas horas (índices USA / resto) en la que cerraron. Deben dividir el día. |
 | `LEVELS_TDO_COLOR` / `_MIDNIGHT_COLOR` / `_PDHL_COLOR` / `_SEPARATOR_COLOR` | `#787B86` / `#FF9800` / `#2962FF` / `#787B86` | Colores `#RRGGBB`. |
 | **UI** — interfaz | | |
@@ -358,7 +358,7 @@ que se usa el perfil (capital inicial) y cada operación cerrada del Forwardtest
 por el riesgo (`SETUP_RISK_PCT`, 1 % del saldo). No se apunta al cerrar sino al **consolidar**: al terminar la vela de 3 h
 (índices USA) o de 4 h (resto) en la que cerró, en hora del servidor; hasta entonces la cabecera la cuenta como «por
 consolidar» con la hora de la próxima consolidación, y al consolidar el Registro lo anota con el saldo nuevo. Así todo lo
-que hay en el diario cuenta, también lo anotado antes de existir el saldo virtual. Si una vela de 15 min cierra con la posición `SETUP_BE_TRIGGER_PCT` % del saldo a
+que hay en el diario cuenta, también lo anotado antes de existir el saldo virtual. Si el precio toca la posición `SETUP_BE_TRIGGER_PCT` % del saldo a
 favor (1 %: +1 R), el stop pasa a la entrada; si lo toca, cierra a 0 y cuenta como breakeven. La cabecera muestra el
 **Saldo** (capital + simulado), el **P&L abierto** de las simuladas, el **Resultado del perfil** (% frente al capital
 inicial) y las **Operaciones** ganadas (G, punto verde), perdidas (P, rojo) y en breakeven (B, gris). Los datos de antes

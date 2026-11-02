@@ -116,7 +116,7 @@ class PatternContext:
     start_bar: int = 0       # primera vela de la propia TBR
     limit_verb: str = "empezara"   # cómo se nombra el límite: "antes de que empezara X" o "antes de que terminara X"
     day_end: int = 0         # fin del día de trading de este mercado (minutos desde medianoche de NY): ahí cierran los trades
-    be_r: float | None = None   # R a favor que, al cierre de una vela de 15 min, pasan el stop a la entrada (como Setup); None: sin breakeven
+    be_r: float | None = None   # R a favor que, en cuanto el precio los toca, pasan el stop a la entrada (como Setup); None: sin breakeven
     peers: tuple[PeerTbr, ...] = ()   # todas las TBR cerradas (la activa incluida), para los patrones que miran más de una
     volume: np.ndarray | None = None   # tick volume de cada vela (para los patrones que usan el VWAP); None si no hay
 

@@ -123,7 +123,7 @@ def test_el_maximo_se_guarda_en_el_diario_y_los_diarios_antiguos_se_leen(tmp_pat
     j.closed(o, Closed("breakeven", 100.0, T0 + STEP, 0.0, 0.0, T0, 1.57))
     s = j.load_recent()
     assert s.trades[0].closed.max_r == 1.57
-    old = tmp_path / "2026-10.jsonl"
+    old = next(tmp_path.glob("*.jsonl"))                                  # el diario del mes en curso
     old.write_text(old.read_text(encoding="utf-8").replace(', "max_r": 1.57', ""), encoding="utf-8")   # diario de antes de este campo
     assert Journal(tmp_path).load_recent().trades[0].closed.max_r is None
 

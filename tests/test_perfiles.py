@@ -42,15 +42,18 @@ def test_sin_breakeven_la_misma_operacion_acaba_en_stop():
     assert closed.result == "stop" and closed.r == -1 and closed.be_ts is None
 
 
-def test_el_breakeven_solo_se_mira_al_cierre_de_las_velas_de_15_min():
-    # Velas de 5 min: la primera (0-5) cierra +1 R, pero no es cierre de M15; la tercera (10-15) sí, y ya está a +0,4 R.
-    ts, high, low, close = bars([(105.5, 99.5, 105.1), (105.0, 101.0, 103.0), (103.0, 101.0, 102.0), (102.0, 99.0, 99.5),
+def test_el_breakeven_salta_en_cuanto_el_precio_toca_1r_sin_esperar_al_cierre_de_la_vela():
+    # Entra en 100 con stop 95 (1 R = 105). La primera vela de 5 min toca 105,5 con su máximo y cierra en 103: el stop pasa a la
+    # entrada desde la vela siguiente (aunque ningún cierre llegue a +1 R), y al volver a 99 cierra a 0 R.
+    ts, high, low, close = bars([(105.5, 99.5, 103.0), (105.0, 101.0, 103.0), (103.0, 101.0, 102.0), (102.0, 99.0, 99.5),
                                  (99.0, 94.0, 94.5)], step=300)
     closed = resolve(order(), ts, high, low, close, be_r=1.0, bar_seconds=300)
-    assert closed.result == "stop" and closed.be_ts is None
+    assert closed.result == "breakeven" and closed.r == 0 and closed.be_ts == int(ts[0])
+    sin_toque = bars([(104.9, 99.5, 103.0), (103.0, 99.0, 99.5), (99.0, 94.0, 94.5)], step=300)       # el máximo se queda en +0,98 R
+    assert resolve(order(), *sin_toque, be_r=1.0, bar_seconds=300).result == "stop"
 
 
-def test_la_vela_que_aun_se_forma_no_mueve_el_stop_y_en_cortos_tambien_funciona():
+def test_la_vela_que_aun_se_forma_no_cierra_la_posicion_y_en_cortos_el_breakeven_tambien_funciona():
     ts, high, low, close = bars([(101.0, 94.0, 94.5)])
     assert resolve(order("short", 100.0, 105.0, 90.0), ts, high, low, close, be_r=1.0, bar_seconds=M15) is None
     ts, high, low, close = bars([(101.0, 94.0, 94.5), (100.2, 96.0, 99.0)])
