@@ -292,7 +292,7 @@ class BacktestDialog(QDialog):
                          "near": QHBoxLayout()}
         self.crt_btns: dict[str, dict[str, QPushButton]] = {}
         self.crt_layouts = []
-        for key, label in (("mtf", "FVG MTF"), ("ltf", "LTF"), ("entry", "Entrada"), ("target", "Objetivo"), ("tbr", "TBR"),
+        for key, label in (("mtf", "FVG"), ("ltf", "LTF"), ("entry", "Entrada"), ("target", "Objetivo"), ("tbr", "TBR"),
                            ("near", "Hora")):
             self.crt_rows[key].setSpacing(6)
             self.crt_layouts.append(self._labelled(label, self.crt_rows[key]))
@@ -381,8 +381,8 @@ class BacktestDialog(QDialog):
         self.by_round = Book("Por hora en punto (±15 min)", "03:00 = de 02:45 a 03:15 · solo las horas con operaciones",
                              ("Hora",) + METRIC_HEADERS)
         self.crt_funnel = Book("Embudo CRT", "de los sweeps de H3 / H4 a las entradas, por mercado y LTF",
-                               ("Mercado · LTF", "Sweeps", "FVG tras el extremo", "Vuelta al FVG", "iFVG", "CISD", "Entrada 1", "Entrada 2",
-                                "Entrada 3", "Entrada 4", "Invalidados"))
+                               ("Mercado · LTF", "Sweeps", "Contra D1", "FVG tras el máximo", "Cierre dentro de C1", "Retesteo", "Entrada 1", "Entrada 2",
+                                "Invalidados"))
         self.by_day = Book("Días de la semana · detalle", "día de la entrada", ("Día",) + METRIC_HEADERS)
         self.halves = Book("Robustez", "el histórico partido en dos por la mediana de las fechas", ("Mitad",) + METRIC_HEADERS)
         self.sensitivity = Book("Sensibilidad", "otros objetivos y tiempos máximos con las mismas entradas",
@@ -455,12 +455,12 @@ class BacktestDialog(QDialog):
     def _build_crt_chips(self) -> None:
         """Botones de CRT: TF del FVG de MTF (el que toca la mecha), TF del iFVG + CISD (LTF) y modelo de entrada."""
         specs = (("mtf", [str(k) for k in CRT_MTF_NAMES], self.set_crt_mtf, str(self.crt_mtf), {str(k): v for k, v in CRT_MTF_NAMES.items()},
-                  "TF del FVG de MTF que toca la mecha del sweep (Todos: M15)"),
+                  "CRT-C2 no usa FVG de MTF: el FVG se busca en el propio LTF"),
                  ("ltf", [str(k) for k in CRT_LTFS], self.set_crt_ltf, str(self.crt_ltf), {str(k): f"M{k}" for k in CRT_LTFS},
-                  "TF donde aparece el iFVG y el CISD, y en el que se entra"),
+                  "TF donde aparece el FVG, el retesteo y la entrada"),
                  ("entry", [str(k) for k in CRT_ENTRIES], self.set_crt_entry, str(self.crt_entry),
                   {str(k): f"{k} · {v}" for k, v in CRT_ENTRIES.items()},
-                  "Modelo de entrada: cierre del CISD, retesteo del iFVG o primera vela sin mecha"),
+                  "Modelo de entrada: orden límite en el nivel de C1 o a mercado tras el retesteo del FVG"),
                  ("target", [str(k) for k in CRT_TARGETS], self.set_crt_target, str(self.crt_target),
                   {str(k): v for k, v in CRT_TARGETS.items()},
                   "Objetivo: 1R, 2R (el del bot, con BE a 1R) o el extremo opuesto de C1. Cada uno es su propio backtest"),
@@ -783,7 +783,7 @@ class BacktestDialog(QDialog):
         self.crt_funnel.setVisible(crt)
         self._fill_crt_funnel(g)
         self.by_filter.title_label.setText(('Por LTF y entrada' if crt else 'Por filtro').upper())
-        self.by_filter.note.setText('las 9 combinaciones, con los mismos mercados, TF del FVG y selección' if crt else
+        self.by_filter.note.setText('las 4 combinaciones, con los mismos mercados, TF del FVG y selección' if crt else
                                     'el mismo patrón con cada filtro del backtest')
         self.by_zone.note.setText('la TBR en cuyo horario cae la entrada (Asia 20-00, London 02-05, NY Open 10-12 NY) o ninguna · sin el filtro de TBR' if crt else
                                   'la TBR donde se dio la entrada')
@@ -1004,9 +1004,9 @@ class BacktestDialog(QDialog):
             if r.get("ltf") != self.crt_ltf:
                 continue
             rows.append([(f"{_short_market(r.get('mercado', ''))} · M{r['ltf']}", None), (_count(r.get("sweeps")), theme.MUTED),
-                         (_count(r.get("fvg")), None), (_count(r.get("toque")), None), (_count(r.get("ifvg")), None),
-                         (_count(r.get("cisd")), theme.ACCENT), (_count(r.get("e1")), None), (_count(r.get("e2")), None),
-                         (_count(r.get("e3")), None), (_count(r.get("e4")), None), (_count(r.get("inv")), theme.MUTED)])
+                         (_count(r.get("d1")), theme.MUTED), (_count(r.get("fvg")), None), (_count(r.get("toque")), None),
+                         (_count(r.get("ifvg")), None), (_count(r.get("e1")), theme.ACCENT), (_count(r.get("e2")), theme.ACCENT),
+                         (_count(r.get("inv")), theme.MUTED)])
         self.crt_funnel.note.setText(f"M{self.crt_ltf} · no cambia con el filtro de años u horas")
         self.crt_funnel.set_rows(rows)
 

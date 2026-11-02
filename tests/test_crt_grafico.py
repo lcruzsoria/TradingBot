@@ -57,17 +57,17 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert (mark["x0"], mark["x1"], mark["xc1"]) == (x0, x0 + 36, x0 - 36)
     assert mark["direction"] == "short" and mark["state"] == "objetivo" and mark["label"] == "CRT"          # el M5 · entrada 1 es TP
     assert mark["c1"] == (100.0, 105.0) and mark["c2"] == (91.5, 108.5) and mark["htf"] == 180
-    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, ["M15"], ["M15"])
+    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, [], [])                       # CRT-C2 no usa FVG de MTF
     assert mark["others"] == [(5, 2, "be"), (3, 1, "stop")] or sorted(mark["others"]) == [(3, 1, "stop"), (5, 2, "be")]
     assert mark["when"] == "13/10 06:00"
     i = lambda hhmm: int(np.searchsorted(ts, int(pd.Timestamp(f"2026-10-13 {hhmm}").value // 10**9) + AHEAD))          # noqa: E731
     assert mark["pos"] == {"x0": i("06:55"), "x1": i("07:10"), "entry": 103.1, "stop": 108.5, "target": 92.3}
     assert mark["ifvg"] == {"x0": i("06:25"), "x1": i("06:45"), "bottom": 106.1, "top": 107.3}
-    assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
+    assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2, "label": "límite"} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
     first = int(np.searchsorted(ts, int(pd.Timestamp("2026-10-12 12:00").value // 10**9) + AHEAD))
     assert mark["fvgs"] == [{"tf": 15, "name": "M15", "x0": first, "x1": i("06:35"), "bottom": 107.5, "top": 110.0}]      # solo el M15 lo toca
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
-    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15"])
+    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", [])
 
 
 def test_un_sweep_invalidado_se_marca_sin_operacion_y_con_su_motivo():
@@ -146,10 +146,11 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert "CRT bajista" in pill.toPlainText() and pill.toPlainText().strip().endswith("TP") and pill.result == "TP"
     assert not chart._card.isVisible()                                                   # la etiqueta sola es discreta: sin detalle
     violet = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#B388FF"]
-    assert len(violet) == 1                                                              # el iFVG invertido, pintado en el LTF
-    assert sorted(it.toPlainText().split()[0] for it in chart._crt_items if hasattr(it, "toPlainText")) == ["CISD", "▼"]     # solo la etiqueta y el CISD: sin nombres de vela ni de zonas
-    orange = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
-    assert len(orange) == 1                                                              # el FVG de MTF del paso 2, en naranja
+    assert violet == []                                                                  # ya no se dibujan el iFVG ni el CISD
+    amber = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
+    assert len(amber) >= 1                                                               # el FVG de LTF, siempre al lado del nivel barrido
+    labels = sorted(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText") and it.toPlainText().split()[0] != "▼")
+    assert labels == ["FVG M5"]                                                          # solo su nombre con el timeframe: sin nombres de vela ni CISD
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
     assert len(boxes) == 2                                                               # C1 y C2 en gris claro, no del color de las velas
@@ -161,10 +162,10 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     chart._mouse_moved(pill.sceneBoundingRect().center())                                # al pasar el ratón
     text = chart._card.toPlainText()
     assert chart._card.isVisible() and "CRT bajista" in text and "TP" in text
-    assert "FVG en MTF" in text and "M15" in text and "M5" in text and "Vela siguiente al CISD" in text and "13/10 06:00" in text
+    assert "FVG en MTF" not in text and "M15" in text and "M5" in text and "Orden límite en el nivel de C1" in text and "13/10 06:00" in text
     assert "M3·1" in text                                                                # y los otros LTF del backtest
     assert "FVG M15" in text and "107.500" in text and "110.000" in text                 # la zona del FVG de MTF, en la ficha
-    assert "103.1" in text and "108.5" in text and "92.3" in text and "iFVG invertido" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
+    assert "103.1" in text and "108.5" in text and "92.3" in text and "FVG de LTF" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
     chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not chart._card.isVisible()
     win.crt_btn.setChecked(False)                                                        # el botón las quita y las vuelve a poner
@@ -189,4 +190,4 @@ def test_un_crt_alcista_lleva_la_etiqueta_debajo_y_en_verde(tmp_path, monkeypatc
     win._on_candles(candles_event())
     pill = win.chart._crt_pills[0]
     assert "CRT alcista" in pill.toPlainText() and pill.result == "SL" and pill._bar.name().upper() == CRT_COLORS["long"]
-    assert win.chart._crts[0]["mtf"] == ["M15"]
+    assert win.chart._crts[0]["mtf"] == []

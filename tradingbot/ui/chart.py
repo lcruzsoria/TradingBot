@@ -900,16 +900,15 @@ class ChartView(pg.PlotWidget):
             head = f'<b style="color:{tone}">CRT {"alcista" if long else "bajista"}</b> · {"largo" if long else "corto"} · {html.escape(word)}'
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
-                    + crt_row("FVG en MTF", " · ".join(data.get("mtf") or ["-"]))
                     + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
-                    + crt_row("iFVG + CISD (LTF)", f"M{data.get('ltf', '-')}")
+                    + crt_row("LTF (FVG, retesteo y entrada)", f"M{data.get('ltf', '-')}")
                     + crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}")
                     + crt_row("Resultado", word + " (objetivo 2R)")
                     + (crt_row("Entrada · SL · TP", f"{fmt_price(data['pos']['entry'])} · {fmt_price(data['pos']['stop'])} · "
                                f"{fmt_price(data['pos']['target'])}") if data.get("pos") else "")
-                    + (crt_row("iFVG invertido", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
+                    + (crt_row("FVG de LTF", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
                        if data.get("ifvg") else "")
-                    + (crt_row("Nivel del CISD", fmt_price(data['cisd']['level'])) if data.get("cisd") else "") + '</table>')
+                    + (crt_row("Nivel de entrada", fmt_price(data['cisd']['level'])) if data.get("cisd") else "") + '</table>')
             others = data.get("others") or []
             verdict = ''
             if others:
@@ -1050,27 +1049,29 @@ class ChartView(pg.PlotWidget):
         self._update_card()
 
     def _draw_crt_trade(self, crt: dict, tone: str) -> None:
-        """La operación del CRT para auditar el criterio: el iFVG invertido (violeta), el nivel del CISD, el extremo del sweep y, como la
+        """La operación del CRT para auditar el criterio: el FVG de LTF (ámbar), el extremo del sweep y, como la
         herramienta de posición, la zona verde hasta el objetivo y la roja hasta el stop con la entrada."""
         pi = self.getPlotItem()
-        violet = "#B388FF"
-
         def add(item, z: float) -> None:
             item.setZValue(z)
             pi.addItem(item, ignoreBounds=True)
             self._crt_items.append(item)
 
-        fvg, cisd, ext, pos = crt.get("ifvg"), crt.get("cisd"), crt.get("extreme"), crt.get("pos")
-        if fvg:
+        amber = "#FFA726"
+        fvg, ext, pos = crt.get("ifvg"), crt.get("extreme"), crt.get("pos")
+        if fvg:                                                 # el FVG de LTF tras el máximo del sweep: siempre al lado del nivel barrido
             left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
             box = QGraphicsRectItem(QRectF(left, fvg["bottom"], right - left, max(fvg["top"] - fvg["bottom"], 1e-9)))
-            box.setBrush(_alpha(violet, 55))
-            pen = QPen(QColor(violet), 1.2, Qt.PenStyle.DashLine)
+            box.setBrush(_alpha(amber, 45))
+            pen = QPen(QColor(amber), 1.2)
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -3)
-        amber = "#FFA726"
-        for zone in crt.get("fvgs") or []:                      # el FVG de MTF que toca el extremo del sweep (paso 2), en cada TF
+            label = pg.TextItem(anchor=(0, 0.5))                  # lo único con texto en el dibujo: el nombre del FVG y su timeframe
+            label.setHtml(f'<span style="font-size:7pt; color:{amber}">FVG M{crt.get("ltf") or ""}</span>')
+            label.setPos(right, (fvg["bottom"] + fvg["top"]) / 2)
+            add(label, 7)
+        for zone in crt.get("fvgs") or []:                      # (ficheros anteriores) el FVG de MTF que toca el extremo del sweep, en cada TF
             left, right = float(zone["x0"]), float(zone["x1"]) + 1
             box = QGraphicsRectItem(QRectF(left, zone["bottom"], max(right - left, 0.5), max(zone["top"] - zone["bottom"], 1e-9)))
             box.setBrush(_alpha(amber, 30))
@@ -1078,14 +1079,6 @@ class ChartView(pg.PlotWidget):
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -4)
-        if cisd:
-            line = pg.PlotCurveItem(x=np.array([float(cisd["x0"]), float(cisd["x1"]) + 1]), y=np.array([cisd["level"]] * 2),
-                                    pen=pg.mkPen(violet, width=1, style=Qt.PenStyle.DotLine))
-            add(line, -3)
-            label = pg.TextItem(anchor=(0, 0.5))                  # lo único con texto en el dibujo: el nivel del CISD
-            label.setHtml(f'<span style="font-size:7pt; color:{violet}">CISD</span>')
-            label.setPos(float(cisd["x1"]) + 1, cisd["level"])
-            add(label, 7)
         if ext:
             dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(tone, width=1.5),
                                      brush=pg.mkBrush(None))

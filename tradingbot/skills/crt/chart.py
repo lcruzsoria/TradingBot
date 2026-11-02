@@ -23,7 +23,7 @@ AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", 
 MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado"}
-LTF_ORDER = (5, 3)
+LTF_ORDER = (3, 5)
 
 
 def htf_minutes(symbol: str, indices=DEFAULT_US_INDICES) -> int:
@@ -120,12 +120,12 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
             "start": start, "fvg_all": fvg, "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
             "others": [(r[0], r[1], STATES.get(r[2], "tiempo")) for r in rows[1:]]}
         if best[4]:
-            mark.update(audit_marks(best[4], ts, ahead, n))
+            mark.update(audit_marks(best[4], ts, ahead, n, best[1]))
         out.append(mark)
     return sorted(out, key=lambda m: m["x0"])
 
 
-def audit_marks(d: dict, ts, ahead: int, n: int) -> dict:
+def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
     """La operación enseñada, para comprobar el criterio en el gráfico: entrada, stop y objetivo; el iFVG invertido; el CISD y el extremo
     del sweep. Los índices son de la vela que contiene cada hora (las del backtest son aperturas de velas del LTF)."""
 
@@ -135,7 +135,7 @@ def audit_marks(d: dict, ts, ahead: int, n: int) -> dict:
     x_in, x_out = at(d["e"]), at(d["x"])
     return {"pos": {"x0": x_in, "x1": max(x_out, x_in), "entry": d["pe"], "stop": d["ps"], "target": d["pt"]},
             "ifvg": {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]},
-            "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"]},
+            "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"], "label": "límite" if entry == 1 else "ruptura"},
             "extreme": {"x": at(d["th"]), "price": d["ps"]},
             "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
                      for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}

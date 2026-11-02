@@ -38,15 +38,15 @@ OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: 
 # pa, pb (base y techo del iFVG invertido), pc (nivel del CISD) y las horas ti (inicio del FVG), tv (inversión), tj (CISD), th (extremo del
 # sweep), tq (inicio del iFVG) y tt (vuelta al FVG de MTF), en minutos NY. Y la zona del FVG de MTF tocado en cada timeframe: f15a / f15b (base y
 # techo) y f15t (primera vela, minutos NY; -1 si ese timeframe no lo toca), (el MTF es solo M15).
-CRT_MTF_BITS = {15: 1}
-CRT_MTF_NAMES = {0: "Todos", 15: "M15"}
-CRT_LTFS = (5, 3)
-CRT_ENTRIES = {1: "Vela siguiente al CISD", 2: "Retesteo del iFVG", 3: "Primera vela sin mecha", 4: "Cierre del CISD"}
+CRT_MTF_BITS: dict[int, int] = {}                     # CRT-C2 no usa FVG de MTF (el FVG se busca en el propio LTF): sin timeframes que filtrar
+CRT_MTF_NAMES = {0: "Todos"}
+CRT_LTFS = (3, 5)
+CRT_ENTRIES = {1: "Orden límite en el nivel de C1", 2: "A mercado tras el retesteo del FVG"}
 CRT_ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
 CRT_TBR = ("Todas", "Dentro de TBR", "Asia", "London", "NY Open", "Fuera de TBR")          # filtro por la TBR de la hora de entrada
 CRT_NEAR = ("Todas", "±15 min de la hora", "Resto")                                          # y por la cercanía a una hora en punto
 CRT_TARGETS = {1: "1R", 2: "2R", 3: "Extremo de C1"}   # columna q: el objetivo con el que se simuló cada operación (cada uno su backtest)
-CRT_DEFAULT = (0, 5, 1, CRT_TBR[0], CRT_NEAR[0], 2)   # (TF del FVG: 0 = todos, LTF, entrada, TBR, cercanía a la hora en punto, objetivo)
+CRT_DEFAULT = (0, 3, 1, CRT_TBR[0], CRT_NEAR[0], 2)   # (TF del FVG: 0 = todos, LTF, entrada, TBR, cercanía a la hora en punto, objetivo)
 # Sensibilidad de los patrones: columna de cada operación -> variante
 SENSITIVITY = (("tp1", "objetivo 1R"), ("tp15", "objetivo 1.5R"), ("tp2", "objetivo 2R"), ("tp25", "objetivo 2.5R"),
                ("tp3", "objetivo 3R"), ("h12", "objetivo 2R, máx. 12 h"), ("r", "objetivo 2R, máx. 24 h"),

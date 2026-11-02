@@ -79,7 +79,7 @@ def configure(name: str) -> dict:
     """Aplica el mercado elegido a las constantes que usan el resto de funciones."""
     global CFG, DATASETS
     m = MARKETS[name]
-    CFG, DATASETS = Cfg(m["htf_min"], m["origin"], m["session_end"], AHEAD), m["datasets"]
+    CFG, DATASETS = Cfg(m["htf_min"], m["origin"], m["session_end"], AHEAD, m["unit"]), m["datasets"]
     return m
 
 

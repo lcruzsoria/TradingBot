@@ -14,6 +14,7 @@ Reglas completas en docs/estrategia_crt/GUIA.md.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,10 +30,11 @@ class Cfg:
     origin: int = 18 * 3600                              # las velas HTF empiezan a esta hora NY (segundos desde las 00:00)
     session_end: int = 18 * 3600                         # a esta hora NY no se abren entradas y lo abierto se cierra
     ahead: int = 7 * 3600                                # servidor = NY + ahead
+    unit: float = 1.0                                    # un pip (forex) o un punto (índices), para redondear el límite de profundidad
 
 
 INDICES = Cfg(180, 18 * 3600, 18 * 3600)
-FOREX = Cfg(240, 17 * 3600, 17 * 3600)
+FOREX = Cfg(240, 17 * 3600, 17 * 3600, unit=1e-4)
 
 
 @dataclass(frozen=True)
@@ -284,3 +286,128 @@ def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict | None:
         exit_price = c[j]
     return {"exit_index": j, "exit_price": float(exit_price), "cómo": how, "target": float(target), "gross": (entry - exit_price) / risk,
             "cost": sp[start] / risk}
+
+
+# -- CRT-C2: el patrón del usuario (sin iFVG), con sesgo D1 y orden límite ---------------------------------------------------
+# Corto (el largo es el espejo): C2 supera el nivel de C1 y marca máximos (un máximo nuevo reinicia el patrón). La vela siguiente al máximo es
+# bajista y deja un FVG bajista en LTF; el precio cierra por debajo del nivel de C1 y vuelve a tocar el FVG (vela de retesteo).
+#   Entrada 1 (orden límite): venta límite EN el nivel de C1, se llena cuando el precio vuelve a subir hasta él tras cerrar por debajo.
+#   Entrada 2 (a mercado): al cierre de la primera vela que cierra por debajo del mínimo de la vela de retesteo.
+# Stop en el máximo del sweep (sin límite de tamaño). Se invalida si la profundidad del sweep (máximo - nivel de C1) supera `cuartos` cuartos
+# de la altura de C1, redondeados al entero superior en pips/puntos, o si el precio llega al extremo opuesto de C1 sin completar el patrón.
+# Sesgo: solo C2 a favor de la tendencia D1 (cierre sobre/bajo la EMA30 y pendiente de 5 días; corto = bajista).
+C2_REASONS = ("sin FVG tras el extremo", "sin cierre dentro de C1", "sin retesteo", "sweep demasiado profundo")
+
+
+def d1_bias(base: pd.DataFrame, cfg: Cfg) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(horas de las velas D1, tendencia alcista, tendencia bajista) de cada vela D1: cierre sobre/bajo la EMA30 y pendiente de 5 días."""
+    d1 = aggregate(base, 1440, cfg, cfg.origin)
+    close = d1["close"].to_numpy()
+    ema = pd.Series(close).ewm(span=30, adjust=False).mean().to_numpy()
+    slope = np.r_[np.full(5, 0.0), ema[5:] - ema[:-5]]
+    return d1["ts"].to_numpy(), (close > ema) & (slope > 0), (close < ema) & (slope < 0)
+
+
+def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool = True, cuartos: float = 1.0) -> tuple[list, dict]:
+    """Todos los setups CRT-C2 de las velas dadas (`base` M5 para HTF y D1, `ltf` M5 o M3), con la entrada límite y la de mercado de cada uno."""
+    htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
+    d1ts, d1_up, d1_down = d1_bias(base, cfg)
+    funnel = {"velas HTF con sweep": 0, "contra la tendencia D1": 0, "con FVG tras el extremo": 0, "con cierre dentro de C1": 0,
+              "con retesteo": 0, "con entrada límite": 0, "con entrada a mercado": 0, "invalidados": 0}
+    setups = Setups()
+    for sign, name in ((1, "short"), (-1, "long")):
+        L, H = view(ltf, sign), view(htf, sign)
+        lts, op_, hi_, lo_, cl_, sp = L["ts"], L["open"], L["high"], L["low"], L["close"], L["spread"]
+        spe = sp if sign < 0 else np.zeros_like(sp)              # el largo compra en el ask: el límite exige bajar un spread más
+        for i in range(1, len(H["ts"])):
+            s2 = int(H["ts"][i])
+            if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60 or H["high"][i] <= H["high"][i - 1]:
+                continue
+            c1h, c1l = float(H["high"][i - 1]), float(H["low"][i - 1])
+            a, b = int(np.searchsorted(lts, s2)), int(np.searchsorted(lts, s2 + cfg.htf_min * 60))
+            if b - a < 5:
+                continue
+            rel = np.flatnonzero(hi_[a:b] > c1h)
+            if not len(rel):
+                continue
+            s0 = a + int(rel[0])
+            if s0 > a and lo_[a:s0].min() < c1l:                                # C2 tomó antes el otro extremo de C1: el sweep es el del otro lado
+                continue
+            funnel["velas HTF con sweep"] += 1
+            if bias:
+                k = int(np.searchsorted(d1ts, s2, "right")) - 2                # último día D1 completo antes de C2
+                if k < 6 or not (d1_down[k] if sign > 0 else d1_up[k]):
+                    funnel["contra la tendencia D1"] += 1
+                    continue
+            limit = math.ceil(cuartos * 0.25 * (c1h - c1l) / cfg.unit - 1e-9) * cfg.unit      # profundidad máxima del sweep
+            ext, ih, fvg, below, touch, lim, mkt = -np.inf, s0, None, None, None, None, None
+            seen = [False, False, False]                                        # FVG, cierre dentro de C1, retesteo
+            deep, opposite = False, False
+            for j in range(s0, b):
+                if lo_[j] < c1l:                                                # llega al extremo opuesto de C1
+                    opposite = True
+                    break
+                if lim is None and fvg is not None and below is not None and j > below and hi_[j] >= c1h + spe[j]:
+                    if ext - c1h > limit:
+                        deep = True
+                    else:                                                       # se llena la orden límite (puede ser la vela del máximo nuevo)
+                        lim = {"jl": j, "stop": ext, "ih": ih, "fvg": fvg, "below": below, "touch": touch}
+                if hi_[j] > ext:                                                # máximo nuevo: se reinicia el patrón
+                    ext, ih, fvg, below, touch = float(hi_[j]), j, None, None, None
+                    continue
+                if fvg is None and j == ih + 2 and op_[ih + 1] > cl_[ih + 1] and lo_[ih] > hi_[j]:
+                    fvg = (float(hi_[j]), float(lo_[ih]), j)                    # (base, techo, tercera vela)
+                    seen[0] = True
+                if fvg is not None and below is None and j > fvg[2] and cl_[j] < c1h:
+                    below = j
+                    seen[1] = True
+                if fvg is not None and below is not None and touch is None and j > below and hi_[j] >= fvg[0]:
+                    touch = j
+                    seen[2] = True
+                elif touch is not None and mkt is None and j > touch and j + 1 < b and cl_[j] < lo_[touch]:
+                    if ext - c1h > limit:
+                        deep = True
+                    else:
+                        mkt = {"jm": j, "jt": touch, "stop": ext, "ih": ih, "fvg": fvg, "below": below, "level": float(lo_[touch])}
+            funnel["con FVG tras el extremo"] += seen[0]
+            funnel["con cierre dentro de C1"] += seen[1]
+            funnel["con retesteo"] += seen[2]
+            funnel["con entrada límite"] += lim is not None
+            funnel["con entrada a mercado"] += mkt is not None
+            if lim is None and mkt is None:
+                if deep or opposite:
+                    reason = 3 if deep else (0 if not seen[0] else 1 if not seen[1] else 2)
+                    setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": ext, "motivo": C2_REASONS[reason],
+                                           "c1": (c1l, c1h)})
+                    funnel["invalidados"] += 1
+                continue
+            setups.append({"sign": sign, "dirección": name, "C2": s2, "c1": (c1l, c1h), "s0": s0, "lim": lim, "mkt": mkt,
+                           "inside": bool(c1l <= H["close"][i] <= c1h), "c2_end": s2 + cfg.htf_min * 60})
+    setups.sort(key=lambda s: (s["lim"] or s["mkt"])["ih"] * 10 + (0 if s["sign"] > 0 else 1))
+    return setups, funnel
+
+
+def c2_view(L: dict, sign: int, mode: int) -> dict:
+    """Velas con las que se gestiona la entrada límite (modo 1): son del bid, así que en un corto stop y objetivo (recompra en el ask) se ven en
+    bid + spread. El largo (visto en espejo) vende en el bid y no necesita ajuste; su entrada ya exige el spread (ver find_c2_setups)."""
+    if mode != 1 or sign < 0:
+        return L
+    sp = L["spread"]
+    return {**L, "high": L["high"] + sp, "low": L["low"] + sp, "close": L["close"] + sp}
+
+
+def c2_entry(L: dict, st: dict, mode: int, cfg: Cfg) -> dict | None:
+    """Entrada del setup CRT-C2 (modo 1: límite en el nivel de C1, 2: a mercado tras el retesteo), en el espacio del corto."""
+    sub = st["lim"] if mode == 1 else st["mkt"]
+    if sub is None:
+        return None
+    ts, cl = L["ts"], L["close"]
+    if mode == 1:
+        entry, start, fill = float(st["c1"][1]), sub["jl"], sub["jl"]
+    else:
+        entry, start, fill = float(cl[sub["jm"]]), sub["jm"] + 1, None
+    risk = sub["stop"] - entry
+    if risk <= 0 or start >= len(ts):
+        return None
+    return {"entry": entry, "start": int(start), "fill": fill, "risk": float(risk), "end": int(session_end(int(ts[start]), cfg)),
+            "stop": float(sub["stop"])}

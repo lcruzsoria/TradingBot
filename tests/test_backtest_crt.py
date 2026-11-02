@@ -1,4 +1,4 @@
-"""Grupos CRT de la ventana Backtest: filtros por TF del FVG (MTF), LTF y modelo de entrada, zonas TBR y botones."""
+"""Grupos CRT-C2 de la ventana Backtest: filtros por LTF, modelo de entrada y objetivo, zonas TBR y botones."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -37,8 +37,7 @@ def test_el_grupo_crt_filtra_por_ltf_entrada_y_tf_del_fvg():
     n = lambda **kw: len(g.view("CRT", "5:1", crt=(kw.get("mtf", 0), kw.get("ltf", 5), kw.get("entry", 1))).main)        # noqa: E731
     assert n() == 4                                   # M5, entrada 1: operaciones 0, 1, 2 y 5
     assert n(ltf=3) == 1 and n(entry=2) == 1
-    assert n(mtf=15) == 4                                                            # todas tocan el FVG de M15 (el único MTF)
-    assert g.crt_mask(15, 5, 2).sum() == 1
+    assert g.crt_mask(0, 5, 2).sum() == 1
 
 
 def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos():
@@ -47,7 +46,7 @@ def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos()
     zones = {k: o.stats().get("n", 0) for k, o in v.zones}
     assert zones == {"Asia": 1, "London": 1, "NY Open": 0, "Fuera de TBR": 1 + 1, "Dentro de alguna TBR": 2, "Todas": 4}
     assert sum(zones[z] for z in CRT_ZONES) == zones["Todas"]                        # no se pierde ninguna operación
-    assert [k for k, _ in v.extra["mtf"]] == ["M15"]
+    assert v.extra["mtf"] == []                                                      # CRT-C2 no usa FVG de MTF
     near = {k: o.stats().get("n", 0) for k, o in v.extra["cercania"]}                 # ops. 0, 1, 2 y 5 (M5, entrada 1): h = 3, -1, 4, 4
     assert near == {"±15 min de la hora en punto": 3, "Resto de horas": 1, "En TBR · ±15 min de la hora": 2, "En TBR · resto": 0,
                     "Fuera de TBR · ±15 min de la hora": 1, "Fuera de TBR · resto": 1}
@@ -91,7 +90,6 @@ def test_zona_tbr_de_la_hora_de_entrada():
                             "2025-03-03 10:00", "2025-03-03 11:59", "2025-03-03 12:00", "2025-03-03 19:59"])
     got = ex.tbr_zone(pd.Series(hours)).tolist()
     assert got == ["Asia", "Fuera de TBR", "London", "London", "Fuera de TBR", "NY Open", "NY Open", "Fuera de TBR", "Fuera de TBR"]
-    assert ex.mtf_bits("M15") == 1 and ex.mtf_bits("M30") == 0
     near = ex.near_hour(pd.Series(pd.to_datetime(["2025-03-03 02:44", "2025-03-03 02:45", "2025-03-03 03:00", "2025-03-03 03:15",
                                                     "2025-03-03 03:16", "2025-03-03 23:50", "2025-03-03 00:10"])))
     assert near.tolist() == [-1, 3, 3, 3, -1, 0, 0]                              # 03:00 vale de 02:45 a 03:15; 23:50 es la hora 0
@@ -107,23 +105,20 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     dlg.set_group("crt:indices")
     assert dlg.profile_key == "crt" and list(dlg.group_btns) == ["crt:indices", "crt:forex"]
     assert dlg.pattern_labelled.itemAt(0).widget().isHidden() and not dlg.crt_layouts[0].itemAt(0).widget().isHidden()
-    assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 5, 1)
+    assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 3, 1)             # por defecto M3 y la orden límite
     g = bt.group("crt:indices")
     first = dlg.blocks["n"].value.text()
-    assert first != "-" and len(dlg.by_filter.rows) == 8 and len(dlg.by_mtf.rows) == 1
+    assert first != "-" and len(dlg.by_filter.rows) == 4 and len(dlg.by_mtf.rows) == 0
     assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
-    for ltf in (5, 3):                                                              # los 2 LTF y los 4 modelos de entrada se pintan
+    for ltf in (5, 3):                                                              # los 2 LTF y los 2 modelos de entrada se pintan
         dlg.set_crt_ltf(ltf)
-        for entry in (1, 2, 3, 4):
+        for entry in (1, 2):
             dlg.set_crt_entry(entry)
             n = len(g.view("CRT", "", crt=dlg.crt).main)
             assert n and dlg.blocks["n"].value.text().replace(".", "") == str(n)
             assert dlg.crt_btns["ltf"][str(ltf)].isChecked() and dlg.crt_btns["entry"][str(entry)].isChecked()
     dlg.set_crt_ltf(5)
     dlg.set_crt_entry(1)
-    dlg.set_crt_mtf(15)                                                             # solo los FVG de M15
-    assert dlg.crt_btns["mtf"]["15"].isChecked() and len(g.view("CRT", "", crt=dlg.crt).main) == len(g.view("CRT", "", crt=(0, 5, 1)).main)
-    dlg.set_crt_mtf(0)
     counts = {}
     for target in (1, 2, 3):                                                        # los tres objetivos son tres backtests
         dlg.set_crt_target(target)
@@ -141,9 +136,9 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert [r[0].text() for r in dlg.by_zone.rows][-1] == "Todas" and len(dlg.by_near.rows) == 6 and dlg.by_round.rows
     dlg.set_crt_tbr("Todas")
     dlg.set_crt_near("Todas")
-    dlg.set_crt_mtf(15)
+    dlg.set_crt_ltf(3)
     dlg.set_group("crt:forex")                                                      # otro grupo de mercados: se queda la selección
-    assert dlg.crt_mtf == 15 and dlg.group_key == "crt:forex" and dlg.compare.rows
+    assert dlg.crt_ltf == 3 and dlg.group_key == "crt:forex" and dlg.compare.rows
     assert "EURUSD" in "".join(r[0].text() for r in dlg.by_market.rows)
     dlg.by_year.click(2024)
     assert dlg.years == {2024} and dlg.blocks["n"].value.text() != "-"
