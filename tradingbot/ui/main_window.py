@@ -351,9 +351,10 @@ class MainWindow(QMainWindow):
         self.crt_btn = QPushButton("CRT")
         self.crt_btn.setProperty("chip", "true")
         self.crt_btn.setCheckable(True)
-        self.crt_btn.setToolTip("Marca en el gráfico los CRT de H3 (H4 en forex) que salieron en el backtest: las velas C1 y C2, el "
-                                "extremo barrido y una etiqueta discreta con CRT alcista o bajista y el resultado (TP, SL o BE). Al pasar "
-                                "el ratón por encima, en qué TF de MTF estaba el FVG y en qué LTF se entró, con qué entrada.")
+        self.crt_btn.setToolTip("Marca en el gráfico los CRT de H3 (H4 en forex) que salieron en el backtest: las velas C1, C2 y C3, el "
+                                "nivel barrido (rojo si barre máximos, verde si mínimos), el FVG de LTF y una etiqueta discreta con CRT "
+                                "alcista o bajista y el resultado (TP, SL, BE, Invalidado o Sin setup). Al pasar el ratón por encima, el "
+                                "LTF y la entrada con los que se operó.")
         self.crt_btn.setVisible(self.strategy == "crt")
         self.crt_btn.setChecked(True)
         self.pos_btn = QPushButton("Entradas")

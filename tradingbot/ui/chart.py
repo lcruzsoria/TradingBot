@@ -1056,8 +1056,7 @@ class ChartView(pg.PlotWidget):
         self._update_card()
 
     def _draw_crt_trade(self, crt: dict, tone: str) -> None:
-        """La operación del CRT para auditar el criterio: el FVG de LTF (ámbar), el extremo del sweep y, como la
-        herramienta de posición, la zona verde hasta el objetivo y la roja hasta el stop con la entrada."""
+        """Lo que se dibuja de la operación de un CRT: solo el FVG de LTF (ámbar) con su etiqueta. Sin cajas de la posición ni círculo del máximo."""
         pi = self.getPlotItem()
         def add(item, z: float) -> None:
             item.setZValue(z)
@@ -1065,7 +1064,7 @@ class ChartView(pg.PlotWidget):
             self._crt_items.append(item)
 
         amber = "#FFA726"
-        fvg, ext, pos = crt.get("ifvg"), crt.get("extreme"), crt.get("pos")
+        fvg = crt.get("ifvg")
         if fvg:                                                 # el FVG de LTF tras el máximo del sweep: siempre al lado del nivel barrido
             left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
             box = QGraphicsRectItem(QRectF(left, fvg["bottom"], right - left, max(fvg["top"] - fvg["bottom"], 1e-9)))
@@ -1086,20 +1085,6 @@ class ChartView(pg.PlotWidget):
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -4)
-        if ext:
-            dot = pg.ScatterPlotItem(x=[float(ext["x"])], y=[ext["price"]], symbol="o", size=9, pen=pg.mkPen(tone, width=1.5),
-                                     brush=pg.mkBrush(None))
-            add(dot, 6)
-        if pos:
-            x0, x1 = float(pos["x0"]), float(pos["x1"]) + 1
-            entry, stop, target = pos["entry"], pos["stop"], pos["target"]
-            for lo, hi, color in ((min(entry, target), max(entry, target), QColor(38, 166, 154, 60)),
-                                  (min(entry, stop), max(entry, stop), QColor(239, 83, 80, 60))):
-                box = QGraphicsRectItem(QRectF(x0, lo, max(x1 - x0, 0.5), max(hi - lo, 1e-9)))
-                box.setBrush(color)
-                box.setPen(QPen(Qt.PenStyle.NoPen))
-                add(box, -5)
-            add(pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.TEXT, width=1.2)), -4)
 
     @property
     def crt_count(self) -> int:
