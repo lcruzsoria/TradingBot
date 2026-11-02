@@ -22,7 +22,7 @@ HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
 MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
-RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado"}
+RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup"}
 LTF_ORDER = (3, 5)
 
 
@@ -68,14 +68,16 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
                         detail["fvg"][tf] = (float(chosen[f"f{tf}a"][i]), float(chosen[f"f{tf}b"][i]), int(chosen[f"f{tf}t"][i]))
             trades.setdefault((int(chosen["c"][i]), int(chosen["d"][i])), []).append(
                 (int(chosen["l"][i]), int(chosen["n"][i]), str(names[i]), int(chosen["t"][i]), detail))
-    invalid: dict[tuple, tuple] = {}                           # (inicio de C2, dirección) -> (hora del extremo, precio, motivo): sweeps invalidados
-    for group in backtest.groups_of("crt"):
-        inv = group.raw.get("invalidos") if group.is_crt else None
-        if not inv:
-            continue
-        for i, m in enumerate(inv["m"]):
-            if market_key(group.raw["cats"]["m"][m]) == key and (int(inv["c"][i]), int(inv["d"][i])) not in trades:
-                invalid[(int(inv["c"][i]), int(inv["d"][i]))] = (int(inv["th"][i]), float(inv["ps"][i]), inv["motivos"][inv["mo"][i]])
+    invalid: dict[tuple, tuple] = {}                           # (inicio de C2, dirección) -> (hora del extremo, precio, motivo, estado)
+    for table, state in (("invalidos", "invalido"), ("sin_setup", "sin_setup")):            # invalidados y sweeps sin setup
+        for group in backtest.groups_of("crt"):
+            inv = group.raw.get(table) if group.is_crt else None
+            if not inv:
+                continue
+            for i, m in enumerate(inv["m"]):
+                if market_key(group.raw["cats"]["m"][m]) == key and (int(inv["c"][i]), int(inv["d"][i])) not in trades \
+                        and (int(inv["c"][i]), int(inv["d"][i])) not in invalid:
+                    invalid[(int(inv["c"][i]), int(inv["d"][i]))] = (int(inv["th"][i]), float(inv["ps"][i]), inv["motivos"][inv["mo"][i]], state)
     if not trades and not invalid:
         return []
     htf = htf_minutes(symbol, indices)
@@ -94,10 +96,10 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
         if x1 <= x0 or xc1 >= x0:
             continue
         if rows is None:                                        # sin operación: el precio llegó al extremo opuesto de C1 sin completar el setup
-            th, price, reason = invalid[(c2_min, direction)]
+            th, price, reason, state = invalid[(c2_min, direction)]
             n_ext = min(max(int(np.searchsorted(ts, th * 60 + ahead, "right")) - 1, 0), n - 1)
             out.append({
-                "x0": x0, "x1": x1, "xc1": xc1, "direction": "short" if direction else "long", "state": "invalido", "label": "CRT",
+                "x0": x0, "x1": x1, "xc1": xc1, "direction": "short" if direction else "long", "state": state, "label": "CRT",
                 "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
                 "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
                 "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,

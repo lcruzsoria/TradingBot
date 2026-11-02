@@ -38,13 +38,17 @@ def raw(ops: list[tuple]) -> dict:
             "patrones": ["CRT"], "filtros": {"5:1": "M5 · 1"}, "ops": cols, "datos": []}
 
 
-def backtest(ops=None, invalid=None) -> Backtest:
+def backtest(ops=None, invalid=None, nosetup=None) -> Backtest:
     ops = ops or [(C2, 1, 5, 1, 0, 1), (C2, 1, 3, 1, 1, 1), (C2, 1, 5, 2, 2, 1)]
     group = raw(ops)
     if invalid:                                                                        # (C2, dirección, hora del extremo, precio, motivo)
         group["invalidos"] = {"m": [0] * len(invalid), "c": [x[0] for x in invalid], "d": [x[1] for x in invalid], "th": [x[2] for x in invalid],
                               "ps": [x[3] for x in invalid], "mo": [x[4] for x in invalid],
                               "motivos": ["sin FVG de MTF", "sin vuelta al FVG de MTF", "sin iFVG invertido"]}
+    if nosetup:                                                                        # (C2, dirección, hora del extremo, precio, motivo)
+        group["sin_setup"] = {"m": [0] * len(nosetup), "c": [x[0] for x in nosetup], "d": [x[1] for x in nosetup], "th": [x[2] for x in nosetup],
+                              "ps": [x[3] for x in nosetup], "mo": [x[4] for x in nosetup],
+                              "motivos": ["sin FVG tras el máximo", "sin cierre dentro de C1", "sin retesteo del FVG", "sin continuación tras el retesteo"]}
     return Backtest([Group("crt:indices", "Índices", group)], {})
 
 
@@ -191,3 +195,18 @@ def test_un_crt_alcista_lleva_la_etiqueta_debajo_y_en_verde(tmp_path, monkeypatc
     pill = win.chart._crt_pills[0]
     assert "CRT alcista" in pill.toPlainText() and pill.result == "SL" and pill._bar.name().upper() == CRT_COLORS["long"]
     assert win.chart._crts[0]["mtf"] == []
+
+
+def test_un_sweep_sin_setup_se_marca_con_su_motivo_y_distinto_del_invalidado(tmp_path, monkeypatch):
+    from tradingbot.skills.crt.chart import crt_marks
+    df = scenario()
+    ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
+    both = backtest(invalid=[(C2, 0, C2 + 35, 108.5, 1)], nosetup=[(C2, 0, C2 + 35, 108.5, 2)])
+    assert [m["state"] for m in crt_marks(both, "NAS100.r", ts, high, low, AHEAD) if m["direction"] == "long"] == ["invalido"]      # el invalidado manda
+    bt = backtest(nosetup=[(C2, 0, C2 + 35, 108.5, 0)])                                # el largo no tiene operación: solo sin setup
+    sin = next(m for m in crt_marks(bt, "NAS100.r", ts, high, low, AHEAD) if m["direction"] == "long")
+    assert sin["state"] == "sin_setup" and sin["motivo"] == "sin FVG tras el máximo" and sin["ltf"] is None
+    win = window(tmp_path, monkeypatch)
+    win.backtest = bt
+    win._on_candles(candles_event())
+    assert any(p.result == "Sin setup" and p.toPlainText().strip().endswith("Sin setup") for p in win.chart._crt_pills)

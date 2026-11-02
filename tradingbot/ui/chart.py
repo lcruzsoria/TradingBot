@@ -45,8 +45,9 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 
 # Resultado de cada posición según su estado: siglas y color del borde de su píldora (None: borde normal).
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
-           "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5")}
-RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
+           "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
+           "sin_setup": ("Sin setup", "#78909C")}
+RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
 
@@ -109,7 +110,8 @@ class NoTradePill(_StripePill):
 CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) en verde, bajista (corto) en rojo
 HTF_BOX = "#C9CDD6"                                       # cajas de las velas C1 y C2 del HTF: gris claro, para no confundirlas con las velas
 CRT_PILL_OPACITY = 0.85
-CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado"}
+CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
+                    "sin_setup": "Sin setup"}
 
 
 class CrtPill(_StripePill):
@@ -914,7 +916,12 @@ class ChartView(pg.PlotWidget):
             if others:
                 listed = ' · '.join(f"M{lt}·{en} {CRT_RESULT_WORDS.get(st, st)}" for lt, en, st in others[:8])
                 verdict = f'<div style="margin-top:4px; color:{muted}">Otros LTF y entradas del backtest: {html.escape(listed)}</div>'
-            if data["state"] == "invalido":                     # sin operación: llegó al extremo opuesto de C1 sin completar el setup
+            if data["state"] == "sin_setup":                    # sweep sin operación ni invalidación: el patrón no se completó antes de que acabara C2
+                body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
+                        + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
+                verdict = (f'<div style="margin-top:4px; color:{muted}">La vela C2 acabó sin completar el patrón (y sin llegar al extremo '
+                           f'opuesto de C1): sin setup.</div>')
+            elif data["state"] == "invalido":                   # sin operación: llegó al extremo opuesto de C1 sin completar el setup
                 body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                         + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
                 verdict = (f'<div style="margin-top:4px; color:{muted}">El precio llegó al extremo opuesto de C1 antes de completar el '

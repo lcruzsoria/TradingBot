@@ -143,7 +143,7 @@ def run_c2(ltf: pd.DataFrame, setups: list, mode: int, rule: engine.Rule) -> pd.
 
 
 def simulate() -> pd.DataFrame:
-    rows, funnels, data, invalid, valid = [], [], [], [], []
+    rows, funnels, data, invalid, valid, nosetup = [], [], [], [], [], []
     for gkey, (gname, symbols) in GROUPS.items():
         bc.configure("indices" if gkey == "indices" else "forex")                    # fija el mercado (H3 / H4 y cierre de sesión)
         for profile, want in symbols:
@@ -156,6 +156,8 @@ def simulate() -> pd.DataFrame:
                 valid += [{"grupo": gkey, "mercado": sym, "C2": s["C2"], "d": int(s["sign"] > 0)} for s in setups]
                 invalid += [{"grupo": gkey, "mercado": sym, "ltf": tf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
                              "t extremo": int(ltf["ts"].iloc[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.invalid]
+                nosetup += [{"grupo": gkey, "mercado": sym, "ltf": tf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
+                             "t extremo": int(ltf["ts"].iloc[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.nosetup]
                 for entry in ENTRIES:
                     for code, (_, rule) in TARGETS.items():
                         t = run_c2(ltf, setups, entry, rule)
@@ -173,7 +175,7 @@ def simulate() -> pd.DataFrame:
     trades["zona"] = tbr_zone(trades["entrada (NY)"])
     TRADES.parent.mkdir(exist_ok=True)
     pd.to_pickle({"operaciones": trades, "embudo": pd.DataFrame(funnels), "datos": pd.DataFrame(data), "reglas": dict(RULES),
-                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid)}, TRADES)
+                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid), "sinsetup": pd.DataFrame(nosetup)}, TRADES)
     print(f"{len(trades)} operaciones -> {TRADES}")
     return trades
 
@@ -233,7 +235,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
                         "d1": int(r["contra la tendencia D1"]), "fvg": int(r["con FVG tras el extremo"]), "toque": int(r["con cierre dentro de C1"]),
                         "ifvg": int(r["con retesteo"]), "e1": int(r["entrada 1"]), "e2": int(r["entrada 2"]), "inv": int(r["invalidados"])}
                        for _, r in funnel.iterrows()],
-        "invalidos": invalid_cols(saved, gkey, markets),
+        "invalidos": invalid_cols(saved, gkey, markets), "sin_setup": nosetup_cols(saved, gkey, markets),
         "metodologia": methodology(gkey, rules)}
 
 
@@ -256,6 +258,29 @@ def invalid_cols(saved: dict, gkey: str, markets: list[str]) -> dict:
             "c": ((inv["C2"].astype(np.int64) - AHEAD) // 60).tolist(), "d": inv["d"].astype(int).tolist(),
             "th": ny_min(inv["t extremo"]), "ps": floats(inv["precio"], 5),
             "mo": inv["motivo"].map({r: i for i, r in enumerate(REASONS)}).astype(int).tolist(), "motivos": REASONS}
+
+
+def nosetup_cols(saved: dict, gkey: str, markets: list[str]) -> dict:
+    """Sweeps sin setup: la vela C2 acabó sin completar el patrón ni llegar a invalidarlo. Solo los que no dieron setup válido ni invalidado en
+    ningún LTF; una fila por C2 y dirección (vale el motivo del primer LTF)."""
+    sin = saved.get("sinsetup")
+    if sin is None or not len(sin):
+        return {}
+    sin = sin[sin["grupo"] == gkey]
+    taken = set()
+    for key in ("validos", "invalidos"):
+        df = saved.get(key)
+        if df is not None and len(df):
+            df = df[df["grupo"] == gkey]
+            taken |= set(map(tuple, df[["mercado", "C2", "d"]].to_numpy().tolist()))
+    sin = sin[[(m, c, d) not in taken for m, c, d in sin[["mercado", "C2", "d"]].to_numpy().tolist()]]
+    sin = sin.sort_values(["mercado", "C2", "d", "ltf"]).drop_duplicates(["mercado", "C2", "d"]).reset_index(drop=True)
+    sin = sin[sin["mercado"].isin(markets)].reset_index(drop=True)
+    return {"m": sin["mercado"].map({m: i for i, m in enumerate(markets)}).astype(int).tolist(),
+            "c": ((sin["C2"].astype(np.int64) - AHEAD) // 60).tolist(), "d": sin["d"].astype(int).tolist(),
+            "th": ny_min(sin["t extremo"]), "ps": floats(sin["precio"], 5),
+            "mo": sin["motivo"].map({r: i for i, r in enumerate(engine.NOSETUP_REASONS)}).astype(int).tolist(),
+            "motivos": list(engine.NOSETUP_REASONS)}
 
 
 def methodology(gkey: str, rules: dict) -> list[list[str]]:

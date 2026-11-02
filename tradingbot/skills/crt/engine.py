@@ -91,6 +91,7 @@ class Setups(list):
     def __init__(self, *args) -> None:
         super().__init__(*args)
         self.invalid: list[dict] = []
+        self.nosetup: list[dict] = []                    # sweeps cuyo patrón no se completó ni se invalidó (la vela C2 acabó antes)
 
 
 def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule, cfg: Cfg) -> tuple[list, dict]:
@@ -299,6 +300,7 @@ def manage(L: dict, st: dict, ep: dict, rule: Rule) -> dict | None:
 # Sesgo: solo C2 a favor de la tendencia D1 (cierre sobre/bajo la EMA30 y pendiente de 5 días; corto = bajista).
 C2_REASONS = ("sin FVG tras el extremo", "sin cierre dentro de C1", "sin retesteo", "sweep demasiado profundo",
               "rompió el máximo tras el retesteo")
+NOSETUP_REASONS = ("sin FVG tras el máximo", "sin cierre dentro de C1", "sin retesteo del FVG", "sin continuación tras el retesteo")
 
 
 def d1_bias(base: pd.DataFrame, cfg: Cfg) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -388,6 +390,10 @@ def find_c2_setups(base: pd.DataFrame, ltf: pd.DataFrame, cfg: Cfg, bias: bool =
                     setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": ext if np.isfinite(ext) else float(hi_[s0]), "motivo": C2_REASONS[reason],
                                            "c1": (c1l, c1h)})
                     funnel["invalidados"] += 1
+                else:                                                           # la vela C2 acabó sin completar el patrón ni llegar al extremo opuesto
+                    stage = 0 if not seen[0] else 1 if not seen[1] else 2 if not seen[2] else 3
+                    setups.nosetup.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "motivo": NOSETUP_REASONS[stage],
+                                           "stop": ext if np.isfinite(ext) else float(hi_[s0])})
                 continue
             setups.append({"sign": sign, "dirección": name, "C2": s2, "c1": (c1l, c1h), "s0": s0, "lim": lim, "mkt": mkt,
                            "inside": bool(c1l <= H["close"][i] <= c1h), "c2_end": s2 + cfg.htf_min * 60})
