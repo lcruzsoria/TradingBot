@@ -47,7 +47,7 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
            "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C"),
-           "sin_sweep": ("Sin sweep", None)}
+           "sin_sweep": ("Sin sweep", None), "sin_evaluar": ("Sin evaluar", None)}
 RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
@@ -112,7 +112,8 @@ CRT_COLORS = {"long": "#26A69A", "short": "#EF5350"}      # CRT alcista (largo) 
 HTF_BOX = "#C9CDD6"                                       # cajas de las velas C1 y C2 del HTF: gris claro, para no confundirlas con las velas
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
-                    "sin_setup": "Sin setup", "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep"}
+                    "sin_setup": "Sin setup", "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep",
+                    "sin_evaluar": "Sin evaluar"}
 
 
 class CrtPill(_StripePill):
@@ -128,7 +129,7 @@ class CrtPill(_StripePill):
             super().__init__(anchor=(0, outside), fill=pg.mkPen(None) and pg.mkBrush(_alpha(theme.PANEL, 225)), border=pg.mkPen(theme.BORDER))
             self._bar = QColor(theme.BORDER)
             self.result = result
-            self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<span style="color:{theme.MUTED}">H{int(crt.get("htf", 180)) // 60} · sin sweep</span>&nbsp;</span>')
+            self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<span style="color:{theme.MUTED}">H{int(crt.get("htf", 180)) // 60} · {"sin sweep" if crt["state"] == "sin_sweep" else "sin evaluar"}</span>&nbsp;</span>')
             self.setZValue(8)
             self.setOpacity(CRT_PILL_OPACITY)
             return
@@ -914,7 +915,7 @@ class ChartView(pg.PlotWidget):
                         f'<td align="right" style="color:{theme.TEXT}">{html.escape(value)}</td></tr>')
 
             head = (f'<b style="color:{tone}">CRT {"alcista" if long else "bajista"}</b> · {"largo" if long else "corto"} · {html.escape(word)}'
-                    if data["direction"] != "none" else f'<b>Vela {htf}</b> · sin sweep')
+                    if data["direction"] != "none" else f'<b>Vela {htf}</b> · {"sin sweep" if data["state"] == "sin_sweep" else "sin evaluar"}')
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                     + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
@@ -931,7 +932,10 @@ class ChartView(pg.PlotWidget):
             if others:
                 listed = ' · '.join(f"M{lt}·{en} {CRT_RESULT_WORDS.get(st, st)}" for lt, en, st in others[:8])
                 verdict = f'<div style="margin-top:4px; color:{muted}">Otros LTF y entradas del backtest: {html.escape(listed)}</div>'
-            if data["state"] == "sin_sweep":                    # la vela no barrió ningún extremo de C1: no hay CRT
+            if data["state"] == "sin_evaluar":                  # la vela barre C1, pero el backtest no la ha evaluado (no hay datos de su resultado)
+                body = '<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf}", f"{data.get('when', '')} NY") + '</table>'
+                verdict = f'<div style="margin-top:4px; color:{muted}">{html.escape(str(data.get("motivo", "")))}</div>'
+            elif data["state"] == "sin_sweep":                  # la vela no barrió ningún extremo de C1: no hay CRT
                 body = '<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf}", f"{data.get('when', '')} NY") + '</table>'
                 verdict = f'<div style="margin-top:4px; color:{muted}">No barre el máximo ni el mínimo de la vela anterior: no hay CRT.</div>'
             elif data["state"] == "sin_operacion":                # el patrón se dio en otro LTF u otra entrada del backtest, no en la elegida
@@ -1049,7 +1053,7 @@ class ChartView(pg.PlotWidget):
             tone = CRT_COLORS.get(crt["direction"], HTF_BOX)
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
             boxes = [(c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]       # C2, la vela que lleva la etiqueta
-            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion", "sin_sweep")
+            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion", "sin_sweep", "sin_evaluar")
             if operated:                                         # C1 y C3 solo en los CRT con operación, con el color de su lado
                 boxes.insert(0, (c1lo, c1hi, _alpha(tone, 12), _alpha(tone, 110), 1.0, xc1, x0))
                 if c3:

@@ -38,13 +38,16 @@ def raw(ops: list[tuple]) -> dict:
             "patrones": ["CRT"], "filtros": {"5:1": "M5 · 1"}, "ops": cols, "datos": []}
 
 
+NEUTRAL = ("sin_sweep", "sin_evaluar")                                                  # velas HTF sin CRT: caja neutra
+
+
 def real_pills(chart):
     """Las etiquetas de los CRT de verdad (sin las de las velas «sin sweep»)."""
-    return [p for c, p in zip(chart._crts, chart._crt_pills) if c["state"] != "sin_sweep"]
+    return [p for c, p in zip(chart._crts, chart._crt_pills) if c["state"] not in NEUTRAL]
 
 
 def real_crts(chart):
-    return [c for c in chart._crts if c["state"] != "sin_sweep"]
+    return [c for c in chart._crts if c["state"] not in NEUTRAL]
 
 
 def backtest(ops=None, invalid=None, nosetup=None) -> Backtest:
@@ -65,7 +68,7 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     from tradingbot.skills.crt.chart import crt_marks as _all_marks
 
     def crt_marks(*a, **k):                                                              # sin las velas «sin sweep», que no son CRT
-        return [m for m in _all_marks(*a, **k) if m["state"] != "sin_sweep"]
+        return [m for m in _all_marks(*a, **k) if m["state"] not in NEUTRAL]
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     [mark] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=5, entry=1)
@@ -90,7 +93,7 @@ def test_un_sweep_invalidado_se_marca_sin_operacion_y_con_su_motivo():
     from tradingbot.skills.crt.chart import crt_marks as _all_marks
 
     def crt_marks(*a, **k):                                                              # sin las velas «sin sweep», que no son CRT
-        return [m for m in _all_marks(*a, **k) if m["state"] != "sin_sweep"]
+        return [m for m in _all_marks(*a, **k) if m["state"] not in NEUTRAL]
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     bt = backtest(invalid=[(C2, 0, C2 + 35, 108.5, 1), (C2, 1, C2 + 35, 108.5, 0)])      # el corto ya tiene operaciones: solo se marca el largo
@@ -105,7 +108,7 @@ def test_solo_se_marcan_las_operaciones_del_ltf_y_la_entrada_elegidos():
     from tradingbot.skills.crt.chart import crt_marks as _all_marks
 
     def crt_marks(*a, **k):                                                              # sin las velas «sin sweep», que no son CRT
-        return [m for m in _all_marks(*a, **k) if m["state"] != "sin_sweep"]
+        return [m for m in _all_marks(*a, **k) if m["state"] not in NEUTRAL]
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     bt = backtest([(C2, 1, 3, 2, 0, 1)])                                                # el CRT solo dio una operación, en M3 con la entrada 2
@@ -118,7 +121,7 @@ def test_sin_velas_de_la_c2_o_de_otro_mercado_no_hay_marcas():
     from tradingbot.skills.crt.chart import crt_marks as _all_marks
 
     def crt_marks(*a, **k):                                                              # sin las velas «sin sweep», que no son CRT
-        return [m for m in _all_marks(*a, **k) if m["state"] != "sin_sweep"]
+        return [m for m in _all_marks(*a, **k) if m["state"] not in NEUTRAL]
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     assert crt_marks(backtest(), "EURUSD", ts, high, low, AHEAD) == []                  # no es un mercado de ese backtest
@@ -175,11 +178,11 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert violet == []                                                                  # ya no se dibujan el iFVG ni el CISD
     amber = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
     assert len(amber) >= 1                                                               # el FVG de LTF, siempre al lado del nivel barrido
-    labels = sorted(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText") and it.toPlainText().split()[0] != "▼" and "sin sweep" not in it.toPlainText())
+    labels = sorted(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText") and not it.__class__.__name__ == "CrtPill")
     assert labels == ["FVG M5"]                                                          # solo su nombre con el timeframe: sin nombres de vela ni CISD
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
-    assert len(boxes) == 1 + sum(c["state"] == "sin_sweep" for c in chart._crts)         # C2 (y las velas sin sweep) en gris claro, no del color de las velas
+    assert len(boxes) == 1 + sum(c["state"] in NEUTRAL for c in chart._crts)         # C2 (y las velas sin sweep) en gris claro, no del color de las velas
     tinted = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == "#EF5350"]
     assert len(tinted) >= 1                                                              # C1 (y C3) de un CRT con operación, del color de su lado (bajista: rojo)
     zones = [it for it in chart._crt_items if hasattr(it, "rect") and hasattr(it, "brush") and it.brush().color().alpha() == 60]
@@ -227,7 +230,7 @@ def test_un_sweep_sin_setup_se_marca_con_su_motivo_y_distinto_del_invalidado(tmp
     from tradingbot.skills.crt.chart import crt_marks as _all_marks
 
     def crt_marks(*a, **k):                                                              # sin las velas «sin sweep», que no son CRT
-        return [m for m in _all_marks(*a, **k) if m["state"] != "sin_sweep"]
+        return [m for m in _all_marks(*a, **k) if m["state"] not in NEUTRAL]
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     both = backtest(invalid=[(C2, 0, C2 + 35, 108.5, 1)], nosetup=[(C2, 0, C2 + 35, 108.5, 2)])
@@ -262,12 +265,12 @@ def test_las_velas_sin_sweep_tambien_llevan_caja_neutra(tmp_path, monkeypatch):
     df = scenario()
     ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
     marks = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=5, entry=1)
-    none = [m for m in marks if m["state"] == "sin_sweep"]
-    assert none and all(m["direction"] == "none" and m["ltf"] is None and m["motivo"] for m in none)
+    none = [m for m in marks if m["state"] in NEUTRAL]
+    assert none and all(m["ltf"] is None and m["motivo"] for m in none)
     assert sorted(m["x0"] for m in marks) == [m["x0"] for m in marks]                      # y ninguna caja pisa a otra: una por vela HTF
     assert len({m["x0"] for m in marks}) == len(marks)
     win = window(tmp_path, monkeypatch)
     win.backtest = backtest()
     win._on_candles(candles_event())
     texts = [p.toPlainText() for p in win.chart._crt_pills]
-    assert any("sin sweep" in t for t in texts) and any("CRT bajista" in t for t in texts)
+    assert any("sin sweep" in t or "sin evaluar" in t for t in texts) and any("CRT bajista" in t for t in texts)

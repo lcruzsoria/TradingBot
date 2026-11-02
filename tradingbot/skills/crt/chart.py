@@ -145,10 +145,24 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
         x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
         if x0 >= n or ts[x0] - start > htf * 60 or x1 <= x0:
             continue
-        out.append({"x0": x0, "x1": x1, "xc1": x0, "direction": "none", "state": "sin_sweep", "label": "CRT",
-                    "c1": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+        xp = int(np.searchsorted(ts, start - htf * 60, "left"))      # la vela anterior (C1), con las velas cargadas
+        prev = xp < x0 and ts[xp] < start
+        sweeps = prev and (float(np.max(highs[x0:x1])) > float(np.max(highs[xp:x0])) or float(np.min(lows[x0:x1])) < float(np.min(lows[xp:x0])))
+        direction, c1_box, xc1 = "none", (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), x0
+        if prev and not sweeps:
+            state, motivo = "sin_sweep", "no barre ningún extremo de C1"
+        else:                                                    # barre C1 (o no hay vela anterior) pero el backtest no la evaluó: fin de semana o fuera de su histórico
+            state, motivo = "sin_evaluar", "el backtest no evalúa esta vela (fuera de su histórico o tras el cierre del fin de semana)"
+            if prev:                                             # el lado lo da el primer extremo de C1 que toma la vela
+                c1_lo, c1_hi = float(np.min(lows[xp:x0])), float(np.max(highs[xp:x0]))
+                up = np.flatnonzero(highs[x0:x1] > c1_hi)
+                dn = np.flatnonzero(lows[x0:x1] < c1_lo)
+                direction = "short" if len(up) and (not len(dn) or up[0] <= dn[0]) else "long"
+                c1_box, xc1 = (c1_lo, c1_hi), xp
+        out.append({"x0": x0, "x1": x1, "xc1": xc1, "direction": direction, "state": state, "label": "CRT",
+                    "c1": c1_box,
                     "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x1, "c3": None,
-                    "mtf": [], "ltf": None, "entry": None, "htf": htf, "motivo": "no barre ningún extremo de C1", "start": start,
+                    "mtf": [], "ltf": None, "entry": None, "htf": htf, "motivo": motivo, "start": start,
                     "fvg_all": [], "others": [], "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M")})
     return sorted(out, key=lambda m: m["x0"])
 
