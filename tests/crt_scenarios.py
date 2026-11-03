@@ -97,3 +97,12 @@ def eurusd(pad: int = 150) -> pd.DataFrame:
     rows = [(first - (pad - i) * STEP, BARS[0][1], BARS[0][1], BARS[0][1], BARS[0][1]) for i in range(pad)]
     rows += [(_server_ts(f"2026-11-02 {hhmm}"), o, h, l, c) for hhmm, o, h, l, c in BARS]
     return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])
+
+
+def nas100() -> pd.DataFrame:
+    """NAS100.s M5 real del 02/11/2026 21:00 NY al 03/11/2026 03:30 NY (tests/crt_nas100_20261103.py): largo en C2 de las 00:00 (H3). El primer doble FVG (iFVG
+    27989.7-28007.7 + FVG 27979.2-27998.2) se invalida a las 00:55 (cierra con cuerpo bajo la zona tras el retest); el setup válido es el del doble FVG de más abajo
+    (FVG 27966.4-27969.9 + iFVG 27951.7-27981.9, CISD 27990.9, retest 02:35, cierre sobre el CISD 02:45): entrada 02:50 en 28024.9 con stop en 27926.65."""
+    from crt_nas100_20261103 import BARS
+    rows = [(_server_ts(f"2026-11-{hhmm[:2]} {hhmm[3:]}"), o, h, l, c) for hhmm, o, h, l, c in BARS]
+    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])

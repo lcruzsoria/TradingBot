@@ -193,7 +193,8 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
 #      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
 #      CISD = el mínimo de la vela de desplazamiento que lo creó (la vela central del FVG de LTF).
 #   3. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (pullback): una vela posterior a la inversión la toca con la
-#      mecha sin cerrar al otro lado de ella.
+#      mecha sin cerrar al otro lado de ella. Si después del retest (o en él) una vela CIERRA con cuerpo al otro lado de la zona, esa pareja queda invalidada
+#      (hay que buscar otra, más abajo): tiene que haber un rebote y luego el cierre sobre el CISD.
 #   4. Después de ese toque, la primera vela que cierra con el cuerpo por debajo del CISD da la entrada: a la apertura de la vela siguiente.
 # Stop en el máximo del sweep (el máximo de C2 hasta ese momento) y objetivo a `rr` veces el riesgo. Si el precio llega al extremo opuesto de
 # C1 sin haberse completado, el setup queda invalidado. Si la zona común existe y el iFVG se invierte pero el precio sigue sin volver a ella, no
@@ -248,7 +249,8 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             if not pairs:
                 continue
             funnel["con FVG de MTF y de LTF con zona común"] += 1
-            hx, ih, touched, inverted, seen_touch, trig, invalidated = float(hi_[s0]), s0, {}, {}, False, None, False
+            pid = lambda p: (p[0], p[1][3], p[1][0])                        # identidad de una pareja: iFVG (vela 3), FVG (cierre y TF)
+            hx, ih, touched, inverted, dead, seen_touch, trig, invalidated = float(hi_[s0]), s0, {}, {}, set(), False, None, False
             for j in range(s0, b):
                 if lo_[j] < c1l:                                                # llega al extremo opuesto de C1 sin setup: invalidado
                     setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx,
@@ -258,21 +260,28 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     break
                 if hi_[j] > hx:
                     hx, ih = float(hi_[j]), j
-                done = [p for p in pairs if p[0] in touched and touched[p[0]] < j and cl_[j] < lo_[p[0] - 1]]            # tocada antes de esta vela y cierra bajo el CISD
+                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and cl_[j] < lo_[p[0] - 1]]     # tocada antes y cierra bajo el CISD
                 if done:
                     k, z, common = max(done, key=lambda p: (p[1][0], p[0], p[1][3]))              # la del FVG de mayor TF
                     trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": float(lo_[k - 1]),
                             "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
-                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "kf": k, "jt": touched[k], "inv": inverted[k], "s0": s0,
+                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
                             "cisd": (k - 1, float(lo_[k - 1])), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
                     break
                 for k, z, common in pairs:
+                    key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
+                    if key in dead:
+                        continue
                     if k not in inverted:                                       # el iFVG se invierte: una vela cierra bajo su base
                         if k < j and cl_[j] < hi_[k - 2]:
                             inverted[k] = j
-                    elif k not in touched and inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0] and cl_[j] <= common[1]:
-                        touched[k] = j                                          # pullback a la zona común, con los dos FVG ya formados
-                        seen_touch = True
+                    elif inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
+                        if cl_[j] > common[1]:                                  # y cierra con cuerpo al otro lado de ella: el retest la invalida
+                            dead.add(key)
+                            seen_touch = True
+                        elif key not in touched:
+                            touched[key] = j                                    # pullback a la zona común: tiene que rebotar y cerrar sobre el CISD
+                            seen_touch = True
             funnel["con pullback a la zona"] += seen_touch
             if trig:
                 funnel["con CISD"] += 1

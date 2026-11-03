@@ -32,8 +32,12 @@ Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.*
 3. **CISD.** Es el extremo de la vela que creó el iFVG: la vela central de sus tres velas (largo: su **máximo**; corto: su mínimo).
 4. **Inversión.** El iFVG se invierte cuando una vela cierra al otro lado de su base (largo: por encima de su techo).
 5. **Pullback a la zona común.** Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (largo: **de arriba abajo**): una vela posterior a la inversión la toca con la mecha sin cerrar al otro lado de ella.
+   - **Un retest que cierra con cuerpo al otro lado de la zona invalida esa pareja:** si tras el retest (o en él) una vela cierra con el cuerpo por debajo de la zona común (en un largo), esa pareja iFVG + FVG muere. Tiene que haber un **rebote** y a continuación el cierre sobre el CISD; si no, se busca otra pareja, normalmente un doble FVG más abajo. Cada pareja iFVG + FVG lleva su propio estado (inversión, retest e invalidación).
 6. **Entrada.** Tras el pullback, la primera vela que **cierra con el cuerpo más allá del CISD** (largo: por encima) da la señal. Se entra a la **apertura de la vela siguiente** (`CRT_ENTRY=1`; con `4`, al cierre de esa vela). Antes de que cierre C2.
 7. **«Setup OK sin Entrada».** Si la zona común existe y el iFVG se invierte pero el precio **sigue sin volver a ella** (llega al extremo opuesto de C1 o acaba C2), no hay entrada: el gráfico marca el CRT como «Setup OK sin Entrada», con el FVG, el iFVG, la zona común y el CISD. Es solo una anotación.
+
+### Ejemplo real: la pareja invalidada y la de más abajo (NAS100)
+NAS100.s, 03/11/2026, C2 de las 00:00 (H3), largo. El primer doble FVG (iFVG 27989.7-28007.7 + FVG 27979.2-27998.2, zona común 27989.7-27998.2) se retestea a las 00:50, pero a las 00:55 una vela cierra con cuerpo por debajo de la zona: **invalidado**. El precio cae a 27926.65 y deja un segundo doble FVG más abajo: FVG 27966.4-27969.9 + iFVG 27951.7-27981.9 (se invierte a las 02:25), CISD 27990.9, retest a las 02:35 (toca y rebota), cierre a las 02:45 sobre el CISD: **entrada a las 02:50 en 28024.9**, stop 27926.65, objetivo 28221.4. Las velas están en `tests/crt_nas100_20261103.py`.
 
 ### Ejemplo real
 EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:

@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_scenarios import AHEAD, eurusd, mirror, scenario                                # noqa: E402
+from crt_scenarios import AHEAD, eurusd, mirror, nas100, scenario                                # noqa: E402
 from tradingbot.envconfig import EnvConfig, parse                                # noqa: E402
 from tradingbot.skills.crt import engine                                         # noqa: E402
 
@@ -254,6 +254,31 @@ def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_manda_el_de_mayor_tf(mon
     monkeypatch.setattr(engine, "ZONE_TFS", (5,))
     for x in engine.find_zone_setups(df, df, 5, cfg)[0]:                                # FVG de M5 con iFVG de M5: dos huecos distintos
         assert x["mtf"] == "M5" and (x["ifvg"][0], x["ifvg"][1]) != (x["zones"][0][1], x["zones"][0][2])
+
+
+def test_un_retest_que_cierra_con_cuerpo_bajo_la_zona_invalida_la_pareja_y_vale_el_doble_fvg_de_mas_abajo():
+    df = nas100()
+    cfg = engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)
+    setups, _ = engine.find_zone_setups(df, df, 5, cfg)
+    mine = [x for x in setups if ny(x["C2"]) == "2026-11-03 00:00"]
+    assert len(mine) == 1                                                             # el de las 01:40 (con la 1.ª pareja, invalidada a las 00:55) ya no existe
+    st = mine[0]
+    assert st["dirección"] == "long" and st["mtf"] == "M5"
+    assert ny(df["ts"][st["inv"]]) == "2026-11-03 02:25"                              # el iFVG de abajo (27951.7-27981.9) se invierte
+    assert ny(df["ts"][st["jt"]]) == "2026-11-03 02:35"                               # retest de la zona común 27966.4-27969.9: toca y rebota
+    assert ny(df["ts"][st["jc"]]) == "2026-11-03 02:45"                               # y cierra sobre el CISD
+    assert (-st["level"], -st["stop"]) == (pytest.approx(27990.9), pytest.approx(27926.65))
+    assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([27966.4, 27969.9])
+    ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
+    assert ny(df["ts"][ep["start"]]) == "2026-11-03 02:50" and -ep["entry"] == pytest.approx(28024.9)
+
+
+def test_cada_pareja_ifvg_fvg_lleva_su_propio_estado():
+    """El iFVG de las 00:25-00:35 forma pareja con varios FVG: tocar la zona de una (00:50) no activa la de otra que aún no existe (la de las 01:35-01:45)."""
+    df = nas100()
+    cfg = engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)
+    setups, _ = engine.find_zone_setups(df, df, 5, cfg)
+    assert all(not (ny(x["C2"]) == "2026-11-03 00:00" and ny(df["ts"][x["jc"]]) == "2026-11-03 01:35") for x in setups)
 
 
 def test_sin_pullback_a_la_zona_no_hay_entrada_aunque_cierre_sobre_el_cisd():
