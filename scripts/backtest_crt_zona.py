@@ -21,7 +21,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tradingbot.skills.crt import engine                                              # noqa: E402
+from tradingbot.skills.crt import bias, engine                                         # noqa: E402
 from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index           # noqa: E402
 
 AHEAD = 7 * 3600                                    # servidor del broker = NY + 7 h
@@ -30,12 +30,16 @@ INDICES = DEFAULT_US_INDICES + ("USTEC", "US500", "US30")
 SPREAD_BP = {"indices": 1.5, "forex": 0.7}
 
 
+BIAS_CFG = bias.CrtBiasCfg(True, False, 10.0, 1.0, ("1h", "4h", "1d"), 1, 50.0)       # el sesgo CRT con sus valores por defecto
+
+
 def run_symbol(df: pd.DataFrame, symbol: str, rr: float, be: float, entry: int = 1) -> pd.DataFrame:
     kind = "indices" if is_us_index(symbol, INDICES) else "forex"
     base = engine.INDICES if kind == "indices" else engine.FOREX
     cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, AHEAD)
     rule = engine.Rule(rr=rr, be_at=be)
     setups, funnel = engine.find_zone_setups(df, df, 5, cfg)
+    zones = bias.zone_cache(df, cfg, BIAS_CFG)
     views = {1: engine.view(df, 1), -1: engine.view(df, -1)}
     rows, busy_until = [], -1
     for st in setups:
@@ -50,11 +54,15 @@ def run_symbol(df: pd.DataFrame, symbol: str, rr: float, be: float, entry: int =
         if ts_in < busy_until:                       # una operación a la vez por mercado, como el bot (un setup nuevo no entra con otro abierto)
             continue
         busy_until = int(L["ts"][res["exit_index"]])
+        sgn = st["sign"]
+        pts = bias.evaluate(df, st["dirección"], int(st["C2"]), (sgn * st["z_bottom"], sgn * st["z_top"]), cfg, BIAS_CFG, AHEAD, zones)
+        hit = {z["rule"]: z["tf"] for z in pts.zones}
         price = abs(ep["entry"])
         cost = price * SPREAD_BP[kind] / 1e4 / ep["risk"]
         rows.append({"símbolo": symbol, "lado": st["dirección"], "entrada": pd.Timestamp(ts_in - AHEAD, unit="s"), "hora_ny": (ts_in - AHEAD) % 86400 // 3600,
                      "riesgo_pct": 100 * ep["risk"] / price, "cómo": res["cómo"], "bruto": res["gross"], "neto": res["gross"] - cost,
-                     "duración_h": (busy_until - ts_in) / 3600})
+                     "duración_h": (busy_until - ts_in) / 3600, "puntos": int(pts.score),
+                     "FVG": hit.get("fvg", "-"), "RB": hit.get("rejection", "-"), "OB": hit.get("ob", "-")})
     out = pd.DataFrame(rows)
     out.attrs["funnel"] = funnel
     return out
@@ -95,6 +103,11 @@ def main() -> None:
     rows += [summarize(t[t["entrada"] <= cut], f"hasta {cut:%Y-%m-%d} (60 %)"), summarize(t[t["entrada"] > cut], "después (40 %)")]
     rows += [summarize(t[t["lado"] == s], f"lado {s}") for s in ("long", "short")]
     rows += [summarize(t[t["cómo"] == c], f"salida {c}") for c in t["cómo"].unique()]
+    rows += [summarize(t[t["puntos"] == k], f"sesgo {k} puntos") for k in range(4)]
+    rows += [summarize(t[t["puntos"] >= k], f"sesgo >= {k} punto(s)") for k in range(1, 4)]
+    for rule in ("FVG", "RB", "OB"):
+        rows += [summarize(t[t[rule] != "-"], f"{rule} cumplida"), summarize(t[t[rule] == "-"], f"{rule} no cumplida")]
+        rows += [summarize(t[t[rule] == tf], f"{rule} validada en {tf}") for tf in ("1d", "4h", "1h")]
     table = pd.DataFrame(rows)
     print(f"\nrr {args.rr} · BE a {args.be} R · {args.carpeta}\n" + table.to_string(index=False))
     try:

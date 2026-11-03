@@ -156,23 +156,30 @@ class SetupBias:
         return BiasResult(bias, day, votes, {}, self.summary(), sign * self.score, max(self.min_score, 1e-9))
 
 
+def zone_cache(df: pd.DataFrame, cfg: engine.Cfg, bias_cfg: CrtBiasCfg) -> dict:
+    """Las zonas HTF de todo el histórico de `df`, por (dirección, TF), para evaluar muchos setups sin recalcularlas (backtest): una zona solo usa velas
+    cerradas hasta su hora de creación, así que filtrarlas por `created` da lo mismo que calcularlas con el histórico anterior a cada setup."""
+    return {(d, tf): zones(df, d, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100) for d in ("long", "short") for tf in bias_cfg.tfs}
+
+
 def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[float, float], cfg: engine.Cfg, bias_cfg: CrtBiasCfg,
-             ahead: int = 0) -> SetupBias:
+             ahead: int = 0, cache: dict | None = None) -> SetupBias:
     """Los puntos de un setup: para cada regla, la primera zona a favor que se cumple yendo del TF mayor al menor (1d, 4h, 1h): creada antes de la C2
     (hora de servidor `c2_start`), como mucho `lookback_days` antes, y solapada con la zona común `common` (mínimo, máximo) del CRT. Una regla da como
-    mucho un punto, el del TF mayor en que se cumple; en cuanto se cumple no se sigue con los TF menores."""
+    mucho un punto, el del TF mayor en que se cumple; en cuanto se cumple no se sigue con los TF menores. `cache` (`zone_cache`): zonas ya calculadas."""
     when = datetime.fromtimestamp(c2_start - ahead, timezone.utc)
     if not bias_cfg.enabled:
         return SetupBias(False, direction, bias_cfg.min_score, bias_cfg.enforce, [], when)
     lo, hi = min(common), max(common)
     first = c2_start - int(bias_cfg.lookback_days * 86400)
-    history = df[df["ts"] < c2_start]
+    history = df[df["ts"] < c2_start] if cache is None else None
     pending = [key for key, _ in RULES]
     found = []
     for tf in sorted(bias_cfg.tfs, key=lambda t: TF_MINUTES[t], reverse=True):               # del mayor al menor
         if not pending:
             break                                                                              # todas las reglas ya tienen su punto
-        ok = [z for z in zones(history, direction, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100)
+        every = cache[(direction, tf)] if cache is not None else zones(history, direction, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100)
+        ok = [z for z in every
               if z["rule"] in pending and first <= z["created"] <= c2_start and z["bottom"] <= hi and z["top"] >= lo]
         for key in list(pending):
             hits = sorted((z for z in ok if z["rule"] == key), key=lambda z: z["created"])

@@ -21,6 +21,21 @@ ENTRY_NAMES = {1: "vela siguiente al CISD", 4: "cierre del CISD"}
 DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
 
 
+def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule: engine.Rule, entry_model: int, points) -> dict:
+    """El `crt.signal` de un setup con su entrada (`engine.find_zone_setups` + `engine.entry_point`). La usa la skill y el script que rehace el forwardtest."""
+    sgn, entry, risk = st["sign"], ep["entry"], ep["risk"]
+    ny = datetime.fromtimestamp(int(ts[ep["start"]]) - ahead, timezone.utc)
+    close_ny = datetime.fromtimestamp(ep["end"] - ahead, timezone.utc)
+    return {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "price": sgn * entry,
+            "stop": sgn * st["stop"], "target": sgn * (entry - rule.rr * risk), "day": ny.date(),
+            "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
+            "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
+            "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY,
+            "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
+            "reason": f"CRT: sweep {st['dirección']} en C2; el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
+                      f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
+
+
 @register_skill("crt")
 class CrtSkill(Skill):
     title = "CRT"
@@ -168,16 +183,6 @@ class CrtSkill(Skill):
             if ep is None or ep["start"] < n - MAX_LATE_BARS:
                 continue
             self._seen.add(key)
-            sgn, entry, risk = st["sign"], ep["entry"], ep["risk"]
             points = self._points(full, cfg, st, ahead)
-            ny = datetime.fromtimestamp(int(ts[ep["start"]]) - ahead, timezone.utc)
-            close_ny = datetime.fromtimestamp(ep["end"] - ahead, timezone.utc)
-            return {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "price": sgn * entry,
-                    "stop": sgn * st["stop"], "target": sgn * (entry - self.rule.rr * risk), "day": ny.date(),
-                    "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
-                    "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
-                    "pattern": f"CRT ({ENTRY_NAMES[self.entry]})", "pattern_key": STRATEGY,
-                    "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
-                    "reason": f"CRT: sweep {st['dirección']} en C2; el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
-                              f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[self.entry]}». {points.summary()}"}
+            return build_signal(symbol, tf, st, ep, ts, ahead, self.rule, self.entry, points)
         return None
