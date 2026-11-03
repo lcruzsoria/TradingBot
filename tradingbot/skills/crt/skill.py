@@ -78,6 +78,10 @@ class CrtSkill(Skill):
         rr = s.get_float("RR", 2.0)
         if rr <= 0:
             raise ValueError("CRT_RR debe ser mayor que 0")
+        engine.MAX_SL_FOREX = s.get_float("MAX_SL_FOREX_PIPS", 25.0) * 1e-4        # stop máximo: más allá no se opera (0 = sin límite)
+        engine.MAX_SL_INDICES = s.get_float("MAX_SL_INDICES_POINTS", 125.0)
+        if engine.MAX_SL_FOREX < 0 or engine.MAX_SL_INDICES < 0:
+            raise ValueError("CRT_MAX_SL_FOREX_PIPS y CRT_MAX_SL_INDICES_POINTS no pueden ser negativos")
         # El breakeven (a 1R) no lo hace esta skill: lo lleva Setup (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT)
         self.rule = engine.Rule(rr=rr, be_at=0.0)
         env = self.services.env

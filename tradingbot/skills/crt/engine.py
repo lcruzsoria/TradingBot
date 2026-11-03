@@ -39,6 +39,15 @@ INDICES = Cfg(180, 18 * 3600, 18 * 3600)
 FOREX = Cfg(240, 17 * 3600, 17 * 3600, unit=1e-4)
 
 
+MAX_SL_INDICES = 125.0                                   # stop máximo (distancia de la entrada al extremo del sweep): en índices, puntos; mayor => no se opera (0 = sin límite)
+MAX_SL_FOREX = 25 * 1e-4                                 # en forex, 25 pips (la skill lo cambia con CRT_MAX_SL_INDICES_POINTS / CRT_MAX_SL_FOREX_PIPS)
+
+
+def max_sl(cfg: Cfg) -> float:
+    """El stop máximo del mercado de `cfg` (forex = H4, índices = H3), en unidades de precio; 0 = sin límite."""
+    return MAX_SL_FOREX if cfg.htf_min == 240 else MAX_SL_INDICES
+
+
 @dataclass(frozen=True)
 class Rule:
     close_inside: bool = False                           # informativo, con look-ahead: C2 cierra dentro del rango de C1
@@ -193,7 +202,8 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
 #      M5 vale M5 o M3, no M15) y no puede ser el mismo hueco. Se busca siempre la combinación del TF mayor posible: si hay varias, manda la del FVG de
 #      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
 #      El primer hueco en nacer es siempre el iFVG, y tiene que seguir activo (sin cerrarse del todo con mecha o cuerpo, ni invertirse) hasta que nace el FVG normal.
-#      CISD = el mínimo de la vela de desplazamiento que lo creó (la vela central del FVG de LTF).
+#      La zona común es el BPR: es la única zona de retest válida (tocar el FVG sin tocar el BPR no vale). El CISD queda siempre más allá del BPR.
+#      CISD = el extremo de la secuencia de velas que genera el iFVG (largo: el máximo de las velas bajistas seguidas que incluyen su vela central; corto: el mínimo).
 #   3. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (pullback): una vela posterior a la inversión la toca con la
 #      mecha sin cerrar al otro lado de ella. Si después del retest (o en él) una vela CIERRA con cuerpo al otro lado de la zona, esa pareja queda invalidada
 #      (hay que buscar otra, más abajo): tiene que haber un rebote y luego el cierre sobre el CISD.
@@ -266,7 +276,35 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
         bv = {k: view(v, sign) for k, v in big.items()}
         names = ("PDH", "máx") if sign > 0 else ("PDL", "mín")
         fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in mtf}                          # el iFVG (LTF) no puede ser de mayor TF que el FVG
-        lts, lo_, hi_, cl_ = L["ts"], L["low"], L["high"], L["close"]
+        lts, lo_, hi_, cl_, op_ = L["ts"], L["low"], L["high"], L["close"], L["open"]
+        cisd_cache: dict = {}
+        mv = {m: view(mtf[m], sign) for m in mtf}                                           # velas de cada TF de FVG: el CISD y su cierre se miran en el TF del BPR (el del FVG)
+
+        def cisd_of(k: int, m: int) -> tuple[int, float, np.ndarray]:
+            """CISD del iFVG cuya 3.ª vela (de LTF) es `k`, visto en las velas de `m` minutos (el TF donde se crea el BPR): el extremo de la secuencia de velas
+            (en el corto, alcistas) que genera el iFVG, que incluye a la vela que contiene su vela central; se amplía hacia atrás y hacia delante mientras las velas
+            sigan en la misma dirección (3, 4, 5 o más). Devuelve (índice de LTF de la primera vela de la secuencia, extremo, fines de vela de `m`)."""
+            if (k, m) not in cisd_cache:
+                V = mv[m]
+                i2 = int(np.searchsorted(V["ts"], lts[k - 1], "right")) - 1
+                i3 = int(np.searchsorted(V["ts"], lts[k], "right")) - 1
+                a_, b_ = max(i2, 0), max(i2, 0)
+                while a_ - 1 >= 0 and V["close"][a_ - 1] > V["open"][a_ - 1] and V["ts"][a_] - V["ts"][a_ - 1] <= m * 60 + 3600:
+                    a_ -= 1
+                while b_ + 1 < len(V["ts"]) and V["close"][b_ + 1] > V["open"][b_ + 1] and V["ts"][b_ + 1] - V["ts"][b_] <= m * 60 + 3600:
+                    b_ += 1                                                                  # la secuencia puede ser de 3, 4, 5 o más velas del mismo color
+                cisd_cache[(k, m)] = (int(np.searchsorted(lts, V["ts"][a_])), float(V["low"][a_:b_ + 1].min()))
+            return cisd_cache[(k, m)]
+
+        def closes_beyond_cisd(p: tuple, j: int, after: int) -> bool:
+            """La vela de LTF `j` cierra una vela del TF del BPR (la del FVG) que empezó tras la de LTF `after` y cierra con cuerpo más allá del CISD de la pareja `p`."""
+            m, V = p[1][0], mv[p[1][0]]
+            end = int(lts[j]) + ltf_min * 60
+            q = int(np.searchsorted(V["ts"], end - m * 60))                                 # la vela de m minutos que acaba en `end`, si hay una
+            if q >= len(V["ts"]) or int(V["ts"][q]) != end - m * 60 or int(V["ts"][q]) < int(lts[after]) + ltf_min * 60:
+                return False
+            return float(V["close"][q]) < cisd_of(p[0], m)[1]
+
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
             if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60:
@@ -302,7 +340,7 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     if k + 1 < f0 and lo_[k + 1:f0].min() <= hi_[k - 2]:        # y tiene que seguir activo (sin cerrarse del todo, con mecha o cuerpo) hasta que se forma el FVG
                         continue
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
-                    if cb < ct:
+                    if cb < ct and cisd_of(k, m)[1] < cb:                          # BPR (zona común) no vacío y con el CISD más allá de él (largo: un máximo por encima del BPR)
                         pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
             if not pairs:
                 continue
@@ -318,13 +356,13 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     break
                 if hi_[j] > hx:
                     hx, ih = float(hi_[j]), j
-                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and cl_[j] < lo_[p[0] - 1]]     # tocada antes y cierra bajo el CISD
+                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and closes_beyond_cisd(p, j, touched[pid(p)])]     # tocada antes y una vela del TF del BPR cierra bajo el CISD
                 if done:
                     k, z, common = max(done, key=lambda p: (p[1][0], p[0], p[1][3]))              # la del FVG de mayor TF
-                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": float(lo_[k - 1]),
+                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": cisd_of(k, z[0])[1],
                             "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
                             "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
-                            "cisd": (k - 1, float(lo_[k - 1])), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
+                            "cisd": cisd_of(k, z[0])[:2], "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
                     break
                 for k, z, common in pairs:
                     key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
@@ -348,7 +386,7 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                 k, z, common = max(live, key=lambda p: (p[1][0], p[0], p[1][3]))
                 funnel["setup OK sin entrada"] += 1
                 setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "zones": [z],
-                                        "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": (k - 1, float(lo_[k - 1])),
+                                        "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": cisd_of(k, z[0])[:2],
                                         "inv": inverted[k], "end": j if invalidated else b - 1})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
@@ -432,6 +470,9 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
             return None
     risk = hx - entry
     if risk <= 0:
+        return None
+    limit_sl = max_sl(cfg)
+    if limit_sl and risk > limit_sl + 1e-9:               # el stop es demasiado grande (forex > 25 pips, índices > 125 puntos): la entrada se cancela
         return None
     return {"entry": float(entry), "start": int(start), "fill": fill, "risk": float(risk), "end": int(end)}
 

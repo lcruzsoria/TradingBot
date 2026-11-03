@@ -31,29 +31,24 @@ Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.*
    - **El CISD y la entrada son del TF del iFVG:** si el FVG y el iFVG se detectan en 15 min, el cierre sobre el CISD se mira en velas de 15 min y la entrada es a la apertura de la siguiente vela de 15 min; con un iFVG de 5 min, en velas de 5 min. Cada combinación se evalúa con las velas de su TF.
    - Se busca siempre la combinación del **TF mayor posible**, marcado por el FVG: si hay varias, manda la del FVG de mayor TF (M15 antes que M5). Si dos combinaciones dan entrada en la misma C2 y lado, vale la primera que cierra sobre su CISD.
    - Ambos nacen dentro de C2 (su primera vela empieza en C2 o después).
-3. **CISD.** Es el extremo de la vela que creó el iFVG: la vela central de sus tres velas (largo: su **máximo**; corto: su mínimo).
+3. **CISD.** Es el extremo de la **secuencia de velas del mismo color que genera el iFVG** (3 velas, pero pueden ser 4, 5 o más): en un largo, el **máximo** de las velas bajistas seguidas; en un corto, el mínimo. Se mide en el **TF donde se crea el BPR** (el del FVG): con un FVG M15, la secuencia y el cierre sobre el CISD son de velas de 15 min. El CISD queda siempre más allá del BPR (largo: un máximo por encima de él).
 4. **Inversión.** El iFVG se invierte cuando una vela cierra al otro lado de su base (largo: por encima de su techo).
-5. **Pullback a la zona común.** Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (largo: **de arriba abajo**): una vela posterior a la inversión la toca con la mecha sin cerrar al otro lado de ella.
+5. **Pullback al BPR.** La zona común de los dos huecos se llama **BPR** (balanced price range) y es la **única zona de retest válida** tras crearse el FVG: tocar el FVG sin tocar el BPR no vale. Ambos huecos pueden ser más grandes que el BPR. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (largo: **de arriba abajo**): una vela posterior a la inversión la toca con la mecha sin cerrar al otro lado de ella.
    - **Un retest que cierra con cuerpo al otro lado de la zona invalida esa pareja:** si tras el retest (o en él) una vela cierra con el cuerpo por debajo de la zona común (en un largo), esa pareja iFVG + FVG muere. Tiene que haber un **rebote** y a continuación el cierre sobre el CISD; si no, se busca otra pareja, normalmente un doble FVG más abajo. Cada pareja iFVG + FVG lleva su propio estado (inversión, retest e invalidación).
-6. **Entrada.** Tras el pullback, la primera vela que **cierra con el cuerpo más allá del CISD** (largo: por encima) da la señal. Se entra a la **apertura de la vela siguiente** (`CRT_ENTRY=1`; con `4`, al cierre de esa vela). Antes de que cierre C2.
+6. **Entrada.** Tras el pullback, la primera vela **del TF del BPR** que **cierra con el cuerpo más allá del CISD** (largo: por encima; una mecha que lo supera no cuenta) da la señal. **Sin cierre sobre el CISD no hay entrada**: ese es el filtro que evita muchos stops. Se entra a la **apertura de la vela siguiente** (`CRT_ENTRY=1`; con `4`, al cierre de esa vela). Antes de que cierre C2.
 7. **«Setup OK sin Entrada».** Si la zona común existe y el iFVG se invierte pero el precio **sigue sin volver a ella** (llega al extremo opuesto de C1 o acaba C2), no hay entrada: el gráfico marca el CRT como «Setup OK sin Entrada», con el FVG, el iFVG, la zona común y el CISD. Es solo una anotación.
 
 ### Ejemplo real: la pareja invalidada y la de más abajo (NAS100)
 NAS100.s, 03/11/2026, C2 de las 00:00 (H3), largo: **no es setup**. El FVG de M5 27966.4-27969.9 (01:10-01:20 NY) lo mitiga la mecha de las 01:25 NY, mucho antes de que nazca el iFVG de 27951.7-27981.9 (02:00-02:10 NY), así que esa pareja no vale (antes se operaba entrando a las 02:50 en 28024.9). Las velas están en `tests/crt_nas100_20261103.py`.
 
 ### Ejemplo real
-EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:
-- Sweep: el mínimo de C1 (1.11808) cae a las 21:15 y el low de C2 llega a 1.1177.
-- FVG M15 bajista de las velas 21:00-21:30: 1.11814-1.11833. iFVG M5 de las velas 21:10-21:20: 1.11815-1.11834. Zona común: **1.11815-1.11833**.
-- CISD: 1.11841 (máximo de la vela de las 21:15).
-- Inversión: a las 21:55 una vela cierra en 1.1185, sobre 1.11834.
-- Pullback: a las 22:10 el mínimo (1.11825) entra en la zona por arriba.
-- Cierre sobre el CISD: la vela de las 22:25 cierra en 1.11843.
-- **Entrada a las 22:30 en 1.11843**, stop 1.1177 (7,3 pips), objetivo 2R en 1.11989.
+EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo: sweep del mínimo de C1 (1.11808) y mínimo de C2 en 1.1177; FVG M15 1.11814-1.11833 e iFVG M5 1.11815-1.11834 (BPR 1.11815-1.11833); inversión a las 21:55; pullback al BPR a las 22:10 (mínimo 1.11825); el CISD (1.11891, el máximo de la secuencia bajista que genera el iFVG) se supera con cuerpo en la vela M15 de 22:45, que cierra a las 23:00. **Entrada a las 23:00 en 1.11902**, stop 1.1177 (13,2 pips, dentro del límite de 25), objetivo 2R en 1.12166.
 
 `tests/crt_eurusd_20261102.py` trae las velas y los tests comprueban cada paso.
 
 ## 4. Gestión
+
+- **Stop máximo:** si la distancia de la entrada al stop supera **25 pips en forex o 125 puntos en índices** la entrada se cancela (`CRT_MAX_SL_FOREX_PIPS`, `CRT_MAX_SL_INDICES_POINTS`; 0 = sin límite).
 
 - **Stop:** en el extremo del sweep hasta ese momento (largo: el mínimo de C2; corto: el máximo). Sin colchón.
 - **Objetivo:** `CRT_RR` veces el riesgo (2R).

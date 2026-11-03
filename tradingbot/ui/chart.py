@@ -927,11 +927,11 @@ class ChartView(pg.PlotWidget):
                                f"{fmt_price(data['pos']['target'])}") if data.get("pos") else "")
                     + (crt_row(f"iFVG M{data.get('ltf', '-')}", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
                        if data.get("ifvg") else "")
-                    + (crt_row("Zona común", f"{fmt_price(data['common']['bottom'])} – {fmt_price(data['common']['top'])}")
+                    + (crt_row("BPR (zona común)", f"{fmt_price(data['common']['bottom'])} – {fmt_price(data['common']['top'])}")
                        if data.get("common") else "")
                     + (crt_row("CISD", fmt_price(data['cisd']['level'])) if data.get("cisd") else "")
-                    + (crt_row("Retest de la zona", f"{data['touch'].get('when', '')} NY · {fmt_price(data['touch']['price'])}")
-                       if data.get("touch") else (crt_row("Retest de la zona", "sin retest") if data.get("common") else "")) + '</table>')
+                    + (crt_row("Retest del BPR", f"{data['touch'].get('when', '')} NY · {fmt_price(data['touch']['price'])}")
+                       if data.get("touch") else (crt_row("Retest del BPR", "sin retest") if data.get("common") else "")) + '</table>')
             others = data.get("others") or []
             verdict = ''
             if others:

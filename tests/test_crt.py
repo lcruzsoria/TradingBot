@@ -94,7 +94,9 @@ def test_regla_1_se_descarta_si_el_extremo_de_c1_da_menos_de_2r_y_se_anota_el_r_
     assert reach == pytest.approx((103.1 - L["low"][ep["start"]:].min()) / 5.4) and reach > 2.0   # el escenario baja a 92.3: 2 R, no 0.57
 
 
-def test_si_ya_hay_una_operacion_abierta_no_se_abre_otra_ni_en_sentido_contrario():
+def test_si_ya_hay_una_operacion_abierta_no_se_abre_otra_ni_en_sentido_contrario(monkeypatch):
+    monkeypatch.setattr(engine, "MAX_SL_FOREX", 0.0)                                  # velas sintéticas de precio ~100: sin límite de stop
+    monkeypatch.setattr(engine, "MAX_SL_INDICES", 0.0)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     import backtest_crt as bt
     bt.configure("indices")
@@ -226,8 +228,8 @@ def loaded(bus, df, symbol="NAS100.s", tf="5m"):
 
 
 def until_entry(df: pd.DataFrame, extra: int = 1) -> pd.DataFrame:
-    """Las velas hasta la de la entrada del EURUSD (22:30 NY del 02/11, la última puede estar formándose)."""
-    return df[df["ts"] <= pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD + (extra - 1) * 300].reset_index(drop=True)
+    """Las velas hasta la de la entrada del EURUSD (23:00 NY del 02/11, la última puede estar formándose)."""
+    return df[df["ts"] <= pd.Timestamp("2026-11-02 23:00").value // 10**9 + AHEAD + (extra - 1) * 300].reset_index(drop=True)
 
 
 def test_la_zona_comun_da_el_largo_del_eurusd_del_02_11():
@@ -238,11 +240,11 @@ def test_la_zona_comun_da_el_largo_del_eurusd_del_02_11():
     assert st["dirección"] == "long" and st["mtf"] == "M15"
     assert ny(df["ts"][st["inv"]]) == "2026-11-02 21:55"                                # el iFVG se invierte: la vela cierra sobre su techo (1.11834)
     assert ny(df["ts"][st["jt"]]) == "2026-11-02 22:10"                                 # el pullback a la zona común, de arriba abajo
-    assert ny(df["ts"][st["jc"]]) == "2026-11-02 22:25"                                 # la primera vela que cierra con cuerpo sobre el CISD tras el toque
-    assert (-st["level"], -st["stop"]) == (pytest.approx(1.11841), pytest.approx(1.1177))
+    assert ny(df["ts"][st["jc"]]) == "2026-11-02 22:55"                                 # la primera vela de M15 (TF del BPR) que cierra con cuerpo sobre el CISD (el máximo de la secuencia bajista que crea el iFVG) tras el toque
+    assert (-st["level"], -st["stop"]) == (pytest.approx(1.11891), pytest.approx(1.1177))
     assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([1.11815, 1.11833])     # zona común: FVG de M15 1.11814-1.11833 y iFVG de M5 1.11815-1.11834
     ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
-    assert ny(df["ts"][ep["start"]]) == "2026-11-02 22:30" and -ep["entry"] == pytest.approx(1.11843)
+    assert ny(df["ts"][ep["start"]]) == "2026-11-02 23:00" and -ep["entry"] == pytest.approx(1.11902)
 
 
 def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_manda_el_de_mayor_tf(monkeypatch):
@@ -273,7 +275,7 @@ def test_las_combinaciones_de_tf_se_miran_con_las_velas_del_tf_del_ifvg():
     setups, _ = engine.find_multi_setups(series, cfg)
     assert {st["ltf"] for st in setups} <= {5, 15}
     five = [st for st in setups if st["ltf"] == 5 and ny(st["C2"]) == "2026-11-02 21:00"]
-    assert five and ny(df["ts"][five[0]["jc"]]) == "2026-11-02 22:25"                  # la combinación de siempre (FVG M15 + iFVG M5) sigue dando la misma entrada
+    assert five and ny(df["ts"][five[0]["jc"]]) == "2026-11-02 22:55"                  # la combinación de siempre (FVG M15 + iFVG M5) sigue dando la misma entrada
     ordered = [st["t_cisd"] for st in setups]
     assert ordered == sorted(ordered)                                                  # salen en orden de la hora del cierre sobre el CISD
     for st in setups:                                                                  # TF del FVG >= TF del iFVG
@@ -303,7 +305,7 @@ def test_la_skill_da_la_senal_y_llega_simulada_a_setup():
     assert len(out["signal"]) == 1
     s = out["signal"][0].payload
     assert (s["symbol"], s["direction"], s["strategy"]) == ("EURUSD", "long", "crt")
-    assert s["price"] == pytest.approx(1.11843) and s["stop"] == pytest.approx(1.1177) and s["target"] == pytest.approx(1.11843 + 2 * 0.00073)
+    assert s["price"] == pytest.approx(1.11902) and s["stop"] == pytest.approx(1.1177) and s["target"] == pytest.approx(1.11902 + 2 * 0.00132)
     assert s["close_at"].startswith("17:00 NY")
     o = out["executed"][0].payload["order"]
     assert o.pattern_key == "crt" and o.tbr_zone == "" and o.direction == "long" and "CRT" in o.pattern
@@ -337,7 +339,7 @@ def test_ignora_otros_mercados_y_timeframes_distintos():
 def test_no_da_senal_si_la_entrada_es_antigua():
     manager, bus, out = run()
     df = eurusd()
-    loaded(bus, df[df["ts"] <= pd.Timestamp("2026-11-02 23:00").value // 10**9 + AHEAD].reset_index(drop=True), "EURUSD")   # ya pasó hace una hora
+    loaded(bus, df[df["ts"] <= pd.Timestamp("2026-11-03 00:05").value // 10**9 + AHEAD].reset_index(drop=True), "EURUSD")   # ya pasó hace una hora
     manager.stop()
     assert out["signal"] == []
 
@@ -405,3 +407,15 @@ def test_los_niveles_que_c2_puede_barrer_son_el_pdh_los_swings_de_h4_y_las_velas
     got = dict((n.split(" ")[0] + " " + n.split(" ")[1], p) for p, n in engine.sweep_levels(s2, hv, dv, tv, sv, ahead, ("PDH", "máx")))
     assert got["PDH día"] == 101 and got["swing H4"] == 120                      # el swing de 110 ya lo barrió una vela HTF: no está intacto
     assert any(n.startswith("máx H12") for _, n in engine.sweep_levels(s2, hv, dv, tv, sv, ahead, ("PDH", "máx")))
+
+
+def test_el_stop_maximo_cancela_la_entrada(monkeypatch):
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    st = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"][0]
+    view = engine.view(df, -1)
+    assert engine.entry_point(view, st, 1, 5, RULE, cfg)["risk"] == pytest.approx(0.00132)         # 13,2 pips: dentro del límite de 25
+    monkeypatch.setattr(engine, "MAX_SL_FOREX", 12 * 1e-4)                                         # con un límite de 12 pips se cancela
+    assert engine.entry_point(view, st, 1, 5, RULE, cfg) is None
+    monkeypatch.setattr(engine, "MAX_SL_FOREX", 0.0)                                               # 0 = sin límite
+    assert engine.entry_point(view, st, 1, 5, RULE, cfg) is not None

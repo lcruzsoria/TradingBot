@@ -2,16 +2,16 @@
 
 `scripts/backtest_crt_zona.py`, velas M5 de PUPrime (dic. 2023 - oct. 2026, 200 000 velas por mercado), con el mismo motor que la skill y la regla final (iFVG invertido, pullback a la zona común, cierre con cuerpo sobre el CISD, FVG de M15 o M5 con iFVG de TF igual o menor, manda el de mayor TF). Una operación a la vez por mercado, entrada a la apertura de la vela siguiente, stop en el extremo del sweep. Neto = bruto menos un spread supuesto (índices 1,5 pb, forex 0,7 pb): los parquet no traen el spread.
 
-**Actualización (03/11/2026, tarde): el primer hueco es siempre el iFVG y sigue activo.** Regla final: el primer hueco en nacer es el iFVG (el que se invierte y da el CISD); tiene que seguir activo (sin cerrarse del todo con mecha o cuerpo, ni invertirse) hasta que se forma el FVG normal, que nace después. El retest que cierra con cuerpo al otro lado de la zona invalida la pareja. Backtest rehecho con velas M5 y M15 de PUPrime recién descargadas (ene. 2024 - 03/11/2026) y el mismo motor que el bot. **Las tablas de abajo son de reglas anteriores y están desfasadas.**
+**Actualización (03/11/2026, noche): CISD de la secuencia, en el TF del BPR, y stop máximo.** Reglas nuevas del usuario: el CISD es el extremo de la secuencia de velas del mismo color que genera el iFVG, se mide en el TF del BPR (el del FVG) y exige un **cierre con cuerpo** (la mecha no vale); y el stop máximo es de 25 pips en forex y 125 puntos en índices. Backtest rehecho con velas M5 y M15 de PUPrime recién descargadas (ene. 2024 - 03/11/2026) y el mismo motor que el bot. **Las tablas de abajo son de reglas anteriores y están desfasadas.**
 
-| Variante (PUPrime, regla final) | n | R bruto | R neto | IC95 neto |
+| Variante (PUPrime, regla actual) | n | R bruto | R neto | IC95 neto |
 |---|---|---|---|---|
-| 2R, BE a +1R (la del bot) | 2 201 | +0,014 | -0,074 | -0,12..-0,03 |
-| 2R, sin BE | 2 181 | +0,007 | -0,081 | -0,13..-0,03 |
-| 1R, BE a +1R | 2 244 | +0,025 | -0,063 | -0,10..-0,02 |
-| 3R, BE a +1R | 2 169 | +0,026 | -0,062 | -0,12..-0,01 |
+| 2R, BE a +1R (la del bot) | 374 | -0,055 | -0,127 | -0,24..-0,02 |
+| 2R, sin BE | 372 | -0,023 | -0,096 | -0,22..+0,03 |
+| 1R, BE a +1R | 376 | +0,005 | -0,067 | -0,16..+0,03 |
+| 3R, BE a +1R | 373 | -0,068 | -0,140 | -0,26..-0,02 |
 
-Por mercado (2R, BE +1R), R neto: NAS100 -0,107, SP500 -0,036, DJ30 -0,034, EURUSD -0,115, GBPUSD -0,064; largos -0,064 y cortos -0,084. Con las mismas velas la primera regla daba 3 366 operaciones, +0,049 bruto y -0,045 neto, y la regla anterior a esta 2 355 y -0,075: **cada regla quita operaciones y el resultado no mejora**. Por combinación: FVG M15 + iFVG M5 2 186 operaciones (-0,076 R neto), FVG M5 + iFVG M5 solo 16 y FVG M15 + iFVG M15 1 (el FVG de M5 casi nunca nace después del iFVG de M5 sin cerrarlo). **Sigue sin haber ventaja neta.**
+Por mercado (2R, BE +1R), R neto: NAS100 -0,307 (59 operaciones), SP500 -0,071 (63), DJ30 +0,020 (50), EURUSD -0,093 (114), GBPUSD -0,175 (88). Las reglas anteriores dejaban 2 201 operaciones y -0,074 R neto: el cierre con cuerpo sobre el CISD de la secuencia y el stop máximo quitan el 83 % de las entradas y **el resultado empeora** (bruto de +0,014 a -0,055 R), aunque con tan pocas operaciones el intervalo es muy ancho. **No hay ventaja neta.**
 
 | Variante (PUPrime) | n | R bruto | R neto | IC95 neto |
 |---|---|---|---|---|
