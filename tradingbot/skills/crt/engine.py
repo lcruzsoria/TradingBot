@@ -191,6 +191,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
 #      dentro de C2, que comparten una zona (se solapan): la zona común. El iFVG tiene que ser de un TF igual o menor que el del FVG (con un FVG de
 #      M5 vale M5 o M3, no M15) y no puede ser el mismo hueco. Se busca siempre la combinación del TF mayor posible: si hay varias, manda la del FVG de
 #      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
+#      El FVG normal tiene que estar sin mitigar cuando nace el iFVG: si una mecha ya entró en su hueco antes, no vale.
 #      CISD = el mínimo de la vela de desplazamiento que lo creó (la vela central del FVG de LTF).
 #   3. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (pullback): una vela posterior a la inversión la toca con la
 #      mecha sin cerrar al otro lado de ella. Si después del retest (o en él) una vela CIERRA con cuerpo al otro lado de la zona, esa pareja queda invalidada
@@ -245,6 +246,9 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             for k in ks_all:
                 for m, zb, zt, formed in zones:
                     if m == ltf_min and formed == int(lts[k]) + m * 60:         # el mismo hueco: el FVG normal y el iFVG tienen que ser dos distintos
+                        continue
+                    f0 = int(np.searchsorted(lts, formed))
+                    if f0 <= k - 3 and lo_[f0:k - 2].min() < zt:                # una mecha ya entró en el FVG antes de nacer el iFVG: está mitigado y no vale
                         continue
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
                     if cb < ct:

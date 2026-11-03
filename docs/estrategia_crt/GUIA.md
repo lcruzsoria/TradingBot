@@ -25,7 +25,7 @@ Se describe el largo (barrido de un mínimo); el corto es el espejo exacto. En e
 Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.**
 
 1. **Sweep.** C2 supera con una mecha el mínimo de C1 (largo) o su máximo (corto). El primer extremo que toma C2 manda: si ya había tomado el otro, el sweep es el del otro lado. Si el precio llega al extremo opuesto de C1 sin que el setup se complete, queda **invalidado**.
-2. **Doble FVG y zona común.** Dentro de C2 hay un FVG «normal» (M15 o M5) y un iFVG de 15 o 5 min que **se solapan**; el hueco que comparten es la **zona común**.
+2. **Doble FVG y zona común.** Dentro de C2 hay un FVG «normal» (M15 o M5) y un iFVG de 15 o 5 min que **se solapan**; el hueco que comparten es la **zona común**. El FVG normal tiene que estar **sin mitigar** cuando nace el iFVG: si una mecha ya entró en su hueco antes de que se formen las tres velas del iFVG, ese FVG no vale.
    - **FVG e iFVG pueden ser de 15 o 5 min**, con **TF del FVG ≥ TF del iFVG**: FVG M15 con iFVG de M15 o M5; FVG M5 con iFVG de M5. No pueden ser el mismo hueco. Las combinaciones con 3 min se probaron y se quitaron: dan muchos setups y salen peor (`RESULTADOS_zona.md`).
    - **El CISD y la entrada son del TF del iFVG:** si el FVG y el iFVG se detectan en 15 min, el cierre sobre el CISD se mira en velas de 15 min y la entrada es a la apertura de la siguiente vela de 15 min; con un iFVG de 5 min, en velas de 5 min. Cada combinación se evalúa con las velas de su TF.
    - Se busca siempre la combinación del **TF mayor posible**, marcado por el FVG: si hay varias, manda la del FVG de mayor TF (M15 antes que M5). Si dos combinaciones dan entrada en la misma C2 y lado, vale la primera que cierra sobre su CISD.
@@ -38,7 +38,7 @@ Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.*
 7. **«Setup OK sin Entrada».** Si la zona común existe y el iFVG se invierte pero el precio **sigue sin volver a ella** (llega al extremo opuesto de C1 o acaba C2), no hay entrada: el gráfico marca el CRT como «Setup OK sin Entrada», con el FVG, el iFVG, la zona común y el CISD. Es solo una anotación.
 
 ### Ejemplo real: la pareja invalidada y la de más abajo (NAS100)
-NAS100.s, 03/11/2026, C2 de las 00:00 (H3), largo. El primer doble FVG (iFVG 27989.7-28007.7 + FVG 27979.2-27998.2, zona común 27989.7-27998.2) se retestea a las 00:50, pero a las 00:55 una vela cierra con cuerpo por debajo de la zona: **invalidado**. El precio cae a 27926.65 y deja un segundo doble FVG más abajo: FVG 27966.4-27969.9 + iFVG 27951.7-27981.9 (se invierte a las 02:25), CISD 27990.9, retest a las 02:35 (toca y rebota), cierre a las 02:45 sobre el CISD: **entrada a las 02:50 en 28024.9**, stop 27926.65, objetivo 28221.4. Las velas están en `tests/crt_nas100_20261103.py`.
+NAS100.s, 03/11/2026, C2 de las 00:00 (H3), largo: **no es setup**. El FVG de M5 27966.4-27969.9 (01:10-01:20 NY) lo mitiga la mecha de las 01:25 NY, mucho antes de que nazca el iFVG de 27951.7-27981.9 (02:00-02:10 NY), así que esa pareja no vale (antes se operaba entrando a las 02:50 en 28024.9). Las velas están en `tests/crt_nas100_20261103.py`.
 
 ### Ejemplo real
 EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:

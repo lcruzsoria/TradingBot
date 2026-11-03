@@ -256,21 +256,12 @@ def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_manda_el_de_mayor_tf(mon
         assert x["mtf"] == "M5" and (x["ifvg"][0], x["ifvg"][1]) != (x["zones"][0][1], x["zones"][0][2])
 
 
-def test_un_retest_que_cierra_con_cuerpo_bajo_la_zona_invalida_la_pareja_y_vale_el_doble_fvg_de_mas_abajo():
+def test_un_fvg_que_una_mecha_ya_mitigo_antes_de_nacer_el_ifvg_no_vale():
     df = nas100()
     cfg = engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)
     setups, _ = engine.find_zone_setups(df, df, 5, cfg)
-    mine = [x for x in setups if ny(x["C2"]) == "2026-11-03 00:00"]
-    assert len(mine) == 1                                                             # el de las 01:40 (con la 1.ª pareja, invalidada a las 00:55) ya no existe
-    st = mine[0]
-    assert st["dirección"] == "long" and st["mtf"] == "M5"
-    assert ny(df["ts"][st["inv"]]) == "2026-11-03 02:25"                              # el iFVG de abajo (27951.7-27981.9) se invierte
-    assert ny(df["ts"][st["jt"]]) == "2026-11-03 02:35"                               # retest de la zona común 27966.4-27969.9: toca y rebota
-    assert ny(df["ts"][st["jc"]]) == "2026-11-03 02:45"                               # y cierra sobre el CISD
-    assert (-st["level"], -st["stop"]) == (pytest.approx(27990.9), pytest.approx(27926.65))
-    assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([27966.4, 27969.9])
-    ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
-    assert ny(df["ts"][ep["start"]]) == "2026-11-03 02:50" and -ep["entry"] == pytest.approx(28024.9)
+    # el FVG de M5 27966.4-27969.9 (01:10-01:20 NY) lo mitiga la mecha de las 01:25 NY, antes de nacer el iFVG de 27951.7-27981.9 (02:00-02:10 NY): sin pareja ni setup
+    assert [x for x in setups if ny(x["C2"]) == "2026-11-03 00:00"] == []
 
 
 def test_las_combinaciones_de_tf_se_miran_con_las_velas_del_tf_del_ifvg():
