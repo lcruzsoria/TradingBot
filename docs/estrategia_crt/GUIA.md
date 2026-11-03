@@ -61,6 +61,24 @@ EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:
 - **Gráfico (botón CRT):** dibuja, además de los CRT del backtest antiguo, **la operación activa de Cortex con todos sus niveles** (`crt/chart.py: live_marks`): el FVG, el iFVG (con el TF), la zona común (recuadro), el CISD, el punto del pullback y la posición (entrada, stop y objetivo); los **setups válidos que el bot no operó** (`signal_marks`), con el resultado que habrían dado sobre las velas cargadas (TP, SL, BE o abierta), y los **«Setup OK sin Entrada»** (`no_entry_marks`). Los setups se calculan una vez con las velas de la skill (M5 o M3) y se dibujan igual en cualquier timeframe del gráfico (en 15m o 1h tienen el mismo estado que en 5m). La etiqueta discreta solo lleva el resultado; los TF del FVG y del iFVG, sus zonas, la zona común, el retest y el CISD salen al desplegarla (ficha). El setup no se guarda con la orden: se vuelve a buscar con el motor sobre las velas cargadas (solo si el gráfico está en el TF de la orden).
 - **Backtest:** `scripts/backtest_crt_zona.py` (velas M5 de `analisis/m5`), con el mismo motor.
 
+## 5 bis. Sesgo del perfil CRT (deshabilitado por ahora)
+
+Sesgo propio del perfil, independiente del de los demás (el perfil CRT no lleva la skill Bias): puntúa cada setup con las **zonas de reversión en HTF** (1h, 4h o 1d) que lo respaldan. Va en el bloque `CRT_BIAS_*` de `tradingbot.env` y la tarjeta de sesgo enseña el del último setup.
+
+- **Dirección:** soporte para los largos y resistencia para los cortos.
+- **Cada zona cuenta un punto.** Con **puntos ≥ `CRT_BIAS_MIN_SCORE` (1)** el setup es GO; si no, NO GO.
+- **Apagado (`CRT_BIAS_ENABLED=false`, por defecto):** el sesgo es 0 y el setup es siempre GO.
+- **Vigencia:** la zona tiene que haberse creado **antes de la C2** del setup (la vela del patrón doble FVG + CISD) y como mucho `CRT_BIAS_LOOKBACK_DAYS` (10) días antes de su hora de creación.
+- **«Dentro de la zona»:** la zona común del CRT (FVG ∩ iFVG) se solapa con la zona HTF.
+
+| Zona | Definición (largo; el corto es el espejo) |
+|---|---|
+| **FVG en HTF** | Hueco entre el máximo de la vela 1 y el mínimo de la vela 3, a la izquierda del precio |
+| **Rejection block** | La mecha de un swing low (su mínimo es el más bajo de `CRT_BIAS_SWING_WIDTH`=1 vela a cada lado) que ocupa más del `CRT_BIAS_RB_MIN_WICK_PCT`=50 % de su vela: del mínimo al borde inferior del cuerpo |
+| **Order block** | El rango completo de la última vela bajista antes de una vela alcista de impulso que deja un FVG (el máximo de la bajista queda bajo el mínimo de la vela posterior). **Sin FVG no hay OB** |
+
+Parámetros: `CRT_BIAS_ENABLED`, `CRT_BIAS_LOOKBACK_DAYS`, `CRT_BIAS_MIN_SCORE`, `CRT_BIAS_TFS`, `CRT_BIAS_SWING_WIDTH`, `CRT_BIAS_RB_MIN_WICK_PCT`. Código: `tradingbot/skills/crt/bias.py`; la señal `crt.signal` lleva `bias_points` y Cortex decide con ellos.
+
 ## 6. Definiciones operativas
 
 | Concepto | Definición |

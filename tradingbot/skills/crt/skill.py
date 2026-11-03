@@ -10,7 +10,8 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 from ..calendario.skill import matches
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
-from . import engine
+from ..bias.models import Bias, BiasResult
+from . import bias as crt_bias, engine
 
 STRATEGY = "crt"
 LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
@@ -31,13 +32,15 @@ class CrtSkill(Skill):
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
                    "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
-    publishes = ("crt.signal",)
+    publishes = ("crt.signal", "bias.updated")
     slot = "aux2"
 
     def on_start(self) -> None:
         self.error = "Configuración CRT no válida"
         self._offset: int | None = None
         self._seen: set = set()
+        self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
+        self._card: dict[str, tuple] = {}                # símbolo -> lo último que se publicó a la tarjeta (solo se publica si cambia)
         self.marks: dict[str, dict] = {}                 # símbolo -> {ts, marks, key}: los setups de los últimos días, con las velas de la skill (M5 o M3)
         app = (self.services.app_cfg or {}).get("app", {})
         self.active = str(app.get("strategy") or "") == STRATEGY
@@ -62,6 +65,7 @@ class CrtSkill(Skill):
         self.rule = engine.Rule(rr=rr, be_at=0.0)
         env = self.services.env
         self.indices = env.get_list("LEVELS_US_INDICES", list(DEFAULT_US_INDICES)) if env is not None else DEFAULT_US_INDICES
+        self.bias_cfg = crt_bias.load_cfg(s)                                           # sesgo propio del perfil CRT (CRT_BIAS_*)
 
     def handle(self, event: Event) -> None:
         if self.error:
@@ -85,11 +89,39 @@ class CrtSkill(Skill):
             return
         self._remember_marks(symbol, tf, df)
         signal = self.scan(symbol, tf, df)
+        if not background:
+            self._publish_bias(symbol, tf)
         if signal is not None:
             self.publish("crt.signal", signal)
             caption(f"señal {symbol}")
         else:
             caption(f"{symbol}: buscando sweep + zona común FVG/iFVG + CISD")
+
+    def _points(self, full, cfg: engine.Cfg, st: dict, ahead: int) -> "crt_bias.SetupBias":
+        """Los puntos del sesgo CRT de un setup (la zona común del CRT contra las zonas de reversión HTF a favor, de los 10 días anteriores a su C2)."""
+        sgn = st["sign"]
+        common = (sgn * st["z_bottom"], sgn * st["z_top"])
+        return crt_bias.evaluate(full, st["dirección"], int(st["C2"]), common, cfg, self.bias_cfg, ahead)
+
+    def _publish_bias(self, symbol: str, tf: str) -> None:
+        """La tarjeta del sesgo enseña el del último setup reciente del mercado del gráfico (o «sin setup»); solo se publica si cambia."""
+        latest = self._latest.get(symbol)
+        if latest is None:
+            return
+        full, cfg, st, ahead = latest
+        if st is None:
+            key = (None, self.bias_cfg.enabled)
+            result = BiasResult(Bias.NO_BIAS, None, (), {}, "Sin setup CRT en las últimas 36 h" + ("" if self.bias_cfg.enabled else " · sesgo CRT deshabilitado (sesgo 0, todo GO)"),
+                                0.0, max(self.bias_cfg.min_score, 1e-9))
+        else:
+            points = self._points(full, cfg, st, ahead)
+            key = (int(st["C2"]), st["dirección"], self.bias_cfg.enabled, points.score)
+            result = points.result()
+        if self._card.get(symbol) == key:
+            return
+        self._card[symbol] = key
+        self.set_caption(f"{symbol}: {result.bias.value} ({result.score:+g})")
+        self.publish("bias.updated", {"result": result, "symbol": symbol, "timeframe": tf, "reason": "setup CRT"})
 
     def _remember_marks(self, symbol: str, tf: str, df) -> None:
         """Calcula UNA vez los setups de zona común de los últimos días (los que dieron entrada, con su resultado simulado, y los «sin entrada») para que
@@ -112,6 +144,7 @@ class CrtSkill(Skill):
         """La señal de entrada de las últimas velas de `df` (o None). La última vela puede estar formándose: los setups se
         buscan solo con las cerradas y la entrada, que es a su apertura, sí puede ser la de la vela en curso."""
         step = minutes(tf)
+        full = df                                                          # todo el histórico: el sesgo mira hasta 10 días atrás
         ahead, _ = server_minus_ny(self._offset)
         base_cfg = engine.INDICES if is_us_index(symbol, self.indices) else engine.FOREX
         cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
@@ -122,6 +155,8 @@ class CrtSkill(Skill):
         ts = df["ts"].to_numpy().astype(np.int64)
         views = {1: engine.view(df, 1), -1: engine.view(df, -1)}
         n = len(df)
+        recent = [x for x in setups if x["jc"] >= n - 1 - 36 * 60 // step]
+        self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):
             if st["jc"] < n - 1 - 36 * 60 // step:                         # nada que mirar: hace más de 36 h (y de una sesión)
                 break
@@ -134,6 +169,7 @@ class CrtSkill(Skill):
                 continue
             self._seen.add(key)
             sgn, entry, risk = st["sign"], ep["entry"], ep["risk"]
+            points = self._points(full, cfg, st, ahead)
             ny = datetime.fromtimestamp(int(ts[ep["start"]]) - ahead, timezone.utc)
             close_ny = datetime.fromtimestamp(ep["end"] - ahead, timezone.utc)
             return {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "price": sgn * entry,
@@ -141,6 +177,7 @@ class CrtSkill(Skill):
                     "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
                     "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
                     "pattern": f"CRT ({ENTRY_NAMES[self.entry]})", "pattern_key": STRATEGY,
+                    "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
                     "reason": f"CRT: sweep {st['dirección']} en C2; el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
-                              f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[self.entry]}». No depende del sesgo"}
+                              f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[self.entry]}». {points.summary()}"}
         return None

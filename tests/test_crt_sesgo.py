@@ -1,0 +1,178 @@
+"""Sesgo propio del perfil CRT: zonas de reversión en HTF (FVG, rejection block y order block), un punto cada una, ventana de 10 días."""
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from crt_scenarios import AHEAD, eurusd                                           # noqa: E402
+from tradingbot.envconfig import EnvConfig, parse                                 # noqa: E402
+from tradingbot.skills.bias.models import Bias                                    # noqa: E402
+from tradingbot.skills.crt import bias, engine                                    # noqa: E402
+
+CFG = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+START = pd.Timestamp("2026-10-20 00:00")
+
+
+def hourly(bars: list[tuple], start: pd.Timestamp = START) -> pd.DataFrame:
+    """Velas de 1 h (apertura, máximo, mínimo, cierre) desde `start` (hora NY), en hora de servidor."""
+    t0 = start.value // 10**9 + AHEAD
+    return pd.DataFrame([(t0 + i * 3600, *b) for i, b in enumerate(bars)], columns=["ts", "open", "high", "low", "close"])
+
+
+def c2_at(hours: int) -> int:
+    return START.value // 10**9 + AHEAD + hours * 3600
+
+
+# 1. FVG alcista: el máximo de la vela 1 (102) queda bajo el mínimo de la 3 (104)
+FVG = [(100, 102, 99, 101.5), (101.5, 108, 101.2, 107.5), (107.5, 110, 104, 109.5)]
+# 2. Rejection block alcista: swing low con una mecha inferior de 6.2 sobre un rango de 7.0 (89 %)
+RB = [(108, 109, 106.5, 107), (105.2, 106, 99, 105.2), (105.5, 108.5, 104.8, 108)]
+# 3. Order block alcista: vela bajista (104 -> 102, máximo 104.5), vela alcista de impulso y un FVG: el mínimo de la tercera (105) queda sobre el máximo de la bajista
+OB = [(104, 104.5, 101.5, 102), (102, 108, 101.8, 107.5), (107.5, 110, 105, 109)]
+FLAT = [(110, 110.5, 109.5, 110)] * 3                                             # relleno que no deja zonas
+
+
+def zone_rules(df, direction="long", tfs=("1h",), **kw):
+    return sorted({z["rule"] for z in bias.zones(df, direction, CFG, tfs, **kw)})
+
+
+def test_fvg_alcista_es_un_soporte_y_el_bajista_una_resistencia():
+    df = hourly(FLAT + FVG + FLAT)
+    spans = lambda d, side: [(x["bottom"], x["top"]) for x in bias.zones(d, side, CFG, ("1h",)) if x["rule"] == "fvg"]      # noqa: E731
+    assert (102, 104) in spans(df, "long")
+    assert (102, 104) not in spans(df, "short")                                                  # para un corto no es una resistencia
+    mirror = hourly([(200 - o, 200 - l, 200 - h, 200 - c) for o, h, l, c in FLAT + FVG + FLAT])
+    assert (96, 98) in spans(mirror, "short") and (96, 98) not in spans(mirror, "long")
+
+
+def test_rejection_block_swing_de_una_vela_y_mecha_de_mas_del_50_por_ciento():
+    df = hourly(FLAT + RB + FLAT)
+    spans = lambda d, **kw: [(x["bottom"], x["top"]) for x in bias.zones(d, "long", CFG, ("1h",), **kw) if x["rule"] == "rejection"]      # noqa: E731
+    assert (99, 105.2) in spans(df)                                                              # del mínimo al borde inferior del cuerpo
+    assert (99, 105.2) not in spans(df, min_wick=0.95)                                           # la mecha es el 89 %: con >95 % ya no vale
+    chata = hourly(FLAT + [RB[0], (105.2, 106, 104.6, 105.2), RB[2]] + FLAT)                       # mecha del 29 %
+    assert spans(chata) == []
+    assert (99, 105.2) not in spans(hourly(FLAT + [(108, 109, 107, 107.5), (105.2, 106, 99, 105.2), (104.7, 104.9, 98.5, 104.5)] + FLAT))   # el mínimo de su entorno es otro
+    ancho = hourly(FLAT + [(108, 109, 107, 107.5), (107, 108, 105, 107.2), (105.2, 106, 99, 105.2), (104.7, 104.9, 101, 104.5), (104.5, 106, 102, 105)] + FLAT)
+    assert (99, 105.2) in spans(ancho)                                                           # con 1 vela a cada lado basta (2 velas más arriba a la izquierda y a la derecha)
+
+
+def test_order_block_es_la_ultima_vela_contraria_antes_del_impulso():
+    df = hourly(FLAT + OB + FLAT)
+    z = [z for z in bias.zones(df, "long", CFG, ("1h",)) if z["rule"] == "ob"]
+    assert (101.5, 104.5) in [(x["bottom"], x["top"]) for x in z]                                  # el rango completo de la vela bajista
+    sin_fvg = hourly(FLAT + [OB[0], OB[1], (107.5, 110, 104.2, 109)] + FLAT)                       # el impulso no deja FVG (mínimo 104.2 < 104.5): no es OB
+    assert (101.5, 104.5) not in [(x["bottom"], x["top"]) for x in bias.zones(sin_fvg, "long", CFG, ("1h",)) if x["rule"] == "ob"]
+    assert (101.5, 104.5) not in [(x["bottom"], x["top"]) for x in bias.zones(hourly(FLAT + [OB[0], (102.5, 103, 101.8, 102), OB[2]] + FLAT), "long", CFG, ("1h",))
+                                  if x["rule"] == "ob"]                                            # la vela siguiente no es un impulso alcista
+    assert (101.5, 104.5) not in [(x["bottom"], x["top"]) for x in bias.zones(df, "short", CFG, ("1h",)) if x["rule"] == "ob"]
+
+
+def test_cada_zona_cuenta_un_punto_y_la_zona_comun_tiene_que_solaparse():
+    df = hourly(FLAT + FVG + FLAT + RB + FLAT + OB + FLAT)
+    c2 = c2_at(len(df) + 1)
+    on = bias.CrtBiasCfg(True, 10, 1, ("1h",))
+    got = bias.evaluate(df, "long", c2, (101.8, 103.0), CFG, on, AHEAD)                           # solapa con el FVG, el rejection block (99-105.2) y el OB
+    assert got.enabled and got.score == len(got.zones) and sorted(got.counts().items()) == [("fvg", 1), ("ob", 1), ("rejection", 1)]
+    assert got.go and got.result().bias is Bias.BULLISH and got.result().score == 3
+    lejos = bias.evaluate(df, "long", c2, (130, 131), CFG, on, AHEAD)                             # el CRT no se forma dentro de ninguna
+    assert lejos.score == 0 and not lejos.go and lejos.result().bias is Bias.NO_BIAS
+    corto = bias.evaluate(df, "short", c2, (101.8, 103.0), CFG, on, AHEAD)                        # son soportes: para un corto no cuentan
+    assert corto.counts()["rejection"] == 0 and corto.counts()["ob"] == 0                           # el rejection block y el OB de este caso son soportes
+
+
+def test_las_zonas_de_mas_de_10_dias_no_valen_y_el_limite_se_configura():
+    df = hourly(FVG + FLAT * 4)
+    on = bias.CrtBiasCfg(True, 10, 1, ("1h",))
+    zone_created = START.value // 10**9 + AHEAD + 3 * 3600
+    assert bias.evaluate(df, "long", zone_created + 9 * 86400, (102, 104), CFG, on, AHEAD).score >= 1                # 9 días antes de la C2
+    assert bias.evaluate(df, "long", zone_created + 11 * 86400, (102, 104), CFG, on, AHEAD).score == 0               # 11 días: caducada
+    corto = bias.CrtBiasCfg(True, 3, 1, ("1h",))
+    assert bias.evaluate(df, "long", zone_created + 4 * 86400, (102, 104), CFG, corto, AHEAD).score == 0
+    nueva = hourly(FVG + FLAT * 4, START + pd.Timedelta(days=6))                                                   # zona posterior a la C2: queda a la derecha
+    assert bias.evaluate(nueva, "long", START.value // 10**9 + AHEAD + 3600, (102, 104), CFG, on, AHEAD).score == 0
+
+
+def test_deshabilitado_el_sesgo_es_cero_y_el_setup_siempre_go():
+    df = hourly(FLAT + FVG + FLAT)
+    off = bias.evaluate(df, "long", c2_at(40), (102, 104), CFG, bias.CrtBiasCfg(), AHEAD)
+    assert not off.enabled and off.score == 0 and off.go and off.result().bias is Bias.NO_BIAS and "deshabilitado" in off.summary()
+
+
+def test_la_configuracion_del_sesgo_crt_se_lee_del_env_y_se_valida():
+    def load(text):
+        return bias.load_cfg(EnvConfig(parse(text)).section("CRT"))
+    d = load("")
+    assert (d.enabled, d.lookback_days, d.min_score, d.tfs, d.swing_width, d.rb_min_wick_pct) == (False, 10.0, 1.0, ("1h", "4h", "1d"), 1, 50.0)
+    c = load("CRT_BIAS_ENABLED=true\nCRT_BIAS_LOOKBACK_DAYS=5\nCRT_BIAS_MIN_SCORE=2\nCRT_BIAS_TFS=4h, 1d\nCRT_BIAS_SWING_WIDTH=2\nCRT_BIAS_RB_MIN_WICK_PCT=60")
+    assert (c.enabled, c.lookback_days, c.min_score, c.tfs, c.swing_width, c.rb_min_wick_pct) == (True, 5.0, 2.0, ("4h", "1d"), 2, 60.0)
+    for bad in ("CRT_BIAS_TFS=15m", "CRT_BIAS_LOOKBACK_DAYS=0", "CRT_BIAS_RB_MIN_WICK_PCT=120", "CRT_BIAS_SWING_WIDTH=0"):
+        with pytest.raises(ValueError):
+            load(bad)
+
+
+# -- skill y Cortex --------------------------------------------------------------------------------------------------------
+
+def run(env_text=""):
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    bus = EventBus()
+    out = {"signal": [], "executed": [], "bias": []}
+    bus.subscribe("t", "crt.signal", out["signal"].append)
+    bus.subscribe("t", "setup.executed", out["executed"].append)
+    bus.subscribe("t", "bias.updated", out["bias"].append)
+    manager = SkillManager(bus, Services(None, None, {"app": {"strategy": "crt"}}, EnvConfig(parse(env_text))), [{"type": s} for s in ("crt", "cortex", "setup")])
+    manager.start()
+    bus.publish("clock.offset", {"server_offset": None, "offset_source": "test"}, source="quotes")
+    return manager, bus, out
+
+
+def load_entry(bus, symbol="EURUSD"):
+    df = eurusd()
+    df = df[df["ts"] <= pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD].reset_index(drop=True)
+    bus.publish("candles.loaded", {"symbol": symbol, "timeframe": "5m", "df": df}, source="feed")
+    time.sleep(0.6)
+
+
+def test_con_el_sesgo_apagado_el_setup_es_go_y_la_tarjeta_dice_sesgo_cero():
+    manager, bus, out = run()
+    load_entry(bus)
+    manager.stop()
+    assert len(out["signal"]) == 1 and len(out["executed"]) == 1                          # GO aunque no haya zonas HTF
+    s = out["signal"][0].payload
+    assert s["bias_enabled"] is False and s["bias_points"].score == 0 and s["bias_result"].bias is Bias.NO_BIAS
+    card = out["bias"][-1].payload["result"]
+    assert [v.rule for v in card.votes] == [t for _, t in bias.RULES] and "deshabilitado" in card.summary
+    assert out["executed"][0].payload["order"].bias == "No Bias" and out["executed"][0].payload["order"].score == 0
+
+
+def test_con_el_sesgo_encendido_el_setup_es_go_con_los_puntos_que_pide_y_no_go_si_no_llega():
+    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=1")
+    load_entry(bus)
+    manager.stop()
+    p = out["signal"][0].payload["bias_points"]
+    assert p.enabled and p.score == 1 and [z["rule"] for z in p.zones] == ["fvg"] and p.zones[0]["tf"] == "1h"      # un FVG de 1h (1.1183-1.1185) solapa con la zona común
+    assert len(out["executed"]) == 1                                                       # 1 punto >= 1: GO
+    assert out["executed"][0].payload["order"].bias == "Bullish" and out["executed"][0].payload["order"].score == 1
+    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=2")
+    load_entry(bus)
+    manager.stop()
+    assert len(out["signal"]) == 1 and out["executed"] == []                               # 1 punto < 2: NO GO, no se abre
+    assert out["signal"][0].payload["bias_points"].go is False and manager.skills["cortex"].caption.startswith("NO GO")
+    card = out["bias"][-1].payload["result"]
+    assert card.score == 1 and card.bias is Bias.NO_BIAS and "FVG en HTF 1h" in card.summary
+
+
+def test_el_perfil_crt_no_lleva_la_skill_bias_de_los_otros_perfiles():
+    from tradingbot.config import strategy_skills
+    kept = strategy_skills([{"type": t} for t in ("bias", "cortex", "pattern", "setup")], "crt")
+    assert "bias" not in [s["type"] for s in kept] and [s["type"] for s in kept] == ["cortex", "setup", "crt"]
+    assert "bias" in [s["type"] for s in strategy_skills([{"type": "bias"}], "calendario")]       # los demás perfiles siguen con la suya

@@ -209,12 +209,16 @@ class CortexSkill(Skill):
         if payload["symbol"] in self._biases:          # el sesgo de ese mercado, si se conoce; si no, el del gráfico
             filter_ = TradeFilter()
             filter_.update(self._biases[payload["symbol"]]["result"])
-        result = filter_.result
+        result = payload.get("bias_result") or filter_.result      # CRT trae el suyo: los puntos de sus zonas HTF
         busy = self._busy(payload["symbol"], payload.get("entry_ts"))
         if busy is not None:
             allowed, reason = False, self._busy_reason(busy)
-        elif payload.get("strategy") == "crt":                      # CRT no usa el sesgo (el backtest no lo usa)
-            allowed, reason = True, payload["reason"]
+        elif payload.get("strategy") == "crt":                      # CRT: sesgo propio (CRT_BIAS_*); apagado, sesgo 0 y siempre GO
+            points = payload.get("bias_points")
+            if points is not None and not points.go:
+                allowed, reason = False, f"sesgo CRT {points.score:g} < {points.min_score:g}: {points.summary()}"
+            else:
+                allowed, reason = True, payload["reason"]
         elif self.calendar_use_bias:
             allowed, reason = filter_.check(Direction(direction.capitalize()))
         else:
