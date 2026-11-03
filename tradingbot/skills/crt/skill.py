@@ -41,7 +41,7 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
 class CrtSkill(Skill):
     title = "CRT"
     description = ("Estrategia CRT (Candle Range Theory) por zona común, dentro de C2: una vela H3 (índices) o H4 (forex) barre con una mecha el "
-                   "máximo o mínimo de la anterior; dentro de C2 un FVG y un iFVG, de 15, 5 o 3 min con TF del FVG >= TF del iFVG (se busca el de mayor TF; el CISD y la "
+                   "máximo o mínimo de la anterior; dentro de C2 un FVG y un iFVG, de 15 o 5 min con TF del FVG >= TF del iFVG (se busca el de mayor TF; el CISD y la "
                    "entrada son del TF del iFVG), comparten una zona. Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
                    "vela que cierra con el cuerpo más allá del CISD (el extremo de la vela que creó el iFVG) da la entrada, a la apertura de la vela "
                    "siguiente. Stop en el extremo del sweep y objetivo 2R (el breakeven a +1R lo lleva Setup). Si la zona existe pero el precio sigue "
@@ -162,7 +162,7 @@ class CrtSkill(Skill):
         self.marks[symbol] = {"key": key, "ts": tail["ts"].to_numpy().copy(), "marks": marks, "ltf": step}
 
     def _series(self, symbol: str, tf: str, df, cfg: engine.Cfg) -> dict:
-        """Las velas de los TF de la zona común (15, 5 y 3 min) de un mercado: las del perfil (`df`), las que se agrupan desde ellas (la de 15 min) y las que hay
+        """Las velas de los TF de la zona común (15 y 5 min) de un mercado: las del perfil (`df`), las que se agrupan desde ellas (la de 15 min) y las que hay
         que pedirle a MT5 (la de 3 con el perfil en 5, la de 5 con el perfil en 3). Si MT5 no las da, esa combinación no se mira."""
         step = minutes(tf)
         series = {step: df}
@@ -187,7 +187,7 @@ class CrtSkill(Skill):
         return engine_complete(series, cfg)
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
-        """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15, 5 y 3 min, TF del FVG >= TF del iFVG). Cada
+        """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15 y 5 min, TF del FVG >= TF del iFVG). Cada
         combinación se mira con las velas del TF de su iFVG (el CISD y la entrada son de ese TF). La última vela puede estar formándose: los setups se buscan solo
         con las cerradas y la entrada, que es a su apertura, sí puede ser la de la vela en curso."""
         step = minutes(tf)

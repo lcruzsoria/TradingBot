@@ -380,21 +380,18 @@ def test_el_perfil_crt_trae_su_skill_y_quita_pattern_tbr_y_calendario(tmp_path):
     assert strategy_skills([{"type": "cortex"}], "calendario") == [{"type": "cortex"}]      # CRT no se cuela en otros perfiles
 
 
-def test_la_skill_pide_a_mt5_las_velas_de_3_min_que_le_faltan_y_sigue_si_no_las_da():
+def test_la_skill_no_pide_velas_a_mt5_con_el_perfil_en_5_min():
     class Source:
-        def __init__(self, fail=False):
-            self.calls, self.fail = [], fail
+        def __init__(self):
+            self.calls = []
 
         def load_recent(self, symbol, timeframe, bars):
             self.calls.append((symbol, timeframe))
-            if self.fail:
-                raise RuntimeError("sin velas")
-            return eurusd().tail(bars).reset_index(drop=True)                      # velas «de 3 min» de mentira: solo importa que se pidan
+            return eurusd().tail(bars).reset_index(drop=True)
 
-    for fail in (False, True):
-        source = Source(fail)
-        manager, bus, out = run(source=source)
-        loaded(bus, until_entry(eurusd()), "EURUSD")
-        manager.stop()
-        assert ("EURUSD", "3m") in source.calls and all(tf == "3m" for _, tf in source.calls)         # con el perfil en 5 min solo falta la de 3
-        assert len(out["signal"]) == 1 and out["signal"][0].payload["timeframe"] == "5m"            # la señal sigue saliendo (y con el TF del perfil)
+    source = Source()
+    manager, bus, out = run(source=source)
+    loaded(bus, until_entry(eurusd()), "EURUSD")
+    manager.stop()
+    assert source.calls == []                                                            # las de 15 min salen de las de 5 y no hay combinaciones con 3 min
+    assert len(out["signal"]) == 1 and out["signal"][0].payload["timeframe"] == "5m"

@@ -13,8 +13,8 @@ Se describe el largo (barrido de un mínimo); el corto es el espejo exacto. En e
 | Papel | Índices | Forex |
 |---|---|---|
 | HTF (sweep) | H3 | H4 |
-| FVG «normal» | M15, M5 o M3 | M15, M5 o M3 |
-| iFVG, CISD y entrada | M15, M5 o M3 (TF del iFVG ≤ TF del FVG) | M15, M5 o M3 |
+| FVG «normal» | M15 o M5 | M15 o M5 |
+| iFVG, CISD y entrada | M15 o M5 (TF del iFVG ≤ TF del FVG) | M15 o M5 |
 
 - Mercados (`CRT_SYMBOLS`): NAS100.s, SP500.s, DJ30.s, EURUSD y GBPUSD de PUPrime.
 - Sesión: a las **18:00 NY** (índices) o **17:00 NY** (forex) no se abren entradas y lo abierto se cierra.
@@ -25,10 +25,10 @@ Se describe el largo (barrido de un mínimo); el corto es el espejo exacto. En e
 Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.**
 
 1. **Sweep.** C2 supera con una mecha el mínimo de C1 (largo) o su máximo (corto). El primer extremo que toma C2 manda: si ya había tomado el otro, el sweep es el del otro lado. Si el precio llega al extremo opuesto de C1 sin que el setup se complete, queda **invalidado**.
-2. **Doble FVG y zona común.** Dentro de C2 hay un FVG «normal» (M15 o M5) y un iFVG de las velas del gráfico (M5 o M3) que **se solapan**; el hueco que comparten es la **zona común**.
-   - **FVG e iFVG pueden ser de 15, 5 o 3 min**, con **TF del FVG ≥ TF del iFVG**: FVG M15 con iFVG de M15, M5 o M3; FVG M5 con iFVG de M5 o M3; FVG M3 con iFVG de M3. No pueden ser el mismo hueco.
-   - **El CISD y la entrada son del TF del iFVG:** si el FVG y el iFVG se detectan en 15 min, el cierre sobre el CISD se mira en velas de 15 min y la entrada es a la apertura de la siguiente vela de 15 min; con un iFVG de 3 min, en velas de 3 min. Cada combinación se evalúa con las velas de su TF.
-   - Se busca siempre la combinación del **TF mayor posible**, marcado por el FVG: si hay varias, manda la del FVG de mayor TF (M15 antes que M5 y que M3). Si dos combinaciones dan entrada en la misma C2 y lado, vale la primera que cierra sobre su CISD.
+2. **Doble FVG y zona común.** Dentro de C2 hay un FVG «normal» (M15 o M5) y un iFVG de 15 o 5 min que **se solapan**; el hueco que comparten es la **zona común**.
+   - **FVG e iFVG pueden ser de 15 o 5 min**, con **TF del FVG ≥ TF del iFVG**: FVG M15 con iFVG de M15 o M5; FVG M5 con iFVG de M5. No pueden ser el mismo hueco. Las combinaciones con 3 min se probaron y se quitaron: dan muchos setups y salen peor (`RESULTADOS_zona.md`).
+   - **El CISD y la entrada son del TF del iFVG:** si el FVG y el iFVG se detectan en 15 min, el cierre sobre el CISD se mira en velas de 15 min y la entrada es a la apertura de la siguiente vela de 15 min; con un iFVG de 5 min, en velas de 5 min. Cada combinación se evalúa con las velas de su TF.
+   - Se busca siempre la combinación del **TF mayor posible**, marcado por el FVG: si hay varias, manda la del FVG de mayor TF (M15 antes que M5). Si dos combinaciones dan entrada en la misma C2 y lado, vale la primera que cierra sobre su CISD.
    - Ambos nacen dentro de C2 (su primera vela empieza en C2 o después).
 3. **CISD.** Es el extremo de la vela que creó el iFVG: la vela central de sus tres velas (largo: su **máximo**; corto: su mínimo).
 4. **Inversión.** El iFVG se invierte cuando una vela cierra al otro lado de su base (largo: por encima de su techo).
@@ -62,7 +62,7 @@ EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:
 
 ## 5. En el bot
 
-- **Skill `crt`** (`tradingbot/skills/crt/skill.py`): con cada `candles.loaded` de M3 o M5 busca el setup con `engine.find_zone_setups` y `engine.entry_point`, y publica `crt.signal`; Cortex la convierte en orden para Setup (simulada) sin consultar el sesgo.
+- **Skill `crt`** (`tradingbot/skills/crt/skill.py`): con cada `candles.loaded` de M5 busca el setup con `engine.find_zone_setups` y `engine.entry_point`, y publica `crt.signal`; Cortex la convierte en orden para Setup (simulada) sin consultar el sesgo.
 - **Gráfico (botón CRT):** dibuja, además de los CRT del backtest antiguo, **la operación activa de Cortex con todos sus niveles** (`crt/chart.py: live_marks`): el FVG, el iFVG (con el TF), la zona común (recuadro), el CISD, el punto del pullback y la posición (entrada, stop y objetivo); los **setups válidos que el bot no operó** (`signal_marks`), con el resultado que habrían dado sobre las velas cargadas (TP, SL, BE o abierta), y los **«Setup OK sin Entrada»** (`no_entry_marks`). Los setups se calculan una vez con las velas de la skill (M5 o M3) y se dibujan igual en cualquier timeframe del gráfico (en 15m o 1h tienen el mismo estado que en 5m). La etiqueta discreta solo lleva el resultado; los TF del FVG y del iFVG, sus zonas, la zona común, el retest y el CISD salen al desplegarla (ficha). El setup no se guarda con la orden: se vuelve a buscar con el motor sobre las velas cargadas (solo si el gráfico está en el TF de la orden).
 - **Backtest:** `scripts/backtest_crt_zona.py` (velas M5 de `analisis/m5`), con el mismo motor.
 

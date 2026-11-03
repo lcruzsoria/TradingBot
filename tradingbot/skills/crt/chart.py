@@ -307,7 +307,7 @@ POINT_KEYS = (("pos", "x0"), ("pos", "x1"), ("ifvg", "x0"), ("ifvg", "x1"), ("co
 
 
 def complete_series(series: dict, cfg) -> dict:
-    """Las velas de los TF de la zona común (15, 5 y 3 min) que se pueden sacar de las que hay: el TF que falte se agrupa desde el menor que lo divida (el de
+    """Las velas de los TF de la zona común (15 y 5 min) que se pueden sacar de las que hay: el TF que falte se agrupa desde el menor que lo divida (el de
     15 min sale del de 5 o del de 3; el de 5 y el de 3 no salen el uno del otro)."""
     out = dict(series)
     for m in engine.ZONE_TFS:
@@ -321,7 +321,7 @@ def complete_series(series: dict, cfg) -> dict:
 
 def zone_marks(series, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES,
                ref_ts=None) -> list[dict]:
-    """Los setups de zona común de las últimas velas con todas las combinaciones de TF (FVG e iFVG de 15, 5 o 3 min con TF del FVG >= TF del iFVG): los que
+    """Los setups de zona común de las últimas velas con todas las combinaciones de TF (FVG e iFVG de 15 o 5 min con TF del FVG >= TF del iFVG): los que
     dieron entrada (con la operación simulada) y los «Setup OK sin Entrada». `series` = {TF: velas} (o unas velas sueltas, de `ltf` minutos). Cada combinación se
     evalúa con las velas del TF de su iFVG y las marcas se pasan a las velas `ref_ts` (las del TF del perfil por defecto). Por cada C2 y lado sale una sola
     marca: la de la entrada más temprana (o, sin entradas, la de «sin entrada»)."""

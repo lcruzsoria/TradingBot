@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 MTF = (15,)                                              # timeframes del FVG de confirmación (minutos)
-ZONE_TFS = (15, 5, 3)                                    # timeframes del FVG (no invertido) y del iFVG de la zona común; el iFVG es de un TF igual o menor que el FVG
+ZONE_TFS = (15, 5)                                       # timeframes del FVG (no invertido) y del iFVG de la zona común; el iFVG es de un TF igual o menor que el FVG
 
 
 @dataclass(frozen=True)
@@ -300,7 +300,7 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
 
 
 def find_multi_setups(series: dict, cfg: Cfg) -> tuple[list, dict]:
-    """Los setups de zona común de todas las combinaciones de timeframes: FVG normal y iFVG de 15, 5 o 3 minutos con TF del FVG >= TF del iFVG. `series` =
+    """Los setups de zona común de todas las combinaciones de timeframes: FVG normal y iFVG de 15 o 5 minutos con TF del FVG >= TF del iFVG. `series` =
     {TF en minutos: velas de ese TF} (las que haya de 3, 5 y 15). Cada combinación se evalúa con las velas del TF del iFVG: la inversión, el CISD, el cierre
     sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Cada setup lleva `ltf` (TF del iFVG, que es el de su CISD y su entrada) y sus
     índices son de las velas de ese TF. Salen en orden de la hora de su cierre sobre el CISD."""
