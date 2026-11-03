@@ -8,7 +8,8 @@ cuanto una regla se cumple en un TF, ese TF le da su **punto** y no se mira en l
      (largo: del mínimo al borde inferior del cuerpo del swing low).
   3. Order block (OB): la última vela contraria antes de un impulso que deja un FVG (largo: la vela bajista, la alcista siguiente y un FVG alcista entre el
      máximo de la bajista y el mínimo de la vela posterior; sin FVG no hay OB). La zona es el rango completo de la vela.
-«Dentro» = la zona común del CRT (FVG ∩ iFVG) se solapa con la zona HTF. Desactivado (`CRT_BIAS_ENABLED=false`) el sesgo es 0 y el setup es siempre GO.
+«Dentro» = la zona común del CRT (FVG ∩ iFVG) se solapa con la zona HTF. Desactivado (`CRT_BIAS_ENABLED=false`) el sesgo es 0 y el setup es siempre GO; encendido
+pero sin `CRT_BIAS_ENFORCE` se calcula y se enseña en la tarjeta y la orden, y no anula ningún trade.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ TF_MINUTES = {"1h": 60, "4h": 240, "1d": 1440}
 @dataclass(frozen=True)
 class CrtBiasCfg:
     enabled: bool = False                                        # CRT_BIAS_ENABLED: apagado, el sesgo es 0 y todo es GO
+    enforce: bool = False                                        # CRT_BIAS_ENFORCE: con el sesgo encendido, un setup sin puntos suficientes es NO GO; apagado solo se calcula y se enseña
     lookback_days: float = 10.0                                  # CRT_BIAS_LOOKBACK_DAYS: antigüedad máxima de una zona respecto a la C2 del setup
     min_score: float = 1.0                                       # CRT_BIAS_MIN_SCORE: puntos para dar GO
     tfs: tuple[str, ...] = ("1h", "4h", "1d")                    # CRT_BIAS_TFS
@@ -56,7 +58,8 @@ def load_cfg(settings) -> CrtBiasCfg:
         raise ValueError("CRT_BIAS_SWING_WIDTH debe ser 1 o más")
     if not 0 <= wick < 100:
         raise ValueError("CRT_BIAS_RB_MIN_WICK_PCT debe estar entre 0 y 100")
-    return CrtBiasCfg(settings.get_bool("BIAS_ENABLED", False), days, score, parse_tfs(settings.get_list("BIAS_TFS", list(CrtBiasCfg.tfs))), width, wick)
+    return CrtBiasCfg(settings.get_bool("BIAS_ENABLED", False), settings.get_bool("BIAS_ENFORCE", False), days, score,
+                      parse_tfs(settings.get_list("BIAS_TFS", list(CrtBiasCfg.tfs))), width, wick)
 
 
 def htf_candles(df: pd.DataFrame, minutes: int, cfg: engine.Cfg) -> pd.DataFrame:
@@ -112,6 +115,7 @@ class SetupBias:
     enabled: bool
     direction: str
     min_score: float
+    enforce: bool = True                                         # False: se calcula y se enseña pero no anula el trade
     zones: list[dict] = field(default_factory=list)
     when: datetime | None = None
 
@@ -121,7 +125,7 @@ class SetupBias:
 
     @property
     def go(self) -> bool:
-        return (not self.enabled) or self.score >= self.min_score
+        return (not self.enabled) or (not self.enforce) or self.score >= self.min_score
 
     def counts(self) -> dict[str, int]:
         return {key: sum(z["rule"] == key for z in self.zones) for key, _ in RULES}
@@ -130,10 +134,11 @@ class SetupBias:
         if not self.enabled:
             return "Sesgo CRT deshabilitado (CRT_BIAS_ENABLED=false): sesgo 0, el setup es siempre GO"
         side = "soporte" if self.direction == "long" else "resistencia"
+        info = "" if self.enforce else " · informativo (CRT_BIAS_ENFORCE=false): no anula el trade"
         if not self.zones:
-            return f"Sin zonas HTF de {side} para el setup {self.direction}: 0 puntos (hacen falta {self.min_score:g})"
+            return f"Sin zonas HTF de {side} para el setup {self.direction}: 0 puntos (hacen falta {self.min_score:g}){info}"
         listed = "; ".join(f"{dict(RULES)[z['rule']]} {z['tf']} {z['bottom']:.5g}-{z['top']:.5g}" for z in self.zones)
-        return f"{len(self.zones)} regla(s) validada(s) con zonas HTF de {side}, un punto cada una (hacen falta {self.min_score:g}): {listed}"
+        return f"{len(self.zones)} regla(s) validada(s) con zonas HTF de {side}, un punto cada una (hacen falta {self.min_score:g}): {listed}{info}"
 
     def result(self) -> BiasResult:
         """El sesgo del setup para la tarjeta: Bullish (largo) o Bearish (corto) si llega a los puntos; si no, No Bias."""
@@ -158,7 +163,7 @@ def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[floa
     mucho un punto, el del TF mayor en que se cumple; en cuanto se cumple no se sigue con los TF menores."""
     when = datetime.fromtimestamp(c2_start - ahead, timezone.utc)
     if not bias_cfg.enabled:
-        return SetupBias(False, direction, bias_cfg.min_score, [], when)
+        return SetupBias(False, direction, bias_cfg.min_score, bias_cfg.enforce, [], when)
     lo, hi = min(common), max(common)
     first = c2_start - int(bias_cfg.lookback_days * 86400)
     history = df[df["ts"] < c2_start]
@@ -175,4 +180,4 @@ def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[floa
                 found.append(hits[-1])                                                         # la más reciente de ese TF; el TF mayor ya da el punto
                 pending.remove(key)
     found.sort(key=lambda z: [k for k, _ in RULES].index(z["rule"]))
-    return SetupBias(True, direction, bias_cfg.min_score, found, when)
+    return SetupBias(True, direction, bias_cfg.min_score, bias_cfg.enforce, found, when)

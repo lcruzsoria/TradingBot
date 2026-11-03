@@ -79,7 +79,7 @@ def test_order_block_es_la_ultima_vela_contraria_antes_del_impulso():
 def test_cada_zona_cuenta_un_punto_y_la_zona_comun_tiene_que_solaparse():
     df = hourly(FLAT + FVG + FLAT + RB + FLAT + OB + FLAT)
     c2 = c2_at(len(df) + 1)
-    on = bias.CrtBiasCfg(True, 10, 1, ("1h",))
+    on = bias.CrtBiasCfg(True, True, 10, 1, ("1h",))
     got = bias.evaluate(df, "long", c2, (101.8, 103.0), CFG, on, AHEAD)                           # solapa con el FVG, el rejection block (99-105.2) y el OB
     assert got.enabled and got.score == len(got.zones) and sorted(got.counts().items()) == [("fvg", 1), ("ob", 1), ("rejection", 1)]
     assert got.go and got.result().bias is Bias.BULLISH and got.result().score == 3
@@ -91,11 +91,11 @@ def test_cada_zona_cuenta_un_punto_y_la_zona_comun_tiene_que_solaparse():
 
 def test_las_zonas_de_mas_de_10_dias_no_valen_y_el_limite_se_configura():
     df = hourly(FVG + FLAT * 4)
-    on = bias.CrtBiasCfg(True, 10, 1, ("1h",))
+    on = bias.CrtBiasCfg(True, True, 10, 1, ("1h",))
     zone_created = START.value // 10**9 + AHEAD + 3 * 3600
     assert bias.evaluate(df, "long", zone_created + 9 * 86400, (102, 104), CFG, on, AHEAD).score >= 1                # 9 días antes de la C2
     assert bias.evaluate(df, "long", zone_created + 11 * 86400, (102, 104), CFG, on, AHEAD).score == 0               # 11 días: caducada
-    corto = bias.CrtBiasCfg(True, 3, 1, ("1h",))
+    corto = bias.CrtBiasCfg(True, True, 3, 1, ("1h",))
     assert bias.evaluate(df, "long", zone_created + 4 * 86400, (102, 104), CFG, corto, AHEAD).score == 0
     nueva = hourly(FVG + FLAT * 4, START + pd.Timedelta(days=6))                                                   # zona posterior a la C2: queda a la derecha
     assert bias.evaluate(nueva, "long", START.value // 10**9 + AHEAD + 3600, (102, 104), CFG, on, AHEAD).score == 0
@@ -111,9 +111,9 @@ def test_la_configuracion_del_sesgo_crt_se_lee_del_env_y_se_valida():
     def load(text):
         return bias.load_cfg(EnvConfig(parse(text)).section("CRT"))
     d = load("")
-    assert (d.enabled, d.lookback_days, d.min_score, d.tfs, d.swing_width, d.rb_min_wick_pct) == (False, 10.0, 1.0, ("1h", "4h", "1d"), 1, 50.0)
-    c = load("CRT_BIAS_ENABLED=true\nCRT_BIAS_LOOKBACK_DAYS=5\nCRT_BIAS_MIN_SCORE=2\nCRT_BIAS_TFS=4h, 1d\nCRT_BIAS_SWING_WIDTH=2\nCRT_BIAS_RB_MIN_WICK_PCT=60")
-    assert (c.enabled, c.lookback_days, c.min_score, c.tfs, c.swing_width, c.rb_min_wick_pct) == (True, 5.0, 2.0, ("4h", "1d"), 2, 60.0)
+    assert (d.enabled, d.enforce, d.lookback_days, d.min_score, d.tfs, d.swing_width, d.rb_min_wick_pct) == (False, False, 10.0, 1.0, ("1h", "4h", "1d"), 1, 50.0)
+    c = load("CRT_BIAS_ENABLED=true\nCRT_BIAS_ENFORCE=true\nCRT_BIAS_LOOKBACK_DAYS=5\nCRT_BIAS_MIN_SCORE=2\nCRT_BIAS_TFS=4h, 1d\nCRT_BIAS_SWING_WIDTH=2\nCRT_BIAS_RB_MIN_WICK_PCT=60")
+    assert (c.enabled, c.enforce, c.lookback_days, c.min_score, c.tfs, c.swing_width, c.rb_min_wick_pct) == (True, True, 5.0, 2.0, ("4h", "1d"), 2, 60.0)
     for bad in ("CRT_BIAS_TFS=15m", "CRT_BIAS_LOOKBACK_DAYS=0", "CRT_BIAS_RB_MIN_WICK_PCT=120", "CRT_BIAS_SWING_WIDTH=0"):
         with pytest.raises(ValueError):
             load(bad)
@@ -155,14 +155,14 @@ def test_con_el_sesgo_apagado_el_setup_es_go_y_la_tarjeta_dice_sesgo_cero():
 
 
 def test_con_el_sesgo_encendido_el_setup_es_go_con_los_puntos_que_pide_y_no_go_si_no_llega():
-    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=1")
+    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_ENFORCE=true\nCRT_BIAS_MIN_SCORE=1")
     load_entry(bus)
     manager.stop()
     p = out["signal"][0].payload["bias_points"]
     assert p.enabled and p.score == 1 and [z["rule"] for z in p.zones] == ["fvg"] and p.zones[0]["tf"] == "1h"      # un FVG de 1h (1.1183-1.1185) solapa con la zona común
     assert len(out["executed"]) == 1                                                       # 1 punto >= 1: GO
     assert out["executed"][0].payload["order"].bias == "Bullish" and out["executed"][0].payload["order"].score == 1
-    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=2")
+    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_ENFORCE=true\nCRT_BIAS_MIN_SCORE=2")
     load_entry(bus)
     manager.stop()
     assert len(out["signal"]) == 1 and out["executed"] == []                               # 1 punto < 2: NO GO, no se abre
@@ -190,13 +190,13 @@ def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monke
                 "1h": [zona("fvg", "1h", c2 - 3600), zona("ob", "1h", c2 - 7200), zona("rejection", "1h", c2 - 7200)]}[tfs[0]]
 
     monkeypatch.setattr(bias, "zones", falsas)
-    got = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("1h", "4h", "1d")), AHEAD)
+    got = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, True, 10, 1, ("1h", "4h", "1d")), AHEAD)
     assert llamadas == ["1d", "4h", "1h"]                                                         # de mayor a menor
     assert [(z["rule"], z["tf"]) for z in got.zones] == [("fvg", "1d"), ("rejection", "1h"), ("ob", "4h")] or \
         sorted((z["rule"], z["tf"]) for z in got.zones) == [("fvg", "1d"), ("ob", "4h"), ("rejection", "1h")]
     assert got.score == 3                                                                         # un punto por regla, no uno por zona (el FVG de 4h y de 1h no suman)
     llamadas.clear()
-    solo = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("4h", "1d")), AHEAD)
+    solo = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, True, 10, 1, ("4h", "1d")), AHEAD)
     assert llamadas == ["1d", "4h"] and sorted((z["rule"], z["tf"]) for z in solo.zones) == [("fvg", "1d"), ("ob", "4h")]
     llamadas.clear()
 
@@ -205,5 +205,16 @@ def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monke
         return [zona(r, "1d", c2 - 86400) for r in ("fvg", "rejection", "ob")] if tfs[0] == "1d" else []
 
     monkeypatch.setattr(bias, "zones", todo_en_1d)
-    assert bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("1h", "4h", "1d")), AHEAD).score == 3
+    assert bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, True, 10, 1, ("1h", "4h", "1d")), AHEAD).score == 3
     assert llamadas == ["1d"]                                                                     # con las tres reglas validadas en 1d no se mira más
+
+
+def test_con_el_sesgo_encendido_sin_enforce_se_calcula_pero_no_anula_el_trade():
+    manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=2")                # 1 punto < 2, pero CRT_BIAS_ENFORCE=false (por defecto)
+    load_entry(bus)
+    manager.stop()
+    p = out["signal"][0].payload["bias_points"]
+    assert p.enabled and not p.enforce and p.score == 1 and p.go                          # se calcula y el setup sigue siendo GO
+    order = out["executed"][0].payload["order"]
+    assert len(out["executed"]) == 1 and order.bias == "No Bias" and order.score == 1          # se abre igual; la orden lleva el sesgo real (1 punto, sin llegar al mínimo)
+    assert "informativo" in out["bias"][-1].payload["result"].summary and "FVG en HTF 1h" in out["bias"][-1].payload["result"].summary
