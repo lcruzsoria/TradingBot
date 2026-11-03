@@ -2,6 +2,17 @@
 
 `scripts/backtest_crt_zona.py`, velas M5 de PUPrime (dic. 2023 - oct. 2026, 200 000 velas por mercado), con el mismo motor que la skill y la regla final (iFVG invertido, pullback a la zona común, cierre con cuerpo sobre el CISD, FVG de M15 o M5 con iFVG de TF igual o menor, manda el de mayor TF). Una operación a la vez por mercado, entrada a la apertura de la vela siguiente, stop en el extremo del sweep. Neto = bruto menos un spread supuesto (índices 1,5 pb, forex 0,7 pb): los parquet no traen el spread.
 
+**Actualización (03/11/2026, tarde): FVG normal sin mitigar.** Regla nueva: el FVG normal tiene que estar sin mitigar cuando nace el iFVG (si una mecha ya entró en su hueco, no vale). Backtest rehecho con velas M5 y M15 de PUPrime recién descargadas (ene. 2024 - 03/11/2026) y el mismo motor que el bot. **Las tablas de abajo son de la regla anterior y están desfasadas.**
+
+| Variante (PUPrime, regla nueva) | n | R bruto | R neto | IC95 neto |
+|---|---|---|---|---|
+| 2R, BE a +1R (la del bot) | 2 870 | +0,044 | -0,049 | -0,09..-0,01 |
+| 2R, sin BE | 2 834 | +0,044 | -0,049 | -0,10..-0,00 |
+| 1R, BE a +1R | 2 944 | +0,038 | -0,055 | -0,09..-0,02 |
+| 3R, BE a +1R | 2 818 | +0,056 | -0,037 | -0,09..+0,01 |
+
+Por mercado (2R, BE +1R), R neto: NAS100 -0,091, SP500 -0,035, DJ30 -0,001, EURUSD -0,091, GBPUSD -0,021. La regla quita unas 500 entradas de 3 366 (regla anterior, mismas velas, combinaciones de 15 y 5 min: +0,049 bruto / -0,045 neto) y **no mejora el resultado**: el bruto baja de +0,049 a +0,044 R y el neto de -0,045 a -0,049 R, dentro del ruido. Los setups que quita no eran peores que los demás. Por combinación: FVG M15 + iFVG M5 2 215 operaciones (-0,075 R neto), FVG M5 + iFVG M5 709 (+0,014) y FVG M15 + iFVG M15 19. El sesgo CRT sigue sin ordenar (0 a 3 puntos: -0,036, -0,077, -0,033 y -0,052 R). **Sigue sin haber ventaja neta.**
+
 | Variante (PUPrime) | n | R bruto | R neto | IC95 neto |
 |---|---|---|---|---|
 | 2R, BE a +1R (la del bot) | 3 344 | +0,054 | -0,041 | -0,08..-0,00 |

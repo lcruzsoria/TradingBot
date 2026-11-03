@@ -1,11 +1,11 @@
-"""Backtest del CRT por zona común con todas las combinaciones de timeframes: FVG normal y iFVG de 15, 5 o 3 min con TF del FVG >= TF del iFVG.
+"""Backtest del CRT por zona común con todas las combinaciones de timeframes: FVG normal y iFVG de 15 o 5 min con TF del FVG >= TF del iFVG.
 
-Lee velas ya descargadas (`scripts/descargar_velas.py`: analisis/3m, analisis/5m y analisis/15m, carpeta `puprime`) y usa el mismo motor que la skill
+Lee velas ya descargadas (`scripts/descargar_velas.py`: analisis/5m y analisis/15m, carpeta `puprime`) y usa el mismo motor que la skill
 (`engine.find_multi_setups`): cada combinación se mira con las velas del TF de su iFVG; la inversión, el CISD, el cierre sobre el CISD y la entrada (a la
 apertura de la vela siguiente de ese TF) son de ese TF. Cada combinación se simula por separado (una operación a la vez por mercado y combinación) y, aparte,
 «todas»: lo que haría el bot con todas a la vez (el primer cierre sobre el CISD de cada C2 y lado, una posición por mercado). Stop en el extremo del sweep,
 objetivo `rr` R y breakeven al tocar +`be` R, con el gestor del motor sobre las velas del TF de la combinación. Neto = bruto - spread supuesto (índices 1,5 pb,
-forex 0,7 pb). Se usa el tramo común a los tres TF de cada mercado (el de 3 min es el más corto).
+forex 0,7 pb). Se usa el tramo común a los dos TF de cada mercado (el de 5 min es el más corto).
 
 Uso (desde la raíz del proyecto):
     uv run --with pyarrow --with openpyxl python scripts/backtest_crt_combinaciones.py
@@ -101,11 +101,11 @@ def main() -> None:
     data = Path(args.datos)
     frames = []
     for sym in args.simbolos:
-        series = {m: load(data, f"{m}m", args.carpeta, sym) for m in (3, 5, 15)}
-        start = max(int(d["ts"].iloc[0]) for d in series.values())            # el tramo común a los tres TF
+        series = {m: load(data, f"{m}m", args.carpeta, sym) for m in (5, 15)}
+        start = max(int(d["ts"].iloc[0]) for d in series.values())            # el tramo común a los dos TF
         series = {m: d[d["ts"] >= start].reset_index(drop=True) for m, d in series.items()}
         t = run_symbol(series, sym, args.rr, args.be)
-        print(f"{sym}: desde {pd.Timestamp(start - AHEAD, unit='s'):%Y-%m-%d} NY, {len(series[3])} velas M3, embudo {t.attrs['funnel']}", flush=True)
+        print(f"{sym}: desde {pd.Timestamp(start - AHEAD, unit='s'):%Y-%m-%d} NY, {len(series[5])} velas M5, embudo {t.attrs['funnel']}", flush=True)
         frames.append(t)
     t = pd.concat(frames, ignore_index=True)
     order = ["todas"] + sorted(g for g in t["grupo"].unique() if g != "todas")
