@@ -46,7 +46,7 @@ def test_el_grupo_crt_separa_las_zonas_tbr_y_el_rendimiento_en_todos_los_casos()
     zones = {k: o.stats().get("n", 0) for k, o in v.zones}
     assert zones == {"Asia": 1, "London": 1, "NY Open": 0, "Fuera de TBR": 1 + 1, "Dentro de alguna TBR": 2, "Todas": 4}
     assert sum(zones[z] for z in CRT_ZONES) == zones["Todas"]                        # no se pierde ninguna operación
-    assert v.extra["mtf"] == []                                                      # CRT-C2 no usa FVG de MTF
+    assert [k for k, _ in v.extra["mtf"]] == ["M15", "M5"]                          # el TF del FVG normal se puede separar
     near = {k: o.stats().get("n", 0) for k, o in v.extra["cercania"]}                 # ops. 0, 1, 2 y 5 (M5, entrada 1): h = 3, -1, 4, 4
     assert near == {"±15 min de la hora en punto": 3, "Resto de horas": 1, "En TBR · ±15 min de la hora": 2, "En TBR · resto": 0,
                     "Fuera de TBR · ±15 min de la hora": 1, "Fuera de TBR · resto": 1}
@@ -105,14 +105,14 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     dlg.set_group("crt:indices")
     assert dlg.profile_key == "crt" and list(dlg.group_btns) == ["crt:indices", "crt:forex"]
     assert dlg.pattern_labelled.itemAt(0).widget().isHidden() and not dlg.crt_layouts[0].itemAt(0).widget().isHidden()
-    assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 3, 1)             # por defecto M3 y la orden límite
+    assert (dlg.crt_mtf, dlg.crt_ltf, dlg.crt_entry) == (0, 5, 1)             # por defecto el iFVG de M5
     g = bt.group("crt:indices")
     first = dlg.blocks["n"].value.text()
-    assert first != "-" and len(dlg.by_filter.rows) == 4 and not hasattr(dlg, 'by_mtf')
+    assert first != "-" and len(dlg.by_filter.rows) == 2 and not hasattr(dlg, 'by_mtf')
     assert [r[0].text() for r in dlg.by_zone.rows] == list(CRT_ZONES) + ["Dentro de alguna TBR", "Todas"]
-    for ltf in (5, 3):                                                              # los 2 LTF y los 2 modelos de entrada se pintan
+    for ltf in (5,):                                                                # el TF del iFVG y la entrada se pintan
         dlg.set_crt_ltf(ltf)
-        for entry in (1, 2):
+        for entry in (1,):
             dlg.set_crt_entry(entry)
             n = len(g.view("CRT", "", crt=dlg.crt).main)
             assert n and dlg.blocks["n"].value.text().replace(".", "") == str(n)
@@ -136,9 +136,9 @@ def test_la_ventana_crt_con_los_datos_reales_y_sus_botones():
     assert [r[0].text() for r in dlg.by_zone.rows][-1] == "Todas" and len(dlg.by_near.rows) == 6 and dlg.by_round.rows
     dlg.set_crt_tbr("Todas")
     dlg.set_crt_near("Todas")
-    dlg.set_crt_ltf(3)
+    dlg.set_crt_ltf(5)
     dlg.set_group("crt:forex")                                                      # otro grupo de mercados: se queda la selección
-    assert dlg.crt_ltf == 3 and dlg.group_key == "crt:forex" and dlg.compare.rows
+    assert dlg.crt_ltf == 5 and dlg.group_key == "crt:forex" and dlg.compare.rows
     assert "EURUSD" in "".join(r[0].text() for r in dlg.by_market.rows)
     dlg.by_year.click(2024)
     assert dlg.years == {2024} and dlg.blocks["n"].value.text() != "-"

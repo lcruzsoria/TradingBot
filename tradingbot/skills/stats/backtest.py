@@ -30,23 +30,23 @@ BOT_FILTER = MAIN_FILTERS[0]
 SIGNIFICANT_T = 2.0                                 # |t| por debajo de 2: no se distingue de cero
 DAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq", "tt", "f15t"}     # el resto son decimales (None -> NaN)
+INT_COLS = {"m", "p", "z", "d", "o", "s", "f", "e", "x", "v", "l", "n", "t", "h", "c", "ti", "tv", "tj", "th", "tq", "tt", "f15t", "f5t"}     # el resto son decimales (None -> NaN)
 OVERLAP_ALL, OVERLAP_GO = 1, 2                      # bits de la columna «f»: solapada con otra (todas / GO de Cortex)
-# CRT: columnas l (LTF en minutos: 5, 3, 1), n (entrada 1, 2, 3), t (máscara del timeframe del FVG de MTF que toca el extremo del sweep)
+# CRT: columnas l (TF del iFVG en minutos: 5 o 15), n (entrada, solo la 1), t (máscara del TF del FVG normal: 1 M15, 2 M5)
 # h (hora en punto 0-23 a la que está pegada la hora de entrada si dista 15 min o menos; -1 si no) y c (inicio de la vela H3 / H4 del
 # sweep, en minutos NY: con él el gráfico marca cada CRT). Para auditar cada operación en el gráfico: pe, ps, pt (entrada, stop y objetivo),
 # pa, pb (base y techo del iFVG invertido), pc (nivel del CISD) y las horas ti (inicio del FVG), tv (inversión), tj (CISD), th (extremo del
-# sweep), tq (inicio del iFVG) y tt (vuelta al FVG de MTF), en minutos NY. Y la zona del FVG de MTF tocado en cada timeframe: f15a / f15b (base y
-# techo) y f15t (primera vela, minutos NY; -1 si ese timeframe no lo toca), (el MTF es solo M15).
-CRT_MTF_BITS: dict[int, int] = {}                     # CRT-C2 no usa FVG de MTF (el FVG se busca en el propio LTF): sin timeframes que filtrar
-CRT_MTF_NAMES = {0: "Todos"}
-CRT_LTFS = (3, 5)
-CRT_ENTRIES = {1: "Orden límite en el nivel de C1", 2: "A mercado tras el retesteo del FVG"}
+# sweep), tq (vela del CISD) y tt (retest de la zona común), en minutos NY. Y la zona del FVG normal en su timeframe: f15a / f15b o f5a / f5b (base y
+# techo) y f15t / f5t (primera vela, minutos NY; -1 si ese timeframe no es el del FVG).
+CRT_MTF_BITS = {15: 1, 5: 2}                          # CRT por zona común: bit de la columna t = TF del FVG normal (el iFVG es de la columna l)
+CRT_MTF_NAMES = {0: "Todos", 15: "M15", 5: "M5"}
+CRT_LTFS = (5, 15)                                     # TF del iFVG: el de su inversión, su CISD y su entrada
+CRT_ENTRIES = {1: "A la apertura de la vela siguiente al cierre con cuerpo sobre el CISD"}
 CRT_ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
 CRT_TBR = ("Todas", "Dentro de TBR", "Asia", "London", "NY Open", "Fuera de TBR")          # filtro por la TBR de la hora de entrada
 CRT_NEAR = ("Todas", "±15 min de la hora", "Resto")                                          # y por la cercanía a una hora en punto
-CRT_TARGETS = {1: "1R", 2: "2R", 3: "Extremo de C1"}   # columna q: el objetivo con el que se simuló cada operación (cada uno su backtest)
-CRT_DEFAULT = (0, 3, 1, CRT_TBR[0], CRT_NEAR[0], 2)   # (TF del FVG: 0 = todos, LTF, entrada, TBR, cercanía a la hora en punto, objetivo)
+CRT_TARGETS = {1: "1R", 2: "2R", 3: "3R"}   # columna q: el objetivo con el que se simuló cada operación (cada uno su backtest)
+CRT_DEFAULT = (0, 5, 1, CRT_TBR[0], CRT_NEAR[0], 2)   # (TF del FVG: 0 = todos, LTF, entrada, TBR, cercanía a la hora en punto, objetivo)
 # Sensibilidad de los patrones: columna de cada operación -> variante
 SENSITIVITY = (("tp1", "objetivo 1R"), ("tp15", "objetivo 1.5R"), ("tp2", "objetivo 2R"), ("tp25", "objetivo 2.5R"),
                ("tp3", "objetivo 3R"), ("h12", "objetivo 2R, máx. 12 h"), ("r", "objetivo 2R, máx. 24 h"),

@@ -26,11 +26,11 @@ from . import engine
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
-MTF_TFS = {15: "M15"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
+MTF_TFS = {15: "M15", 5: "M5"}                                            # f15a, f15b, f15t...: el FVG de MTF tocado en cada TF
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup",
                 "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep"}
-LTF_ORDER = (3, 5)
+LTF_ORDER = (5, 15)
 
 
 def htf_minutes(symbol: str, indices=DEFAULT_US_INDICES) -> int:
@@ -183,7 +183,7 @@ def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
     x_in, x_out = at(d["e"]), at(d["x"])
     return {"pos": {"x0": x_in, "x1": max(x_out, x_in), "entry": d["pe"], "stop": d["ps"], "target": d["pt"]},
             "ifvg": {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]},
-            "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"], "label": "límite" if entry == 1 else "ruptura"},
+            "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"], "label": "CISD"},
             "extreme": {"x": at(d["th"]), "price": d["ps"]},
             "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
                      for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}
