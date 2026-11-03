@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -237,33 +238,51 @@ def test_la_zona_comun_da_el_largo_del_eurusd_del_02_11():
     cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
     setups, funnel = engine.find_zone_setups(df, df, 5, cfg)
     st = [x for x in setups if ny(x["C2"]) == "2026-11-02 21:00"][0]
-    assert st["dirección"] == "long" and st["mtf"] == "M15"
+    assert st["dirección"] == "long" and st["mtf"] == "M5"                              # BPR clásico de M5: iFVG bajista invertido (1.11815-1.11834) y FVG alcista posterior (1.11793-1.11818)
     assert ny(df["ts"][st["inv"]]) == "2026-11-02 21:55"                                # el iFVG se invierte: la vela cierra sobre su techo (1.11834)
-    assert ny(df["ts"][st["jt"]]) == "2026-11-02 22:10"                                 # el pullback a la zona común, de arriba abajo
-    assert ny(df["ts"][st["jc"]]) == "2026-11-02 22:55"                                 # la primera vela de M15 (TF del BPR) que cierra con cuerpo sobre el CISD (el máximo de la secuencia bajista que crea el iFVG) tras el toque
-    assert (-st["level"], -st["stop"]) == (pytest.approx(1.11891), pytest.approx(1.1177))
-    assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([1.11815, 1.11833])     # zona común: FVG de M15 1.11814-1.11833 y iFVG de M5 1.11815-1.11834
+    assert ny(df["ts"][st["jt"]]) == "2026-11-02 22:15"                                 # el retest del BPR, de arriba abajo
+    assert ny(df["ts"][st["jc"]]) == "2026-11-02 22:30"                                 # la primera vela de M5 (TF menor) que cierra con cuerpo sobre el CISD (el máximo de la secuencia bajista que crea el iFVG) tras el toque
+    assert (-st["level"], -st["stop"]) == (pytest.approx(1.11849), pytest.approx(1.1177))
+    assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([1.11815, 1.11818])     # el BPR: zona común de los dos huecos
     ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
-    assert ny(df["ts"][ep["start"]]) == "2026-11-02 23:00" and -ep["entry"] == pytest.approx(1.11902)
+    assert ny(df["ts"][ep["start"]]) == "2026-11-02 22:35" and -ep["entry"] == pytest.approx(1.11858)
 
 
-def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_manda_el_de_mayor_tf(monkeypatch):
+def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_a_igual_hora_manda_el_de_menor_tf(monkeypatch):
     df = eurusd()
     cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
     st = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"][0]
-    assert st["mtf"] == "M15"                                                           # con un FVG de M15 y otro de M5 posibles, el de mayor TF
+    assert st["mtf"] == "M5"                                                            # con un FVG de M15 y otro de M5 posibles, a igual hora el de M5 (los dos de M5 antes que el mixto)
     assert [x for x in engine.find_zone_setups(df, df, 30, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"] == []     # un iFVG de 30 min no cabe en un FVG de M15 ni de M5
     monkeypatch.setattr(engine, "ZONE_TFS", (5,))
     for x in engine.find_zone_setups(df, df, 5, cfg)[0]:                                # FVG de M5 con iFVG de M5: dos huecos distintos
         assert x["mtf"] == "M5" and (x["ifvg"][0], x["ifvg"][1]) != (x["zones"][0][1], x["zones"][0][2])
 
 
-def test_un_fvg_que_una_mecha_ya_mitigo_antes_de_nacer_el_ifvg_no_vale():
-    df = nas100()
-    cfg = engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)
-    setups, _ = engine.find_zone_setups(df, df, 5, cfg)
-    # el FVG de M5 27966.4-27969.9 (01:10-01:20 NY) lo mitiga la mecha de las 01:25 NY, antes de nacer el iFVG de 27951.7-27981.9 (02:00-02:10 NY): sin pareja ni setup
-    assert [x for x in setups if ny(x["C2"]) == "2026-11-03 00:00"] == []
+def test_el_bpr_es_la_zona_comun_de_un_ifvg_y_un_fvg_de_sentido_contrario_y_el_ifvg_sigue_activo_hasta_el_fvg():
+    for df, cfg in ((nas100(), engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)), (eurusd(), engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD))):
+        setups, _ = engine.find_zone_setups(df, df, 5, cfg)
+        assert setups
+        for st in setups:
+            v, m, (zb, zt, formed) = engine.view(df, st["sign"]), int(st["mtf"][1:]), (st["zones"][0][1], st["zones"][0][2], st["zones"][0][3])
+            series = df if m == 5 else engine.aggregate(df, m, cfg)
+            gaps = engine.bearish_fvgs(engine.view(series, st["sign"]), m)                  # el FVG normal es un hueco de sentido contrario al iFVG
+            assert any(abs(b - zb) < 1e-9 and abs(t - zt) < 1e-9 and f == formed for b, t, f in zip(gaps["bottom"], gaps["top"], gaps["formed"]))
+            (ib, it), (cb, ct) = st["ifvg"], st["common"]
+            assert max(ib, zb) == pytest.approx(cb) and min(it, zt) == pytest.approx(ct) and cb < ct   # BPR = zona común de los dos
+            k, f_mid = st["kf"], int(np.searchsorted(v["ts"], formed - 2 * m * 60))
+            assert k + 1 >= f_mid or v["low"][k + 1:f_mid].min() > ib                      # el iFVG no se cierra del todo antes de la vela central del FVG
+            assert st["cisd"][1] < cb                                                      # el CISD queda más allá del BPR
+
+
+def test_si_el_bpr_de_m15_ya_tuvo_su_retest_no_se_sustituye_por_uno_de_m5():
+    from tradingbot.skills.crt.chart import complete_series
+    for df, cfg in ((nas100(), engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)), (eurusd(), engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD))):
+        series = complete_series({5: df}, cfg)
+        first15 = {(c2, sign): t for c2, sign, lv, t in engine.find_zone_setups(series[15], series[15], 15, cfg, {15: series[15]})[0].contacts if lv == 0}
+        for st in engine.find_multi_setups(series, cfg)[0]:
+            if st["ltf"] == 5 and (st["C2"], st["sign"]) in first15:
+                assert st["t_cisd"] < first15[(st["C2"], st["sign"])]                      # el de M5 ya había dado la entrada cuando el de M15 tuvo su retest
 
 
 def test_las_combinaciones_de_tf_se_miran_con_las_velas_del_tf_del_ifvg():
@@ -274,8 +293,11 @@ def test_las_combinaciones_de_tf_se_miran_con_las_velas_del_tf_del_ifvg():
     assert sorted(series) == [5, 15]                                                   # el de 15 min sale del de 5; el de 3 no se puede sacar
     setups, _ = engine.find_multi_setups(series, cfg)
     assert {st["ltf"] for st in setups} <= {5, 15}
-    five = [st for st in setups if st["ltf"] == 5 and ny(st["C2"]) == "2026-11-02 21:00"]
-    assert five and ny(df["ts"][five[0]["jc"]]) == "2026-11-02 22:55"                  # la combinación de siempre (FVG M15 + iFVG M5) sigue dando la misma entrada
+    fifteen = [st for st in setups if st["ltf"] == 15 and ny(st["C2"]) == "2026-11-02 21:00"]
+    assert len(fifteen) == 1 and ny(series[15]["ts"][fifteen[0]["jc"]]) == "2026-11-02 22:45"       # el BPR de M15 (retest 22:15) cierra sobre su CISD en M15
+    ep = engine.entry_point(engine.view(series[15], -1), fifteen[0], 1, 15, RULE, cfg)
+    assert ny(series[15]["ts"][ep["start"]]) == "2026-11-02 23:00" and -ep["entry"] == pytest.approx(1.11902) and ep["risk"] == pytest.approx(0.00132)
+    assert [st for st in setups if st["ltf"] == 5 and ny(st["C2"]) == "2026-11-02 21:00"] == []     # y el de M5 (que cerraba a las 22:30) se descarta: el de M15 ya tuvo su retest
     ordered = [st["t_cisd"] for st in setups]
     assert ordered == sorted(ordered)                                                  # salen en orden de la hora del cierre sobre el CISD
     for st in setups:                                                                  # TF del FVG >= TF del iFVG
@@ -414,8 +436,8 @@ def test_el_stop_maximo_cancela_la_entrada(monkeypatch):
     cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
     st = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"][0]
     view = engine.view(df, -1)
-    assert engine.entry_point(view, st, 1, 5, RULE, cfg)["risk"] == pytest.approx(0.00132)         # 13,2 pips: dentro del límite de 25
-    monkeypatch.setattr(engine, "MAX_SL_FOREX", 12 * 1e-4)                                         # con un límite de 12 pips se cancela
+    assert engine.entry_point(view, st, 1, 5, RULE, cfg)["risk"] == pytest.approx(0.00088)         # 8,8 pips: dentro del límite de 25
+    monkeypatch.setattr(engine, "MAX_SL_FOREX", 8 * 1e-4)                                          # con un límite de 8 pips se cancela
     assert engine.entry_point(view, st, 1, 5, RULE, cfg) is None
     monkeypatch.setattr(engine, "MAX_SL_FOREX", 0.0)                                               # 0 = sin límite
     assert engine.entry_point(view, st, 1, 5, RULE, cfg) is not None

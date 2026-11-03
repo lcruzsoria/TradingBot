@@ -210,7 +210,10 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
     cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
     htf, out = base.htf_min, []
     fvg = _window(fvg_series, ts[0]) if fvg_series else None
+    first15 = engine.m15_retests(fvg[15], cfg, hist) if ltf == 5 and fvg and 15 in fvg else {}      # el BPR de M15 con retest manda sobre los de M5
     for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg, hist)[0].no_entry:
+        if (st["C2"], st["sign"]) in first15:
+            continue
         sgn, start = st["sign"], int(st["C2"])
 
         def zone(a: float, b: float) -> tuple[float, float]:
@@ -259,8 +262,11 @@ def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: 
     htf, out, closed_bars = base.htf_min, [], n - 1                      # la última vela puede estar formándose
     fvg = _window(fvg_series, ts[0]) if fvg_series else None
     setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg, fvg, hist)
+    first15 = engine.m15_retests(fvg[15], cfg, hist) if ltf == 5 and fvg and 15 in fvg else {}      # el BPR de M15 con retest manda sobre los de M5
     views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
     for st in setups:
+        if int(ts[st["jc"]]) >= first15.get((st["C2"], st["sign"]), 1 << 62):
+            continue
         L = views[st["sign"]]
         ep = engine.entry_point(L, st, entry, ltf, rule, cfg, closed_bars)
         if ep is None:

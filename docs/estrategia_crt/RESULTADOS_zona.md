@@ -2,6 +2,17 @@
 
 `scripts/backtest_crt_zona.py`, velas M5 de PUPrime (dic. 2023 - oct. 2026, 200 000 velas por mercado), con el mismo motor que la skill y la regla final (iFVG invertido, pullback a la zona común, cierre con cuerpo sobre el CISD, FVG de M15 o M5 con iFVG de TF igual o menor, manda el de mayor TF). Una operación a la vez por mercado, entrada a la apertura de la vela siguiente, stop en el extremo del sweep. Neto = bruto menos un spread supuesto (índices 1,5 pb, forex 0,7 pb): los parquet no traen el spread.
 
+**Actualización (03/11/2026, última): BPR clásico (iFVG y FVG de sentido contrario), retest, CISD y entrada en el TF menor.** El FVG normal pasa a ser un hueco de sentido contrario al iFVG (largo: iFVG bajista invertido y FVG alcista; BPR = su zona común). Orden: los dos de M15; si no, los dos de M5; solo después FVG M15 + iFVG M5; el BPR de M15 con retest no se sustituye por uno de M5. Retest, CISD (secuencia de velas del mismo color) y cierre de cuerpo se validan en el TF menor; stop máximo 25 pips / 125 puntos. Backtest rehecho (`scripts/backtest_crt_combinaciones.py`, velas de PUPrime ene. 2024 - 03/11/2026, 2R con BE +1R):
+
+| Combinación que dio la entrada | n | R bruto | R neto | IC95 neto |
+|---|---|---|---|---|
+| Todas (lo que haría el bot) | 2 038 | -0,012 | -0,114 | -0,16..-0,06 |
+| FVG M15 + iFVG M15 | 89 | -0,168 | -0,252 | -0,48..-0,03 |
+| FVG M15 + iFVG M5 | 57 | 0,000 | -0,095 | -0,40..+0,21 |
+| FVG M5 + iFVG M5 | 1 892 | -0,005 | -0,108 | -0,16..-0,06 |
+
+Por mercado, R neto: NAS100 -0,239 (326), SP500 -0,140 (406), DJ30 -0,141 (296), EURUSD -0,054 (537), GBPUSD -0,057 (473). Por puntos del sesgo (0 a 3): -0,111, -0,133, -0,122 y -0,071. **No hay ventaja neta**: el bruto es ≈0 y el spread lo vuelve negativo. Las secciones de abajo son de reglas anteriores y están desfasadas.
+
 **Actualización (03/11/2026, noche): CISD de la secuencia, en el TF del BPR, y stop máximo.** Reglas nuevas del usuario: el CISD es el extremo de la secuencia de velas del mismo color que genera el iFVG, se mide en el TF del BPR (el del FVG) y exige un **cierre con cuerpo** (la mecha no vale); y el stop máximo es de 25 pips en forex y 125 puntos en índices. Backtest rehecho con velas M5 y M15 de PUPrime recién descargadas (ene. 2024 - 03/11/2026) y el mismo motor que el bot. **Las tablas de abajo son de reglas anteriores y están desfasadas.**
 
 | Variante (PUPrime, regla actual) | n | R bruto | R neto | IC95 neto |

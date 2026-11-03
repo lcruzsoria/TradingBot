@@ -85,7 +85,7 @@ def bearish_fvgs(v: dict, minutes: int) -> dict:
     i = np.arange(2, len(ts))
     ok = (l[i - 2] > h[i]) & (ts[i] - ts[i - 2] <= 2 * minutes * 60 + 3600)
     i = i[ok]
-    return {"formed": ts[i] + minutes * 60, "bottom": h[i], "top": l[i - 2]}
+    return {"formed": ts[i] + minutes * 60, "first": ts[i - 2], "bottom": h[i], "top": l[i - 2]}
 
 
 def session_end(ts: int, cfg: Cfg) -> int:
@@ -104,6 +104,7 @@ class Setups(list):
         self.invalid: list[dict] = []
         self.nosetup: list[dict] = []                    # sweeps cuyo patrón no se completó ni se invalidó (la vela C2 acabó antes)
         self.no_entry: list[dict] = []                   # «Setup OK sin entrada»: la zona común existe pero el precio siguió sin tocarla
+        self.contacts: list[tuple] = []                  # (C2, sign, nivel del BPR, hora) del primer contacto con un BPR de cada nivel (0: FVG e iFVG de M15, 1: los dos de M5, 2: FVG de M15 e iFVG de M5)
 
 
 def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule, cfg: Cfg) -> tuple[list, dict]:
@@ -275,35 +276,26 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
         L, H = view(ltf, sign), view(htf, sign)
         bv = {k: view(v, sign) for k, v in big.items()}
         names = ("PDH", "máx") if sign > 0 else ("PDL", "mín")
-        fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in mtf}                          # el iFVG (LTF) no puede ser de mayor TF que el FVG
+        fv = {m: bearish_fvgs(view(mtf[m], sign), m) for m in mtf}                          # el FVG normal es de sentido contrario al iFVG (un largo: iFVG bajista que se invierte, FVG alcista); el iFVG no puede ser de mayor TF que el FVG
         lts, lo_, hi_, cl_, op_ = L["ts"], L["low"], L["high"], L["close"], L["open"]
         cisd_cache: dict = {}
-        mv = {m: view(mtf[m], sign) for m in mtf}                                           # velas de cada TF de FVG: el CISD y su cierre se miran en el TF del BPR (el del FVG)
 
-        def cisd_of(k: int, m: int) -> tuple[int, float, np.ndarray]:
-            """CISD del iFVG cuya 3.ª vela (de LTF) es `k`, visto en las velas de `m` minutos (el TF donde se crea el BPR): el extremo de la secuencia de velas
-            (en el corto, alcistas) que genera el iFVG, que incluye a la vela que contiene su vela central; se amplía hacia atrás y hacia delante mientras las velas
-            sigan en la misma dirección (3, 4, 5 o más). Devuelve (índice de LTF de la primera vela de la secuencia, extremo, fines de vela de `m`)."""
-            if (k, m) not in cisd_cache:
-                V = mv[m]
-                i2 = int(np.searchsorted(V["ts"], lts[k - 1], "right")) - 1
-                i3 = int(np.searchsorted(V["ts"], lts[k], "right")) - 1
-                a_, b_ = max(i2, 0), max(i2, 0)
-                while a_ - 1 >= 0 and V["close"][a_ - 1] > V["open"][a_ - 1] and V["ts"][a_] - V["ts"][a_ - 1] <= m * 60 + 3600:
+        def cisd_of(k: int) -> tuple[int, float]:
+            """CISD del iFVG cuya 3.ª vela es `k`: el extremo de la secuencia de velas (en el corto, alcistas) que genera el iFVG, que incluye a su vela central; se
+            amplía hacia atrás y hacia delante mientras las velas sigan en la misma dirección (3, 4, 5 o más). Se mira en las velas del TF del iFVG, que es el TF
+            menor de los dos huecos y donde se valida el BPR. Devuelve (índice de la primera vela de la secuencia, extremo)."""
+            if k not in cisd_cache:
+                a_, b_ = k - 1, k - 1
+                while a_ - 1 >= 0 and cl_[a_ - 1] > op_[a_ - 1] and lts[a_] - lts[a_ - 1] <= ltf_min * 60 + 3600:
                     a_ -= 1
-                while b_ + 1 < len(V["ts"]) and V["close"][b_ + 1] > V["open"][b_ + 1] and V["ts"][b_ + 1] - V["ts"][b_] <= m * 60 + 3600:
+                while b_ + 1 < len(lts) and cl_[b_ + 1] > op_[b_ + 1] and lts[b_ + 1] - lts[b_] <= ltf_min * 60 + 3600:
                     b_ += 1                                                                  # la secuencia puede ser de 3, 4, 5 o más velas del mismo color
-                cisd_cache[(k, m)] = (int(np.searchsorted(lts, V["ts"][a_])), float(V["low"][a_:b_ + 1].min()))
-            return cisd_cache[(k, m)]
+                cisd_cache[k] = (a_, float(lo_[a_:b_ + 1].min()))
+            return cisd_cache[k]
 
         def closes_beyond_cisd(p: tuple, j: int, after: int) -> bool:
-            """La vela de LTF `j` cierra una vela del TF del BPR (la del FVG) que empezó tras la de LTF `after` y cierra con cuerpo más allá del CISD de la pareja `p`."""
-            m, V = p[1][0], mv[p[1][0]]
-            end = int(lts[j]) + ltf_min * 60
-            q = int(np.searchsorted(V["ts"], end - m * 60))                                 # la vela de m minutos que acaba en `end`, si hay una
-            if q >= len(V["ts"]) or int(V["ts"][q]) != end - m * 60 or int(V["ts"][q]) < int(lts[after]) + ltf_min * 60:
-                return False
-            return float(V["close"][q]) < cisd_of(p[0], m)[1]
+            """La vela `j` (del TF del iFVG, el menor de los dos) es posterior a la del retest `after` y cierra con cuerpo más allá del CISD de la pareja `p`."""
+            return j > after and float(cl_[j]) < cisd_of(p[0])[1]
 
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
@@ -332,21 +324,21 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             pairs = []                                                          # (k, zona de MTF, zona común) con zona común no vacía
             for k in ks_all:
                 for m, zb, zt, formed in zones:
-                    if m == ltf_min and formed == int(lts[k]) + m * 60:         # el mismo hueco: el FVG normal y el iFVG tienen que ser dos distintos
-                        continue
-                    f0 = int(np.searchsorted(lts, formed))                      # velas anteriores al cierre del FVG normal
                     if int(lts[k]) + ltf_min * 60 > formed:                     # el primer hueco siempre es el iFVG: el FVG normal se forma después de él
                         continue
-                    if k + 1 < f0 and lo_[k + 1:f0].min() <= hi_[k - 2]:        # y tiene que seguir activo (sin cerrarse del todo, con mecha o cuerpo) hasta que se forma el FVG
+                    f_mid = int(np.searchsorted(lts, formed - 2 * m * 60))      # vela de desplazamiento del FVG (la central): ahí puede cerrarse y a la vez invertirse el iFVG
+                    if k + 1 < f_mid and lo_[k + 1:f_mid].min() <= hi_[k - 2]:   # el iFVG tiene que seguir activo (sin cerrarse del todo, con mecha o cuerpo) hasta que nace el FVG
                         continue
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
-                    if cb < ct and cisd_of(k, m)[1] < cb:                          # BPR (zona común) no vacío y con el CISD más allá de él (largo: un máximo por encima del BPR)
+                    if cb < ct and cisd_of(k)[1] < cb:                          # BPR (zona común) no vacío y con el CISD más allá de él (largo: un máximo por encima del BPR)
                         pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
             if not pairs:
                 continue
             funnel["con FVG de MTF y de LTF con zona común"] += 1
             pid = lambda p: (p[0], p[1][3], p[1][0])                        # identidad de una pareja: iFVG (vela 3), FVG (cierre y TF)
             hx, ih, touched, inverted, dead, seen_touch, trig, invalidated = float(hi_[s0]), s0, {}, {}, set(), False, None, False
+            contact: dict = {}                                              # primer contacto (vela) de cada pareja con su BPR
+            lvl = lambda p: 0 if ltf_min == 15 else (1 if p[1][0] == 5 else 2)   # orden de búsqueda: los dos huecos de M15, si no los dos de M5 y solo después FVG de M15 con iFVG de M5
             for j in range(s0, b):
                 if lo_[j] < c1l:                                                # llega al extremo opuesto de C1 sin setup: invalidado
                     setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx,
@@ -356,13 +348,14 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     break
                 if hi_[j] > hx:
                     hx, ih = float(hi_[j]), j
-                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and closes_beyond_cisd(p, j, touched[pid(p)])]     # tocada antes y una vela del TF del BPR cierra bajo el CISD
+                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and closes_beyond_cisd(p, j, touched[pid(p)])     # tocada antes y una vela del TF menor cierra bajo el CISD
+                        and not any(lvl(q) < lvl(p) and contact.get(pid(q), j + 1) <= j for q in pairs)]                                       # y ningún BPR de un nivel anterior tuvo ya su retest: ese es el válido
                 if done:
-                    k, z, common = max(done, key=lambda p: (p[1][0], p[0], p[1][3]))              # la del FVG de mayor TF
-                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": cisd_of(k, z[0])[1],
+                    k, z, common = max(done, key=lambda p: (-p[1][0], p[0], p[1][3]))             # a igual hora, la del FVG de menor TF (con el iFVG de M5: antes la de M5 que la mixta)
+                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": cisd_of(k)[1],
                             "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
                             "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
-                            "cisd": cisd_of(k, z[0])[:2], "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
+                            "cisd": cisd_of(k), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
                     break
                 for k, z, common in pairs:
                     key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
@@ -372,39 +365,55 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                         if k < j and cl_[j] < hi_[k - 2]:
                             inverted[k] = j
                     elif inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
+                        contact.setdefault(key, j)
                         if cl_[j] > common[1]:                                  # y cierra con cuerpo al otro lado de ella: el retest la invalida
                             dead.add(key)
                             seen_touch = True
                         elif key not in touched:
                             touched[key] = j                                    # pullback a la zona común: tiene que rebotar y cerrar sobre el CISD
                             seen_touch = True
+            for lv in {lvl(p) for p in pairs}:
+                hits = [contact[pid(p)] for p in pairs if lvl(p) == lv and pid(p) in contact]
+                if hits:
+                    setups.contacts.append((s2, sign, lv, int(lts[min(hits)])))
             funnel["con pullback a la zona"] += seen_touch
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
             elif (live := [p for p in pairs if p[0] in inverted and pid(p) not in dead and pid(p) not in touched])                     and (invalidated or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # una pareja viva con el iFVG invertido, sin retest, y C2 acabó (o el precio siguió)
-                k, z, common = max(live, key=lambda p: (p[1][0], p[0], p[1][3]))
+                k, z, common = max(live, key=lambda p: (-p[1][0], p[0], p[1][3]))
                 funnel["setup OK sin entrada"] += 1
                 setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "zones": [z],
-                                        "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": cisd_of(k, z[0])[:2],
+                                        "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": cisd_of(k),
                                         "inv": inverted[k], "end": j if invalidated else b - 1})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
 
 
+def m15_retests(series15: pd.DataFrame, cfg: Cfg, hist: pd.DataFrame | None = None) -> dict:
+    """(C2, sign) -> hora del primer retest de un BPR de M15 (iFVG y FVG de M15). Si ese BPR ya tuvo su retest, es el válido y no se sustituye por uno de M5."""
+    contacts = find_zone_setups(series15, series15, 15, cfg, {15: series15}, hist)[0].contacts
+    return {(c2, sign): t for c2, sign, lv, t in contacts if lv == 0}
+
+
 def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) -> tuple[list, dict]:
-    """Los setups de zona común de todas las combinaciones de timeframes: FVG normal y iFVG de 15 o 5 minutos con TF del FVG >= TF del iFVG. `series` =
-    {TF en minutos: velas de ese TF} (las que haya de 3, 5 y 15). Cada combinación se evalúa con las velas del TF del iFVG: la inversión, el CISD, el cierre
-    sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Cada setup lleva `ltf` (TF del iFVG, que es el de su CISD y su entrada) y sus
-    índices son de las velas de ese TF. Salen en orden de la hora de su cierre sobre el CISD."""
-    out, funnel = [], {}
-    for i in sorted(t for t in series if t in ZONE_TFS):
+    """Los setups de BPR de todas las combinaciones de timeframes: iFVG y FVG normal (de sentido contrario) los dos de 15 min, los dos de 5 o FVG de 15 con iFVG
+    de 5. `series` = {TF en minutos: velas de ese TF} (las que haya de 5 y 15). Cada combinación se evalúa con las velas del TF del iFVG (el menor de los dos):
+    la inversión, el retest, el CISD, el cierre sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Si el BPR de M15 de una C2 ya tuvo su
+    retest, los setups de M5 de esa C2 y lado posteriores a él se descartan. Cada setup lleva `ltf` (TF del iFVG) y sus índices son de las velas de ese TF.
+    Salen en orden de la hora de su cierre sobre el CISD."""
+    out, funnel, first15 = [], {}, {}
+    for i in sorted((t for t in series if t in ZONE_TFS), reverse=True):                    # primero M15: si su BPR ya tuvo el retest, no se sustituye por uno de M5
         fvg = {m: v for m, v in series.items() if m >= i and m in ZONE_TFS}
         setups, f = find_zone_setups(series[i], series[i], i, cfg, fvg, hist)
+        for c2, sign, lv, t in setups.contacts:
+            if lv == 0:
+                first15[(c2, sign)] = min(t, first15.get((c2, sign), t))
         for st in setups:
             st["ltf"] = i
             st["t_cisd"] = int(series[i]["ts"].iloc[st["jc"]])
-        out += setups
+            if i == 15 or st["t_cisd"] < first15.get((st["C2"], st["sign"]), st["t_cisd"] + 1):
+                out.append(st)
         for k, v in f.items():
             funnel[k] = funnel.get(k, 0) + v
     out.sort(key=lambda st: (st["t_cisd"], -st["ltf"]))

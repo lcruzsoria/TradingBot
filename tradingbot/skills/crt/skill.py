@@ -33,16 +33,16 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
             "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
             "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY,
             "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
-            "reason": f"CRT: sweep {st['dirección']} en C2 ({st.get('sweep', 'vela C1')}); el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
-                      f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
+            "reason": f"CRT: sweep {st['dirección']} en C2 ({st.get('sweep', 'vela C1')}); el iFVG de M{st.get('ltf', tf)} y el FVG de {st['mtf']} (de sentido contrario) forman un BPR; con el iFVG invertido el "
+                      f"precio vuelve a él y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
 
 
 @register_skill("crt")
 class CrtSkill(Skill):
     title = "CRT"
     description = ("Estrategia CRT (Candle Range Theory) por zona común, dentro de C2: una vela H3 (índices) o H4 (forex) barre con una mecha el "
-                   "máximo o mínimo de la anterior; dentro de C2 un FVG y un iFVG, de 15 o 5 min con TF del FVG >= TF del iFVG (se busca el de mayor TF; el CISD y la "
-                   "entrada son del TF del iFVG), comparten una zona. Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
+                   "máximo o mínimo de la anterior; dentro de C2 un iFVG y un FVG de sentido contrario forman un BPR (zona común): los dos de 15 min, si no los dos de 5 y solo "
+                   "después FVG de 15 con iFVG de 5; el retest, el CISD y la entrada son del TF menor (el del iFVG). Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
                    "vela que cierra con el cuerpo más allá del CISD (el extremo de la vela que creó el iFVG) da la entrada, a la apertura de la vela "
                    "siguiente. Stop en el extremo del sweep y objetivo 2R (el breakeven a +1R lo lleva Setup). Si la zona existe pero el precio sigue "
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "

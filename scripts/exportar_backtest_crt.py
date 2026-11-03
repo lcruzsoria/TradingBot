@@ -1,4 +1,4 @@
-"""Backtest del CRT por zona común para la ventana Backtest del bot: FVG e iFVG de 15 o 5 min (TF del FVG >= TF del iFVG), una sola entrada.
+"""Backtest del CRT por BPR para la ventana Backtest del bot: iFVG y FVG de sentido contrario, los dos de 15 min, los dos de 5 o FVG de 15 con iFVG de 5 (en ese orden), una sola entrada.
 
 Para cada mercado busca los setups con el motor de la skill (`engine.find_zone_setups`: iFVG invertido, pullback a la zona común, cierre con cuerpo sobre el
 CISD, entrada a la apertura de la vela siguiente de ese TF; stop en el extremo del sweep) y los simula con objetivo 1R, 2R (el del bot) y 3R, con BE a +1R.
@@ -107,11 +107,14 @@ def simulate() -> pd.DataFrame:
             start = max(int(d["ts"].iloc[0]) for d in series.values())                  # el tramo común a los dos TF
             series = {m: d[d["ts"] >= start].reset_index(drop=True) for m, d in series.items()}
             views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
+            first15 = engine.m15_retests(series[15], cfg)                                # el BPR de M15 que ya tuvo su retest no se sustituye por uno de M5
             for ltf in LTFS:
                 t0 = time.time()
                 fvg = {m: v for m, v in series.items() if m >= ltf}
                 setups, funnel = engine.find_zone_setups(series[ltf], series[ltf], ltf, cfg, fvg)
                 ts = series[ltf]["ts"].to_numpy().astype(np.int64)
+                if ltf == 5:
+                    setups[:] = [x for x in setups if int(ts[x["jc"]]) < first15.get((x["C2"], x["sign"]), 1 << 62)]
                 valid += [{"grupo": gkey, "mercado": sym, "C2": s["C2"], "d": int(s["sign"] > 0)} for s in setups]
                 invalid += [{"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
                              "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.invalid]
