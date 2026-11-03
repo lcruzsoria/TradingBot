@@ -344,8 +344,8 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
-            elif not seen_touch and inverted and (invalidated or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # invertido y el precio siguió (o C2 acabó) sin el pullback
-                k, z, common = max((p for p in pairs if p[0] in inverted), key=lambda p: (p[1][0], p[0], p[1][3]))
+            elif (live := [p for p in pairs if p[0] in inverted and pid(p) not in dead and pid(p) not in touched])                     and (invalidated or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # una pareja viva con el iFVG invertido, sin retest, y C2 acabó (o el precio siguió)
+                k, z, common = max(live, key=lambda p: (p[1][0], p[0], p[1][3]))
                 funnel["setup OK sin entrada"] += 1
                 setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "zones": [z],
                                         "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": (k - 1, float(lo_[k - 1])),
