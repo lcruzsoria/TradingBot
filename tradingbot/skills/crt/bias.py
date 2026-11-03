@@ -1,7 +1,8 @@
 """Sesgo del perfil CRT: zonas de reversión en HTF (1h, 4h o 1d) que dan puntos a un setup. Independiente del sesgo de los demás perfiles.
 
 Para un setup largo cuentan las zonas de SOPORTE y para uno corto las de RESISTENCIA, nacidas antes de la vela C2 del setup (la del patrón de doble FVG +
-CISD) y como mucho `lookback_days` días antes de su hora de creación. Cada zona cuenta **un punto**; con `puntos >= min_score` el setup es GO:
+CISD) y como mucho `lookback_days` días antes de su hora de creación. La validación es **por regla y de mayor a menor timeframe** (1d, 4h, 1h): en
+cuanto una regla se cumple en un TF, ese TF le da su **punto** y no se mira en los menores. Con `puntos >= min_score` el setup es GO:
   1. FVG en HTF a la izquierda del precio (hueco entre la vela 1 y la 3), con el CRT formándose dentro de esa zona.
   2. Rejection block: la zona que define la mecha de un swing de 1 vela a cada lado (configurable) cuya mecha ocupa más del 50 % de su vela (configurable)
      (largo: del mínimo al borde inferior del cuerpo del swing low).
@@ -132,7 +133,7 @@ class SetupBias:
         if not self.zones:
             return f"Sin zonas HTF de {side} para el setup {self.direction}: 0 puntos (hacen falta {self.min_score:g})"
         listed = "; ".join(f"{dict(RULES)[z['rule']]} {z['tf']} {z['bottom']:.5g}-{z['top']:.5g}" for z in self.zones)
-        return f"{len(self.zones)} zona(s) HTF de {side}, un punto cada una (hacen falta {self.min_score:g}): {listed}"
+        return f"{len(self.zones)} regla(s) validada(s) con zonas HTF de {side}, un punto cada una (hacen falta {self.min_score:g}): {listed}"
 
     def result(self) -> BiasResult:
         """El sesgo del setup para la tarjeta: Bullish (largo) o Bearish (corto) si llega a los puntos; si no, No Bias."""
@@ -152,14 +153,26 @@ class SetupBias:
 
 def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[float, float], cfg: engine.Cfg, bias_cfg: CrtBiasCfg,
              ahead: int = 0) -> SetupBias:
-    """Los puntos de un setup: zonas HTF a favor creadas antes de su C2 (hora de servidor `c2_start`), como mucho `lookback_days` antes, que se
-    solapan con la zona común `common` (mínimo, máximo) del CRT."""
+    """Los puntos de un setup: para cada regla, la primera zona a favor que se cumple yendo del TF mayor al menor (1d, 4h, 1h): creada antes de la C2
+    (hora de servidor `c2_start`), como mucho `lookback_days` antes, y solapada con la zona común `common` (mínimo, máximo) del CRT. Una regla da como
+    mucho un punto, el del TF mayor en que se cumple; en cuanto se cumple no se sigue con los TF menores."""
     when = datetime.fromtimestamp(c2_start - ahead, timezone.utc)
     if not bias_cfg.enabled:
         return SetupBias(False, direction, bias_cfg.min_score, [], when)
     lo, hi = min(common), max(common)
     first = c2_start - int(bias_cfg.lookback_days * 86400)
-    found = [z for z in zones(df[df["ts"] < c2_start], direction, cfg, bias_cfg.tfs, bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100)
-             if first <= z["created"] <= c2_start and z["bottom"] <= hi and z["top"] >= lo]
-    found.sort(key=lambda z: (z["created"], z["rule"], z["tf"]))
+    history = df[df["ts"] < c2_start]
+    pending = [key for key, _ in RULES]
+    found = []
+    for tf in sorted(bias_cfg.tfs, key=lambda t: TF_MINUTES[t], reverse=True):               # del mayor al menor
+        if not pending:
+            break                                                                              # todas las reglas ya tienen su punto
+        ok = [z for z in zones(history, direction, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100)
+              if z["rule"] in pending and first <= z["created"] <= c2_start and z["bottom"] <= hi and z["top"] >= lo]
+        for key in list(pending):
+            hits = sorted((z for z in ok if z["rule"] == key), key=lambda z: z["created"])
+            if hits:
+                found.append(hits[-1])                                                         # la más reciente de ese TF; el TF mayor ya da el punto
+                pending.remove(key)
+    found.sort(key=lambda z: [k for k, _ in RULES].index(z["rule"]))
     return SetupBias(True, direction, bias_cfg.min_score, found, when)

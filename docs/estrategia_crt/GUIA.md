@@ -66,7 +66,8 @@ EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:
 Sesgo propio del perfil, independiente del de los demás (el perfil CRT no lleva la skill Bias): puntúa cada setup con las **zonas de reversión en HTF** (1h, 4h o 1d) que lo respaldan. Va en el bloque `CRT_BIAS_*` de `tradingbot.env` y la tarjeta de sesgo enseña el del último setup.
 
 - **Dirección:** soporte para los largos y resistencia para los cortos.
-- **Cada zona cuenta un punto.** Con **puntos ≥ `CRT_BIAS_MIN_SCORE` (1)** el setup es GO; si no, NO GO.
+- **Cada regla da un punto** (FVG, rejection block y order block: de 0 a 3). Con **puntos ≥ `CRT_BIAS_MIN_SCORE` (1)** el setup es GO; si no, NO GO.
+- **Validación por regla y de mayor a menor TF** (1d, 4h, 1h): en cuanto una regla se cumple en un TF, ese TF le da el punto y no se sigue con los menores (p. ej. si el setup se forma dentro de un FVG de 1d, no hace falta mirar el FVG de 4h ni de 1h).
 - **Apagado (`CRT_BIAS_ENABLED=false`, por defecto):** el sesgo es 0 y el setup es siempre GO.
 - **Vigencia:** la zona tiene que haberse creado **antes de la C2** del setup (la vela del patrón doble FVG + CISD) y como mucho `CRT_BIAS_LOOKBACK_DAYS` (10) días antes de su hora de creación.
 - **«Dentro de la zona»:** la zona común del CRT (FVG ∩ iFVG) se solapa con la zona HTF.

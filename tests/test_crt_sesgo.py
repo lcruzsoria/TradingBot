@@ -176,3 +176,34 @@ def test_el_perfil_crt_no_lleva_la_skill_bias_de_los_otros_perfiles():
     kept = strategy_skills([{"type": t} for t in ("bias", "cortex", "pattern", "setup")], "crt")
     assert "bias" not in [s["type"] for s in kept] and [s["type"] for s in kept] == ["cortex", "setup", "crt"]
     assert "bias" in [s["type"] for s in strategy_skills([{"type": "bias"}], "calendario")]       # los demás perfiles siguen con la suya
+
+
+def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monkeypatch):
+    llamadas = []
+    zona = lambda rule, tf, created: {"rule": rule, "tf": tf, "bottom": 101.0, "top": 105.0, "created": created, "candle": created}      # noqa: E731
+    c2 = c2_at(300)
+
+    def falsas(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5):
+        llamadas.append(tfs[0])
+        return {"1d": [zona("fvg", "1d", c2 - 5 * 86400)],
+                "4h": [zona("fvg", "4h", c2 - 3 * 86400), zona("ob", "4h", c2 - 2 * 86400)],
+                "1h": [zona("fvg", "1h", c2 - 3600), zona("ob", "1h", c2 - 7200), zona("rejection", "1h", c2 - 7200)]}[tfs[0]]
+
+    monkeypatch.setattr(bias, "zones", falsas)
+    got = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("1h", "4h", "1d")), AHEAD)
+    assert llamadas == ["1d", "4h", "1h"]                                                         # de mayor a menor
+    assert [(z["rule"], z["tf"]) for z in got.zones] == [("fvg", "1d"), ("rejection", "1h"), ("ob", "4h")] or \
+        sorted((z["rule"], z["tf"]) for z in got.zones) == [("fvg", "1d"), ("ob", "4h"), ("rejection", "1h")]
+    assert got.score == 3                                                                         # un punto por regla, no uno por zona (el FVG de 4h y de 1h no suman)
+    llamadas.clear()
+    solo = bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("4h", "1d")), AHEAD)
+    assert llamadas == ["1d", "4h"] and sorted((z["rule"], z["tf"]) for z in solo.zones) == [("fvg", "1d"), ("ob", "4h")]
+    llamadas.clear()
+
+    def todo_en_1d(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5):
+        llamadas.append(tfs[0])
+        return [zona(r, "1d", c2 - 86400) for r in ("fvg", "rejection", "ob")] if tfs[0] == "1d" else []
+
+    monkeypatch.setattr(bias, "zones", todo_en_1d)
+    assert bias.evaluate(hourly(FLAT * 4), "long", c2, (102, 103), CFG, bias.CrtBiasCfg(True, 10, 1, ("1h", "4h", "1d")), AHEAD).score == 3
+    assert llamadas == ["1d"]                                                                     # con las tres reglas validadas en 1d no se mira más
