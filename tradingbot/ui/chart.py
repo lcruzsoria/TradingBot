@@ -138,13 +138,8 @@ class CrtPill(_StripePill):
         tone = CRT_COLORS[crt["direction"]]
         self._bar = QColor(tone)
         self.result = result
-        tfs = ""
-        if crt.get("common"):                                         # setup de zona común: el TF del FVG y el del iFVG, en la propia etiqueta
-            fvg = " ".join(f"FVG {z['name']}" for z in crt.get("fvgs") or [])
-            tfs = (f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;<span style="color:{theme.MUTED}">'
-                   f'{html.escape(fvg)} + iFVG M{crt.get("ltf", "")}</span>')
         self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<b style="color:{tone}">{"▲" if long else "▼"}</b>&nbsp;'
-                     f'<span style="color:{theme.TEXT}">CRT {"alcista" if long else "bajista"}</span>{tfs}'
+                     f'<span style="color:{theme.TEXT}">CRT {"alcista" if long else "bajista"}</span>'
                      f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
                      f'<b style="color:{RESULT_TEXT.get(result, color or theme.MUTED)}">{result}</b></span>')
         self.setZValue(8)

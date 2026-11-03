@@ -1,5 +1,6 @@
-"""Los CRT del gráfico (botón CRT del perfil CRT): los del backtest, los que el bot operó en directo (`live_marks`) y los «Setup OK sin Entrada»
-(`no_entry_marks`).
+"""Los CRT del gráfico (botón CRT del perfil CRT): los del backtest, los setups de zona común de los últimos días con la operación que habrían dado
+(`signal_marks`: también los que el bot operó en directo) y los «Setup OK sin Entrada» (`no_entry_marks`). Los setups se calculan UNA vez con las
+velas de la skill (M5 o M3) y se dibujan en cualquier timeframe del gráfico (`retime`), así su estado no cambia al cambiar de timeframe.
 
 Las marcas del backtest (`crt_marks`):
 
@@ -188,79 +189,6 @@ def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
                      for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}
 
 
-LIVE_BARS = 2 * 1440                                             # minutos de velas anteriores a la entrada con los que la skill busca el setup
-
-
-def live_marks(trades, df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rule=None, indices=DEFAULT_US_INDICES) -> list[dict]:
-    """Marcas (formato de ChartView.set_crts) de las operaciones que el bot hizo en directo: `trades` son `Trade` del forwardtest.
-
-    El setup no se guarda con la orden: se vuelve a buscar con el motor sobre las velas cargadas, igual que la skill al dar la señal
-    (los 2 días antes de la entrada, la entrada en la vela que abrió la orden) y se dibuja lo que la dio: el FVG de MTF, el iFVG de LTF,
-    la zona que comparten, el CISD, el toque de la zona y la posición. Solo salen las del timeframe del gráfico."""
-    rule = rule or engine.Rule(be_at=0.0)
-    ts = df["ts"].to_numpy().astype(np.int64)
-    highs, lows = df["high"].to_numpy(), df["low"].to_numpy()
-    n = len(ts)
-    base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
-    cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
-    htf, step, out = base.htf_min, ltf * 60, []
-    for trade in trades:
-        order, closed = trade.order, trade.closed
-        if order.symbol != symbol or order.pattern_key != "crt" or not order.entry_ts or minutes(order.timeframe) != ltf:
-            continue
-        x_in = int(np.searchsorted(ts, order.entry_ts, "left"))
-        if x_in >= n or int(ts[x_in]) != order.entry_ts:
-            continue
-        lo = max(0, x_in + 1 - LIVE_BARS // ltf)
-        sub = df.iloc[lo:x_in + 1].reset_index(drop=True)
-        closed_bars = len(sub) - 1
-        setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg)
-        views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
-        st = ep = None
-        for cand in reversed(setups):
-            if cand["dirección"] != order.direction:
-                continue
-            ep = engine.entry_point(views[cand["sign"]], cand, entry, ltf, rule, cfg, closed_bars)
-            if ep is not None and int(views[1]["ts"][ep["start"]]) == order.entry_ts:
-                st = cand
-                break
-        if st is None:
-            continue
-        sgn = st["sign"]                                               # el motor ve el largo como un corto con los precios cambiados de signo
-
-        def zone(a: float, b: float) -> tuple[float, float]:
-            return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
-
-        start = int(st["C2"])
-        x0 = int(np.searchsorted(ts, start, "left"))
-        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
-        xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
-        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
-        if x1 <= x0 or xc1 >= x0:
-            continue
-        end = int(np.searchsorted(ts, closed.exit_ts, "left")) if closed else n - 1
-        zb, zt = zone(st["z_bottom"], st["z_top"])
-        state = STATES.get(closed.result, "tiempo") if closed else "abierta"
-        out.append({
-            "x0": x0, "x1": x1, "xc1": xc1, "direction": order.direction, "state": state, "label": "CRT",
-            "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
-            "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
-            "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
-            "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": entry, "entry_name": CRT_ENTRIES[entry], "htf": htf, "start": start,
-            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "others": [], "live": True,
-            "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
-            "pos": {"x0": x_in, "x1": max(end, x_in), "entry": order.price, "stop": order.stop, "target": order.target},
-            "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
-            "common": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zb, "top": zt},
-            "cisd": {"x0": lo + st["cisd"][0], "x1": lo + st["jc"], "level": sgn * st["cisd"][1], "label": "CISD"},
-            "touch": {"x": lo + st["jt"], "price": zt if order.direction == "long" else zb,
-                      "when": datetime.fromtimestamp(int(ts[lo + st["jt"]]) - ahead, timezone.utc).strftime("%d/%m %H:%M")},
-            "extreme": {"x": lo + st["ih"], "price": order.stop},
-            "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")), "x1": lo + st["jc"],
-                      "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
-    return out
-
-
 NO_ENTRY_DAYS = 4                                                # días de velas en los que se buscan los «Setup OK sin entrada»
 
 
@@ -303,4 +231,101 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
             "extreme": {"x": lo + st["ih"], "price": sgn * st["stop"]},
             "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")) + lo, "x1": lo + end,
                       "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
+    return out
+
+
+HOW_STATES = {"objetivo": "objetivo", "stop": "stop", "BE": "be", "sesión": "tiempo"}      # cómo acaba `engine.manage` -> estado del gráfico
+
+
+def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES) -> list[dict]:
+    """Marcas de los setups de zona común de las últimas velas que dieron entrada (cierre sobre el CISD tras el pullback), con la operación que
+    habría salido sobre las velas cargadas (stop, objetivo, breakeven a +`be` R y cierre de sesión), aunque el bot no la abriera: así un setup válido
+    no se queda como «sin evaluar». Las operaciones que sí abrió el bot se reconocen por su hora de entrada y su estado manda sobre el simulado (lo hace la ventana)."""
+    ts_all = df["ts"].to_numpy().astype(np.int64)
+    lo = max(0, len(ts_all) - NO_ENTRY_DAYS * 1440 // ltf)
+    sub = df.iloc[lo:].reset_index(drop=True)
+    ts, highs, lows = ts_all[lo:], sub["high"].to_numpy(), sub["low"].to_numpy()
+    n = len(ts)
+    base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
+    cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
+    rule = engine.Rule(rr=rr, be_at=be)
+    htf, out, closed_bars = base.htf_min, [], n - 1                      # la última vela puede estar formándose
+    setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg)
+    views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
+    for st in setups:
+        L = views[st["sign"]]
+        ep = engine.entry_point(L, st, entry, ltf, rule, cfg, closed_bars)
+        if ep is None:
+            continue
+        res = engine.manage(L, st, ep, rule)
+        if res is None:
+            continue
+        sgn, start = st["sign"], int(st["C2"])
+
+        def zone(a: float, b: float) -> tuple[float, float]:
+            return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
+
+        x0 = int(np.searchsorted(ts, start, "left"))
+        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
+        xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
+        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
+        if x1 <= x0 or xc1 >= x0 or x0 >= n:
+            continue
+        x_in, x_out = int(ep["start"]), int(res["exit_index"])
+        zb, zt = zone(st["z_bottom"], st["z_top"])
+        state = "abierta" if res["cómo"] == "fin de datos" else HOW_STATES.get(res["cómo"], "tiempo")
+        out.append({
+            "x0": lo + x0, "x1": lo + x1, "xc1": lo + xc1, "direction": st["dirección"], "state": state, "label": "CRT",
+            "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+            "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
+            "mtf": [st["mtf"]], "ltf": ltf, "entry": entry, "entry_name": CRT_ENTRIES.get(entry, ""), "htf": htf, "start": start, "others": [],
+            "fvg_all": [st["mtf"]], "live": True, "simulated": True, "entry_ts": int(ts[x_in]),
+            "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
+            "pos": {"x0": lo + x_in, "x1": lo + max(x_out, x_in), "entry": sgn * ep["entry"], "stop": sgn * st["stop"], "target": sgn * res["target"]},
+            "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
+            "common": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zb, "top": zt},
+            "cisd": {"x0": lo + st["cisd"][0], "x1": lo + st["jc"], "level": sgn * st["cisd"][1], "label": "CISD"},
+            "touch": {"x": lo + st["jt"], "price": zt if sgn < 0 else zb,
+                      "when": datetime.fromtimestamp(int(ts[st["jt"]]) - ahead, timezone.utc).strftime("%d/%m %H:%M")},
+            "extreme": {"x": lo + st["ih"], "price": sgn * st["stop"]},
+            "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")) + lo, "x1": lo + st["jc"],
+                      "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
+    return out
+
+
+HTF_KEYS = ("x0", "x1", "xc1", "x2")                                     # límites de las velas del HTF: están alineados con las velas de cualquier timeframe
+POINT_KEYS = (("pos", "x0"), ("pos", "x1"), ("ifvg", "x0"), ("ifvg", "x1"), ("common", "x0"), ("common", "x1"), ("cisd", "x0"), ("cisd", "x1"),
+              ("touch", "x"), ("extreme", "x"))
+
+
+def zone_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES) -> list[dict]:
+    """Los setups de zona común de las últimas velas: los que dieron entrada (con la operación simulada) y los «Setup OK sin Entrada»."""
+    return signal_marks(df, symbol, ahead, ltf, entry, rr, be, indices) + no_entry_marks(df, symbol, ahead, ltf, indices)
+
+
+def retime(marks: list[dict], ts_src, ts_dst) -> list[dict]:
+    """Las marcas calculadas sobre las velas `ts_src` (índices de vela) pasadas a las velas `ts_dst` de otro timeframe por su hora, para dibujar el mismo
+    setup con el mismo estado en cualquier timeframe del gráfico."""
+    ts_src, ts_dst = np.asarray(ts_src, dtype=np.int64), np.asarray(ts_dst, dtype=np.int64)
+    n_src, n_dst = len(ts_src), len(ts_dst)
+
+    def at(x, boundary: bool) -> int:
+        x = int(x)
+        if x >= n_src:                                                   # más allá de la última vela: pegado al final del gráfico
+            return n_dst
+        t = int(ts_src[max(x, 0)])
+        i = int(np.searchsorted(ts_dst, t, "left" if boundary else "right"))
+        return i if boundary else max(i - 1, 0)
+
+    out = []
+    for m in marks:
+        m = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v) for k, v in m.items()}
+        for k in HTF_KEYS:
+            if k in m:
+                m[k] = at(m[k], True)
+        for group, key in POINT_KEYS:
+            if m.get(group):
+                m[group][key] = at(m[group][key], False)
+        m["fvgs"] = [dict(z, x0=at(z["x0"], False), x1=at(z["x1"], False)) for z in m.get("fvgs") or []]
+        out.append(m)
     return out

@@ -144,7 +144,8 @@ def window(tmp_path, monkeypatch, strategy="crt"):
     import tradingbot.skills  # noqa: F401
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
-    monkeypatch.setattr("tradingbot.skills.crt.chart.no_entry_marks", lambda *a, **k: [])       # los «sin entrada» tienen su propio test
+    monkeypatch.setattr("tradingbot.skills.crt.chart.no_entry_marks", lambda *a, **k: [])       # los «sin entrada» y los simulados tienen su propio test
+    monkeypatch.setattr("tradingbot.skills.crt.chart.signal_marks", lambda *a, **k: [])
     cfg = {"app": {"symbol": "NAS100.r", "timeframe": "5m", "watchlist": ["NAS100.r"], "strategy": strategy}}
     return MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "setup"}]), cfg, "t")
 
@@ -277,32 +278,6 @@ def test_las_velas_sin_sweep_tambien_llevan_caja_neutra(tmp_path, monkeypatch):
     assert any("sin sweep" in t or "sin evaluar" in t for t in texts) and any("CRT bajista" in t for t in texts)
 
 
-def test_las_operaciones_en_directo_se_dibujan_con_todos_sus_niveles():
-    from types import SimpleNamespace
-    from crt_scenarios import eurusd
-    from tradingbot.skills.crt.chart import live_marks
-    df = eurusd()
-    x_in = int((df["ts"] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD).to_numpy().argmax())
-    order = SimpleNamespace(symbol="EURUSD", pattern_key="crt", timeframe="5m", direction="long", entry_ts=int(df["ts"][x_in]),
-                            price=1.11843, stop=1.1177, target=1.11989)
-    marks = live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1)
-    assert len(marks) == 1
-    m = marks[0]
-    assert m["state"] == "abierta" and m["direction"] == "long"
-    assert (m["fvgs"][0]["name"], m["fvgs"][0]["bottom"], m["fvgs"][0]["top"]) == ("M15", pytest.approx(1.11814), pytest.approx(1.11833))
-    assert (m["ifvg"]["bottom"], m["ifvg"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11834))
-    assert (m["common"]["bottom"], m["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833))
-    assert m["cisd"]["level"] == pytest.approx(1.11841) and m["cisd"]["x1"] == x_in - 1          # la vela de las 22:25 cierra sobre el CISD
-    assert m["touch"]["x"] == x_in - 4                                                           # el pullback de las 22:10, de arriba abajo
-    assert m["pos"]["x0"] == x_in and (m["pos"]["entry"], m["pos"]["stop"], m["pos"]["target"]) == (1.11843, 1.1177, 1.11989)
-    order.timeframe = "3m"                                                                       # otro LTF que el del gráfico: no se dibuja
-    assert live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1) == []
-
-
-def ny_2100(st) -> bool:
-    return int(st["C2"]) == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD
-
-
 def test_el_setup_sin_toque_de_la_zona_se_marca_setup_ok_sin_entrada():
     from crt_scenarios import eurusd
     from tradingbot.skills.crt import engine
@@ -324,17 +299,14 @@ def test_el_setup_sin_toque_de_la_zona_se_marca_setup_ok_sin_entrada():
 def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from crt_scenarios import eurusd
-    from tradingbot.skills.crt.chart import live_marks
+    from tradingbot.skills.crt.chart import signal_marks
     from tradingbot.ui.chart import CrtPill
     df = eurusd()
-    x_in = int((df["ts"] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD).to_numpy().argmax())
-    order = SimpleNamespace(symbol="EURUSD", pattern_key="crt", timeframe="5m", direction="long", entry_ts=int(df["ts"][x_in]),
-                            price=1.11843, stop=1.1177, target=1.11989)
-    mark = live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1)[0]
+    mark = [m for m in signal_marks(df, "EURUSD", AHEAD, 5) if m["when"] == "02/11 21:00"][0]
     assert mark["touch"]["when"] == "02/11 22:10"
     win = window(tmp_path, monkeypatch)
     pill = CrtPill(mark)
-    assert "FVG M15 + iFVG M5" in pill.toPlainText()                                             # los TF, en la propia etiqueta
+    assert "FVG" not in pill.toPlainText()                                                       # la etiqueta discreta no lleva los TF: salen al desplegarla
     chart = win.chart
     chart.set_crts([mark])
     chart.resize(900, 500)
@@ -349,3 +321,34 @@ def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(t
     assert "Zona común" in text and "1.11815" in text                                            # el área común (doble FVG)
     assert "Retest de la zona" in text and "02/11 22:10" in text                                 # el retest
     assert "CISD" in text and "1.11841" in text                                                  # el nivel del CISD
+
+
+def test_un_setup_valido_que_el_bot_no_opero_se_dibuja_con_el_resultado_que_habria_dado():
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt.chart import signal_marks
+    df = eurusd()
+    marks = [m for m in signal_marks(df, "EURUSD", AHEAD, 5) if m["when"] == "02/11 21:00"]
+    assert len(marks) == 1
+    m = marks[0]
+    assert m["direction"] == "long" and m["simulated"] and m["state"] in ("objetivo", "stop", "be", "tiempo", "abierta")
+    assert m["pos"]["entry"] == pytest.approx(1.11843) and m["pos"]["stop"] == pytest.approx(1.1177) and m["pos"]["target"] == pytest.approx(1.11989)
+    assert (m["common"]["bottom"], m["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833)) and m["cisd"]["level"] == pytest.approx(1.11841)
+    assert m["touch"]["when"] == "02/11 22:10"
+
+
+def test_el_estado_de_un_setup_es_el_mismo_en_5m_y_en_15m():
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt.chart import retime, zone_marks
+    df = eurusd()
+    marks = zone_marks(df, "EURUSD", AHEAD, 5)
+    ts5 = df["ts"].to_numpy()
+    ts15 = np.unique(ts5 // 900 * 900)                                                           # las velas de 15 min con las mismas horas
+    m5 = [m for m in marks if m["when"] == "02/11 21:00"][0]
+    m15 = [m for m in retime(marks, ts5, ts15) if m["when"] == "02/11 21:00"][0]
+    assert m15["state"] == m5["state"] and m15["direction"] == m5["direction"] and m15["simulated"] == m5["simulated"]
+    assert (m15["common"]["bottom"], m15["common"]["top"], m15["cisd"]["level"]) == (m5["common"]["bottom"], m5["common"]["top"], m5["cisd"]["level"])
+    assert ts15[m15["pos"]["x0"]] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD       # la entrada, en la vela de 15 min que la contiene
+    assert ts15[m15["touch"]["x"]] == pd.Timestamp("2026-11-02 22:00").value // 10**9 + AHEAD       # el retest de las 22:10, en la vela de las 22:00
+    assert ts15[m15["x0"]] == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD               # C2 empieza donde empieza
+    waiting = [m for m in marks if m["state"] == "sin_entrada"]
+    assert [m["state"] for m in retime(waiting, ts5, ts15)] == ["sin_entrada"] * len(waiting)

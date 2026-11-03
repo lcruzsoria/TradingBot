@@ -278,6 +278,15 @@ def test_la_skill_da_la_senal_y_llega_simulada_a_setup():
     assert out["executed"][0].payload["sent"] is False                           # simulación: no se envía a MT5
 
 
+def test_la_skill_guarda_los_setups_de_los_ultimos_dias_para_el_grafico():
+    manager, bus, out = run()
+    loaded(bus, until_entry(eurusd(), extra=40), "EURUSD")
+    marks = manager.skills["crt"].marks["EURUSD"]
+    manager.stop()
+    assert marks["ltf"] == 5 and len(marks["ts"]) > 0
+    assert [m["when"] for m in marks["marks"] if m["when"] == "02/11 21:00" and m["state"] != "sin_entrada"] == ["02/11 21:00"]
+
+
 def test_fuera_del_perfil_crt_la_skill_no_opera():
     manager, bus, out = run(strategy="")
     loaded(bus, until_entry(eurusd()), "EURUSD")

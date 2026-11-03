@@ -1269,7 +1269,7 @@ class MainWindow(QMainWindow):
         if df is None or not len(df):
             self.chart.set_crts([])
             return
-        from ..skills.crt.chart import crt_marks, live_marks, no_entry_marks
+        from ..skills.crt.chart import crt_marks, retime, zone_marks
         from ..skills.levels.daylevels import DEFAULT_US_INDICES
         tf = minutes(self.current_tf())
         if tf > 60:
@@ -1279,13 +1279,28 @@ class MainWindow(QMainWindow):
         ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
         ltf, entry = (tf if tf in (5, 3, 1) else 5), int(getattr(skill, "entry", 1))
         marks = crt_marks(self.backtest, self.charted_symbol, ts, high, low, self.ny_shift, ltf, entry) if self.backtest is not None else []
-        live = live_marks(self.stats.trades, df, self.charted_symbol, self.ny_shift, ltf, entry, getattr(skill, "rule", None),
-                          getattr(skill, "indices", DEFAULT_US_INDICES))
-        waiting = no_entry_marks(df, self.charted_symbol, self.ny_shift, ltf, getattr(skill, "indices", DEFAULT_US_INDICES))
-        taken = {(m["x0"], m["direction"]) for m in live}              # lo que el bot hizo en directo manda sobre el backtest
-        live += [m for m in waiting if (m["x0"], m["direction"]) not in taken]
-        taken = {(m["x0"], m["direction"]) for m in live}
-        self.chart.set_crts(sorted([m for m in marks if (m["x0"], m["direction"]) not in taken] + live, key=lambda m: m["x0"]))
+        cache = getattr(skill, "marks", {}).get(self.charted_symbol)       # los setups, calculados una vez con las velas de la skill: el mismo estado en todos los timeframes
+        if cache is not None:
+            setups = retime(cache["marks"], cache["ts"], ts)
+        elif tf in (5, 3):                                                  # la skill aún no ha visto este mercado: se calculan con las velas del gráfico
+            setups = zone_marks(df, self.charted_symbol, self.ny_shift, tf, entry, getattr(getattr(skill, "rule", None), "rr", 2.0), 1.0,
+                                getattr(skill, "indices", DEFAULT_US_INDICES))
+        else:
+            setups = []
+        for trade in self.stats.trades:                                     # lo que el bot hizo en directo manda sobre el resultado simulado
+            o = trade.order
+            if o.pattern_key != "crt" or o.symbol != self.charted_symbol or not o.entry_ts:
+                continue
+            for m in setups:
+                if m.get("entry_ts") == o.entry_ts and m["direction"] == o.direction:
+                    c = trade.closed
+                    m["state"] = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
+                    m["simulated"] = False
+                    m["pos"].update(entry=o.price, stop=o.stop, target=o.target)
+                    if c:
+                        m["pos"]["x1"] = max(int(np.searchsorted(ts, c.exit_ts, "left")), m["pos"]["x0"])
+        taken = {(m["x0"], m["direction"]) for m in setups}                 # los setups mandan sobre las marcas del backtest antiguo («sin evaluar»...)
+        self.chart.set_crts(sorted([m for m in marks if (m["x0"], m["direction"]) not in taken] + setups, key=lambda m: m["x0"]))
 
     def _calendar_positions(self) -> list[dict]:
         """Perfil Calendario: todas las entradas del backtest dentro de las velas cargadas y, encima, las del forwardtest."""

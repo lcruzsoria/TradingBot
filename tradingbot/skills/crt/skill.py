@@ -38,6 +38,7 @@ class CrtSkill(Skill):
         self.error = "Configuración CRT no válida"
         self._offset: int | None = None
         self._seen: set = set()
+        self.marks: dict[str, dict] = {}                 # símbolo -> {ts, marks, key}: los setups de los últimos días, con las velas de la skill (M5 o M3)
         app = (self.services.app_cfg or {}).get("app", {})
         self.active = str(app.get("strategy") or "") == STRATEGY
         try:
@@ -82,12 +83,30 @@ class CrtSkill(Skill):
         if len(df) < MIN_BARS:
             caption(f"{symbol}: faltan velas ({len(df)})")
             return
+        self._remember_marks(symbol, tf, df)
         signal = self.scan(symbol, tf, df)
         if signal is not None:
             self.publish("crt.signal", signal)
             caption(f"señal {symbol}")
         else:
             caption(f"{symbol}: buscando sweep + zona común FVG/iFVG + CISD")
+
+    def _remember_marks(self, symbol: str, tf: str, df) -> None:
+        """Calcula UNA vez los setups de zona común de los últimos días (los que dieron entrada, con su resultado simulado, y los «sin entrada») para que
+        el gráfico los dibuje igual en cualquier timeframe; solo se recalculan si hay velas nuevas."""
+        from .chart import NO_ENTRY_DAYS, zone_marks
+        step = minutes(tf)
+        key = (step, len(df), int(df["ts"].iloc[-1]), self._offset)
+        if self.marks.get(symbol, {}).get("key") == key:
+            return
+        ahead, _ = server_minus_ny(self._offset)
+        tail = df.tail(NO_ENTRY_DAYS * 1440 // step + 60).reset_index(drop=True)
+        try:
+            marks = zone_marks(tail, symbol, ahead, step, self.entry, self.rule.rr, 1.0, self.indices)
+        except Exception as exc:                                         # un fallo del dibujo no puede parar la señal
+            self.set_caption(f"marcas del gráfico: {exc}")
+            return
+        self.marks[symbol] = {"key": key, "ts": tail["ts"].to_numpy().copy(), "marks": marks, "ltf": step}
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas de `df` (o None). La última vela puede estar formándose: los setups se
