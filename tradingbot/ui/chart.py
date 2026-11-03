@@ -47,8 +47,8 @@ BE_GRAY = "#9E9E9E"          # break even: gris neutro (en el texto, el borde de
 RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE", BE_GRAY),
            "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
            "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C"),
-           "sin_sweep": ("Sin sweep", None), "sin_evaluar": ("Sin evaluar", None)}
-RESULT_TEXT = {"TP": "#2ECC71", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
+           "sin_sweep": ("Sin sweep", None), "sin_evaluar": ("Sin evaluar", None), "sin_entrada": ("Setup OK sin Entrada", "#FFA726")}
+RESULT_TEXT = {"TP": "#2ECC71", "Setup OK sin Entrada": "#FFA726", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
 
@@ -113,7 +113,7 @@ HTF_BOX = "#C9CDD6"                                       # cajas de las velas C
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
                     "sin_setup": "Sin setup", "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep",
-                    "sin_evaluar": "Sin evaluar"}
+                    "sin_evaluar": "Sin evaluar", "sin_entrada": "Setup OK sin Entrada", "abierta": "abierta"}
 
 
 class CrtPill(_StripePill):
@@ -138,8 +138,13 @@ class CrtPill(_StripePill):
         tone = CRT_COLORS[crt["direction"]]
         self._bar = QColor(tone)
         self.result = result
+        tfs = ""
+        if crt.get("common"):                                         # setup de zona común: el TF del FVG y el del iFVG, en la propia etiqueta
+            fvg = " ".join(f"FVG {z['name']}" for z in crt.get("fvgs") or [])
+            tfs = (f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;<span style="color:{theme.MUTED}">'
+                   f'{html.escape(fvg)} + iFVG M{crt.get("ltf", "")}</span>')
         self.setHtml(f'<span style="font-size:8pt">&nbsp;&nbsp;<b style="color:{tone}">{"▲" if long else "▼"}</b>&nbsp;'
-                     f'<span style="color:{theme.TEXT}">CRT {"alcista" if long else "bajista"}</span>'
+                     f'<span style="color:{theme.TEXT}">CRT {"alcista" if long else "bajista"}</span>{tfs}'
                      f'&nbsp;<span style="color:{theme.BORDER}">│</span>&nbsp;'
                      f'<b style="color:{RESULT_TEXT.get(result, color or theme.MUTED)}">{result}</b></span>')
         self.setZValue(8)
@@ -919,14 +924,18 @@ class ChartView(pg.PlotWidget):
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                     + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
-                    + crt_row("LTF (FVG, retesteo y entrada)", f"M{data.get('ltf', '-')}")
-                    + crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}")
-                    + crt_row("Resultado", word + " (objetivo 2R)")
+                    + (crt_row("LTF (FVG, retesteo y entrada)", f"M{data.get('ltf', '-')}") if not data.get("live") else "")
+                    + (crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}") if data.get("entry") else "")
+                    + crt_row("Resultado", word + ("" if data.get("live") else " (objetivo 2R)"))
                     + (crt_row("Entrada · SL · TP", f"{fmt_price(data['pos']['entry'])} · {fmt_price(data['pos']['stop'])} · "
                                f"{fmt_price(data['pos']['target'])}") if data.get("pos") else "")
-                    + (crt_row("FVG de LTF", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
+                    + (crt_row(f"iFVG M{data.get('ltf', '-')}", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
                        if data.get("ifvg") else "")
-                    + (crt_row("Nivel de entrada", fmt_price(data['cisd']['level'])) if data.get("cisd") else "") + '</table>')
+                    + (crt_row("Zona común", f"{fmt_price(data['common']['bottom'])} – {fmt_price(data['common']['top'])}")
+                       if data.get("common") else "")
+                    + (crt_row("CISD", fmt_price(data['cisd']['level'])) if data.get("cisd") else "")
+                    + (crt_row("Retest de la zona", f"{data['touch'].get('when', '')} NY · {fmt_price(data['touch']['price'])}")
+                       if data.get("touch") else (crt_row("Retest de la zona", "sin retest") if data.get("common") else "")) + '</table>')
             others = data.get("others") or []
             verdict = ''
             if others:
@@ -1102,17 +1111,44 @@ class ChartView(pg.PlotWidget):
             box.setPen(pen)
             add(box, -3)
             label = pg.TextItem(anchor=(0, 0.5))                  # lo único con texto en el dibujo: el nombre del FVG y su timeframe
-            label.setHtml(f'<span style="font-size:7pt; color:{amber}">FVG M{crt.get("ltf") or ""}</span>')
+            label.setHtml(f'<span style="font-size:7pt; color:{amber}">iFVG M{crt.get("ltf") or ""}</span>')
             label.setPos(right, (fvg["bottom"] + fvg["top"]) / 2)
             add(label, 7)
-        for zone in crt.get("fvgs") or []:                      # (ficheros anteriores) el FVG de MTF que toca el extremo del sweep, en cada TF
+        blue = "#42A5F5"
+        for zone in crt.get("fvgs") or []:                      # el FVG de MTF que toca el extremo del sweep, en cada TF (azul, para no confundirlo con el iFVG)
             left, right = float(zone["x0"]), float(zone["x1"]) + 1
             box = QGraphicsRectItem(QRectF(left, zone["bottom"], max(right - left, 0.5), max(zone["top"] - zone["bottom"], 1e-9)))
-            box.setBrush(_alpha(amber, 30))
-            pen = QPen(QColor(amber), 1.2)
+            box.setBrush(_alpha(blue, 40))
+            pen = QPen(QColor(blue), 1.2)
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -4)
+            label = pg.TextItem(anchor=(0, 0.5))
+            label.setHtml(f'<span style="font-size:7pt; color:{blue}">FVG {html.escape(str(zone.get("name") or ""))}</span>')
+            label.setPos(right, (zone["bottom"] + zone["top"]) / 2)
+            add(label, 7)
+        common, cisd = crt.get("common"), crt.get("cisd")
+        if common:                                              # la zona que comparten el FVG de MTF y el iFVG de LTF: el precio la toca antes de entrar
+            left, right = float(common["x0"]), float(common["x1"]) + 1
+            box = QGraphicsRectItem(QRectF(left, common["bottom"], max(right - left, 0.5), max(common["top"] - common["bottom"], 1e-9)))
+            box.setBrush(_alpha(theme.TEXT, 35))
+            pen = QPen(QColor(theme.TEXT), 1.6)
+            pen.setCosmetic(True)
+            box.setPen(pen)
+            add(box, -2)
+        if cisd and cisd.get("label") == "CISD":                 # el CISD: el extremo de la vela que creó el iFVG; el cierre con cuerpo más allá da la entrada
+            pink = "#EC407A"
+            left, right = float(cisd["x0"]), float(cisd["x1"]) + 1
+            add(pg.PlotCurveItem(x=np.array([left, right]), y=np.array([cisd["level"], cisd["level"]]),
+                                 pen=pg.mkPen(pink, width=1.6, style=Qt.PenStyle.DashLine)), -1)
+            label = pg.TextItem(anchor=(1, 0.5))
+            label.setHtml(f'<span style="font-size:7pt; color:{pink}">CISD {fmt_price(cisd["level"])}</span>')
+            label.setPos(left, cisd["level"])
+            add(label, 7)
+        touch = crt.get("touch")
+        if touch:                                               # la vela que toca la zona común
+            dot = pg.ScatterPlotItem(x=[float(touch["x"])], y=[touch["price"]], size=7, brush=pg.mkBrush(theme.TEXT), pen=pg.mkPen(None))
+            add(dot, 6)
         if pos:                                                 # la operación, como la herramienta de posición: zona verde hasta el objetivo, roja hasta el stop
             x0, x1 = float(pos["x0"]), float(pos["x1"]) + 1
             entry, stop, target = pos["entry"], pos["stop"], pos["target"]
@@ -1123,6 +1159,10 @@ class ChartView(pg.PlotWidget):
                 box.setPen(QPen(Qt.PenStyle.NoPen))
                 add(box, -5)
             add(pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.TEXT, width=1.2)), -4)
+            label = pg.TextItem(anchor=(0, 0.5))
+            label.setHtml(f'<span style="font-size:7pt; color:{theme.TEXT}">entrada {fmt_price(entry)}</span>')
+            label.setPos(x1, entry)
+            add(label, 7)
 
     @property
     def crt_count(self) -> int:

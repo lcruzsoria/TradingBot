@@ -85,3 +85,15 @@ def mirror(df: pd.DataFrame, k: float = 200.0) -> pd.DataFrame:
     out["open"], out["close"] = k - df["open"], k - df["close"]
     out["high"], out["low"] = k - df["low"], k - df["high"]
     return out
+
+
+def eurusd(pad: int = 150) -> pd.DataFrame:
+    """EURUSD M5 real del 02/11/2026 de las 17:00 a las 23:55 NY (tests/crt_eurusd_20261102.py), con `pad` velas planas delante para llegar al mínimo de
+    la skill. Largo por zona común: C2 de las 21:00 (H4) barre el mínimo de C1 (1.11808); el FVG de M15 1.11814-1.11833 y el iFVG de M5 1.11815-1.11834
+    comparten la zona 1.11815-1.11833; el iFVG se invierte a las 21:55; pullback a la zona a las 22:10 (de arriba abajo); la vela de las 22:25 cierra
+    con cuerpo sobre el CISD (1.11841); entrada a las 22:30 en 1.11843 con stop en 1.1177."""
+    from crt_eurusd_20261102 import BARS
+    first = _server_ts(f"2026-11-02 {BARS[0][0]}")
+    rows = [(first - (pad - i) * STEP, BARS[0][1], BARS[0][1], BARS[0][1], BARS[0][1]) for i in range(pad)]
+    rows += [(_server_ts(f"2026-11-02 {hhmm}"), o, h, l, c) for hhmm, o, h, l, c in BARS]
+    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])

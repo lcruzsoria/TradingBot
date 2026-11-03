@@ -748,6 +748,7 @@ class MainWindow(QMainWindow):
         """La skill Stats publica una copia de las cifras del forwardtest cada vez que cambian."""
         self.stats = p["stats"]
         self._paint_trades()
+        self._apply_crts()                                       # y los CRT que el bot operó en directo
         changed = False
         for t in self.stats.trades:                              # el GO de lo que el bot ya operó vale aunque se reinicie la app:
             o = t.order                                          # si no, el gráfico lo marcaría NO GO «posición abierta»
@@ -1265,15 +1266,26 @@ class MainWindow(QMainWindow):
         if self.strategy != "crt":
             return
         df = self.candles
-        if df is None or not len(df) or self.backtest is None:
+        if df is None or not len(df):
             self.chart.set_crts([])
             return
-        from ..skills.crt.chart import crt_marks
+        from ..skills.crt.chart import crt_marks, live_marks, no_entry_marks
+        from ..skills.levels.daylevels import DEFAULT_US_INDICES
         tf = minutes(self.current_tf())
+        if tf > 60:
+            self.chart.set_crts([])
+            return
         skill = self.manager.skills.get("crt")
         ts, high, low = (df[k].to_numpy() for k in ("ts", "high", "low"))
-        self.chart.set_crts(crt_marks(self.backtest, self.charted_symbol, ts, high, low, self.ny_shift, tf if tf in (5, 3, 1) else 5,
-                                      int(getattr(skill, "entry", 1))) if tf <= 60 else [])
+        ltf, entry = (tf if tf in (5, 3, 1) else 5), int(getattr(skill, "entry", 1))
+        marks = crt_marks(self.backtest, self.charted_symbol, ts, high, low, self.ny_shift, ltf, entry) if self.backtest is not None else []
+        live = live_marks(self.stats.trades, df, self.charted_symbol, self.ny_shift, ltf, entry, getattr(skill, "rule", None),
+                          getattr(skill, "indices", DEFAULT_US_INDICES))
+        waiting = no_entry_marks(df, self.charted_symbol, self.ny_shift, ltf, getattr(skill, "indices", DEFAULT_US_INDICES))
+        taken = {(m["x0"], m["direction"]) for m in live}              # lo que el bot hizo en directo manda sobre el backtest
+        live += [m for m in waiting if (m["x0"], m["direction"]) not in taken]
+        taken = {(m["x0"], m["direction"]) for m in live}
+        self.chart.set_crts(sorted([m for m in marks if (m["x0"], m["direction"]) not in taken] + live, key=lambda m: m["x0"]))
 
     def _calendar_positions(self) -> list[dict]:
         """Perfil Calendario: todas las entradas del backtest dentro de las velas cargadas y, encima, las del forwardtest."""

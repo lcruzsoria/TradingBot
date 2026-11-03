@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_scenarios import AHEAD, mirror, scenario                                # noqa: E402
+from crt_scenarios import AHEAD, eurusd, mirror, scenario                                # noqa: E402
 from tradingbot.envconfig import EnvConfig, parse                                # noqa: E402
 from tradingbot.skills.crt import engine                                         # noqa: E402
 
@@ -226,63 +226,87 @@ def loaded(bus, df, symbol="NAS100.s", tf="5m"):
 
 
 def until_entry(df: pd.DataFrame, extra: int = 1) -> pd.DataFrame:
-    """Las velas hasta la de la entrada (07:35 NY, la última puede estar formándose)."""
-    return df[df["ts"] <= pd.Timestamp("2026-10-13 07:35").value // 10**9 + AHEAD + extra * 300 - 300].reset_index(drop=True)
+    """Las velas hasta la de la entrada del EURUSD (22:30 NY del 02/11, la última puede estar formándose)."""
+    return df[df["ts"] <= pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD + (extra - 1) * 300].reset_index(drop=True)
+
+
+def test_la_zona_comun_da_el_largo_del_eurusd_del_02_11():
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    setups, funnel = engine.find_zone_setups(df, df, 5, cfg)
+    st = [x for x in setups if ny(x["C2"]) == "2026-11-02 21:00"][0]
+    assert st["dirección"] == "long" and st["mtf"] == "M15"
+    assert ny(df["ts"][st["inv"]]) == "2026-11-02 21:55"                                # el iFVG se invierte: la vela cierra sobre su techo (1.11834)
+    assert ny(df["ts"][st["jt"]]) == "2026-11-02 22:10"                                 # el pullback a la zona común, de arriba abajo
+    assert ny(df["ts"][st["jc"]]) == "2026-11-02 22:25"                                 # la primera vela que cierra con cuerpo sobre el CISD tras el toque
+    assert (-st["level"], -st["stop"]) == (pytest.approx(1.11841), pytest.approx(1.1177))
+    assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([1.11815, 1.11833])     # zona común: FVG de M15 1.11814-1.11833 y iFVG de M5 1.11815-1.11834
+    ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
+    assert ny(df["ts"][ep["start"]]) == "2026-11-02 22:30" and -ep["entry"] == pytest.approx(1.11843)
+
+
+def test_el_ifvg_es_de_un_tf_igual_o_menor_que_el_fvg_y_manda_el_de_mayor_tf(monkeypatch):
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    st = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"][0]
+    assert st["mtf"] == "M15"                                                           # con un FVG de M15 y otro de M5 posibles, el de mayor TF
+    assert [x for x in engine.find_zone_setups(df, df, 30, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"] == []     # un iFVG de 30 min no cabe en un FVG de M15 ni de M5
+    monkeypatch.setattr(engine, "ZONE_TFS", (5,))
+    for x in engine.find_zone_setups(df, df, 5, cfg)[0]:                                # FVG de M5 con iFVG de M5: dos huecos distintos
+        assert x["mtf"] == "M5" and (x["ifvg"][0], x["ifvg"][1]) != (x["zones"][0][1], x["zones"][0][2])
+
+
+def test_sin_pullback_a_la_zona_no_hay_entrada_aunque_cierre_sobre_el_cisd():
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    cut = df[df["ts"] < pd.Timestamp("2026-11-02 22:10").value // 10**9 + AHEAD].reset_index(drop=True)      # sin las velas del pullback
+    assert [x for x in engine.find_zone_setups(cut, cut, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"] == []
 
 
 def test_la_skill_da_la_senal_y_llega_simulada_a_setup():
     manager, bus, out = run()
-    loaded(bus, until_entry(scenario()))
-    loaded(bus, until_entry(scenario()))                                         # no se repite para el mismo sweep
+    loaded(bus, until_entry(eurusd()), "EURUSD")
+    loaded(bus, until_entry(eurusd()), "EURUSD")                                 # no se repite para el mismo sweep
     manager.stop()
     assert len(out["signal"]) == 1
     s = out["signal"][0].payload
-    assert (s["symbol"], s["direction"], s["strategy"]) == ("NAS100.s", "short", "crt")
-    assert s["price"] == pytest.approx(103.1) and s["stop"] == pytest.approx(108.5) and s["target"] == pytest.approx(92.3)
-    assert s["close_at"].startswith("18:00 NY")
+    assert (s["symbol"], s["direction"], s["strategy"]) == ("EURUSD", "long", "crt")
+    assert s["price"] == pytest.approx(1.11843) and s["stop"] == pytest.approx(1.1177) and s["target"] == pytest.approx(1.11843 + 2 * 0.00073)
+    assert s["close_at"].startswith("17:00 NY")
     o = out["executed"][0].payload["order"]
-    assert o.pattern_key == "crt" and o.tbr_zone == "" and o.direction == "short" and "CRT" in o.pattern
+    assert o.pattern_key == "crt" and o.tbr_zone == "" and o.direction == "long" and "CRT" in o.pattern
     assert out["executed"][0].payload["sent"] is False                           # simulación: no se envía a MT5
-
-
-def test_el_largo_llega_como_largo():
-    manager, bus, out = run()
-    loaded(bus, until_entry(mirror(scenario())))
-    manager.stop()
-    assert [e.payload["direction"] for e in out["signal"]] == ["long"]
-    s = out["signal"][0].payload
-    assert s["price"] == pytest.approx(200 - 103.1) and s["stop"] == pytest.approx(200 - 108.5)
 
 
 def test_fuera_del_perfil_crt_la_skill_no_opera():
     manager, bus, out = run(strategy="")
-    loaded(bus, until_entry(scenario()))
+    loaded(bus, until_entry(eurusd()), "EURUSD")
     manager.stop()
     assert out["signal"] == [] and manager.skills["crt"].caption == "solo en el perfil CRT"
 
 
 def test_ignora_otros_mercados_y_timeframes_distintos():
     manager, bus, out = run()
-    loaded(bus, until_entry(scenario()), symbol="XAUUSD")
-    loaded(bus, until_entry(scenario()), tf="15m")
+    loaded(bus, until_entry(eurusd()), symbol="XAUUSD")
+    loaded(bus, until_entry(eurusd()), symbol="EURUSD", tf="15m")
     manager.stop()
     assert out["signal"] == []
 
 
 def test_no_da_senal_si_la_entrada_es_antigua():
     manager, bus, out = run()
-    df = scenario()
-    loaded(bus, df[df["ts"] <= pd.Timestamp("2026-10-13 08:00").value // 10**9 + AHEAD].reset_index(drop=True))   # ya pasó hace una hora
+    df = eurusd()
+    loaded(bus, df[df["ts"] <= pd.Timestamp("2026-11-02 23:00").value // 10**9 + AHEAD].reset_index(drop=True), "EURUSD")   # ya pasó hace una hora
     manager.stop()
     assert out["signal"] == []
 
 
 def test_ajustes_no_validos_ponen_la_skill_en_error():
-    manager, _, _ = run(env_text="CRT_ENTRY=7")
+    manager, _, _ = run(env_text="CRT_ENTRY=2")
     state = manager.skills["crt"].state.value
     manager.stop()
     assert state == "error"
-    manager, _, _ = run(env_text="CRT_ENTRY=2")
+    manager, _, _ = run(env_text="CRT_ENTRY=4")
     ok = manager.skills["crt"].state.value
     manager.stop()
     assert ok != "error"

@@ -1,4 +1,7 @@
-"""Los CRT que salieron en el backtest, como marcas del gráfico (botón CRT del perfil CRT).
+"""Los CRT del gráfico (botón CRT del perfil CRT): los del backtest, los que el bot operó en directo (`live_marks`) y los «Setup OK sin Entrada»
+(`no_entry_marks`).
+
+Las marcas del backtest (`crt_marks`):
 
 Cada marca es una vela C2 (manipulación) del HTF (H3 en índices, H4 en el resto) que barrió el extremo de la anterior (C1) y de la que el backtest sacó
 alguna operación. El backtest guarda de cada operación su mercado, el inicio de C2 (columna `c`, minutos de Nueva York), el timeframe del
@@ -14,9 +17,11 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from ...timeframes import minutes
 from ..calendario.chart import market_key
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..stats.backtest import CRT_ENTRIES, CRT_MTF_BITS, CRT_MTF_NAMES
+from . import engine
 
 HTF_MINUTES = {"indices": 180, "forex": 240}
 AUDIT_COLS = ("pe", "ps", "pt", "pa", "pb", "pc", "ti", "tv", "tj", "th", "tq", "tt")      # columnas del backtest para auditar la operación
@@ -181,3 +186,121 @@ def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
             "extreme": {"x": at(d["th"]), "price": d["ps"]},
             "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
                      for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}
+
+
+LIVE_BARS = 2 * 1440                                             # minutos de velas anteriores a la entrada con los que la skill busca el setup
+
+
+def live_marks(trades, df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rule=None, indices=DEFAULT_US_INDICES) -> list[dict]:
+    """Marcas (formato de ChartView.set_crts) de las operaciones que el bot hizo en directo: `trades` son `Trade` del forwardtest.
+
+    El setup no se guarda con la orden: se vuelve a buscar con el motor sobre las velas cargadas, igual que la skill al dar la señal
+    (los 2 días antes de la entrada, la entrada en la vela que abrió la orden) y se dibuja lo que la dio: el FVG de MTF, el iFVG de LTF,
+    la zona que comparten, el CISD, el toque de la zona y la posición. Solo salen las del timeframe del gráfico."""
+    rule = rule or engine.Rule(be_at=0.0)
+    ts = df["ts"].to_numpy().astype(np.int64)
+    highs, lows = df["high"].to_numpy(), df["low"].to_numpy()
+    n = len(ts)
+    base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
+    cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
+    htf, step, out = base.htf_min, ltf * 60, []
+    for trade in trades:
+        order, closed = trade.order, trade.closed
+        if order.symbol != symbol or order.pattern_key != "crt" or not order.entry_ts or minutes(order.timeframe) != ltf:
+            continue
+        x_in = int(np.searchsorted(ts, order.entry_ts, "left"))
+        if x_in >= n or int(ts[x_in]) != order.entry_ts:
+            continue
+        lo = max(0, x_in + 1 - LIVE_BARS // ltf)
+        sub = df.iloc[lo:x_in + 1].reset_index(drop=True)
+        closed_bars = len(sub) - 1
+        setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg)
+        views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
+        st = ep = None
+        for cand in reversed(setups):
+            if cand["dirección"] != order.direction:
+                continue
+            ep = engine.entry_point(views[cand["sign"]], cand, entry, ltf, rule, cfg, closed_bars)
+            if ep is not None and int(views[1]["ts"][ep["start"]]) == order.entry_ts:
+                st = cand
+                break
+        if st is None:
+            continue
+        sgn = st["sign"]                                               # el motor ve el largo como un corto con los precios cambiados de signo
+
+        def zone(a: float, b: float) -> tuple[float, float]:
+            return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
+
+        start = int(st["C2"])
+        x0 = int(np.searchsorted(ts, start, "left"))
+        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
+        xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
+        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
+        if x1 <= x0 or xc1 >= x0:
+            continue
+        end = int(np.searchsorted(ts, closed.exit_ts, "left")) if closed else n - 1
+        zb, zt = zone(st["z_bottom"], st["z_top"])
+        state = STATES.get(closed.result, "tiempo") if closed else "abierta"
+        out.append({
+            "x0": x0, "x1": x1, "xc1": xc1, "direction": order.direction, "state": state, "label": "CRT",
+            "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
+            "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
+            "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
+            "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": entry, "entry_name": CRT_ENTRIES[entry], "htf": htf, "start": start,
+            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "others": [], "live": True,
+            "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
+            "pos": {"x0": x_in, "x1": max(end, x_in), "entry": order.price, "stop": order.stop, "target": order.target},
+            "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
+            "common": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zb, "top": zt},
+            "cisd": {"x0": lo + st["cisd"][0], "x1": lo + st["jc"], "level": sgn * st["cisd"][1], "label": "CISD"},
+            "touch": {"x": lo + st["jt"], "price": zt if order.direction == "long" else zb,
+                      "when": datetime.fromtimestamp(int(ts[lo + st["jt"]]) - ahead, timezone.utc).strftime("%d/%m %H:%M")},
+            "extreme": {"x": lo + st["ih"], "price": order.stop},
+            "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")), "x1": lo + st["jc"],
+                      "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
+    return out
+
+
+NO_ENTRY_DAYS = 4                                                # días de velas en los que se buscan los «Setup OK sin entrada»
+
+
+def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES) -> list[dict]:
+    """Marcas de los CRT de las últimas velas que dejaron la zona común (FVG de MTF ∩ iFVG de LTF) sin que el precio la tocara: «Setup OK sin
+    Entrada». Se dibujan el FVG, el iFVG, la zona común y el CISD, sin posición."""
+    ts_all = df["ts"].to_numpy().astype(np.int64)
+    keep = NO_ENTRY_DAYS * 1440 // ltf
+    lo = max(0, len(ts_all) - keep)
+    sub = df.iloc[lo:].reset_index(drop=True)
+    ts, highs, lows = ts_all[lo:], sub["high"].to_numpy(), sub["low"].to_numpy()
+    n = len(ts)
+    base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
+    cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
+    htf, out = base.htf_min, []
+    for st in engine.find_zone_setups(sub, sub, ltf, cfg)[0].no_entry:
+        sgn, start = st["sign"], int(st["C2"])
+
+        def zone(a: float, b: float) -> tuple[float, float]:
+            return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
+
+        x0 = int(np.searchsorted(ts, start, "left"))
+        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
+        xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
+        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
+        if x1 <= x0 or xc1 >= x0 or x0 >= n:
+            continue
+        end = min(int(st["end"]), n - 1)
+        zb, zt = zone(*st["common"])
+        out.append({
+            "x0": lo + x0, "x1": lo + x1, "xc1": lo + xc1, "direction": "short" if sgn > 0 else "long", "state": "sin_entrada", "label": "CRT",
+            "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+            "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
+            "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": None, "htf": htf, "start": start, "others": [], "live": True,
+            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "motivo": "Setup OK sin Entrada: el precio siguió sin tocar la zona común",
+            "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
+            "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
+            "common": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zb, "top": zt},
+            "cisd": {"x0": lo + st["cisd"][0], "x1": lo + end, "level": sgn * st["cisd"][1], "label": "CISD"},
+            "extreme": {"x": lo + st["ih"], "price": sgn * st["stop"]},
+            "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")) + lo, "x1": lo + end,
+                      "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
+    return out

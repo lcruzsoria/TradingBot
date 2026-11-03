@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 MTF = (15,)                                              # timeframes del FVG de confirmación (minutos)
+ZONE_TFS = (15, 5)                                       # timeframes del FVG (no invertido) de la zona común, del mayor al menor; el iFVG es de un TF igual o menor
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class Setups(list):
         super().__init__(*args)
         self.invalid: list[dict] = []
         self.nosetup: list[dict] = []                    # sweeps cuyo patrón no se completó ni se invalidó (la vela C2 acabó antes)
+        self.no_entry: list[dict] = []                   # «Setup OK sin entrada»: la zona común existe pero el precio siguió sin tocarla
 
 
 def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule, cfg: Cfg) -> tuple[list, dict]:
@@ -178,6 +180,109 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
+    setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
+    return setups, funnel
+
+
+# -- CRT por zona común: FVG de MTF ∩ iFVG de LTF ---------------------------------------------------------------------------
+# Corto (el largo es el espejo, ver `view`). Todo dentro de C2:
+#   1. C2 supera el máximo de C1 (sweep). Si C2 tomó antes el mínimo de C1, el sweep es el del otro lado.
+#   2. Durante la subida quedan un FVG alcista «normal» (M15 o M5, `ZONE_TFS`) y un FVG alcista de LTF (el iFVG: M5, M3 o M1), los dos nacidos
+#      dentro de C2, que comparten una zona (se solapan): la zona común. El iFVG tiene que ser de un TF igual o menor que el del FVG (con un FVG de
+#      M5 vale M5 o M3, no M15) y no puede ser el mismo hueco. Se busca siempre la combinación del TF mayor posible: si hay varias, manda la del FVG de
+#      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
+#      CISD = el mínimo de la vela de desplazamiento que lo creó (la vela central del FVG de LTF).
+#   3. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (pullback): una vela posterior a la inversión la toca con la
+#      mecha sin cerrar al otro lado de ella.
+#   4. Después de ese toque, la primera vela que cierra con el cuerpo por debajo del CISD da la entrada: a la apertura de la vela siguiente.
+# Stop en el máximo del sweep (el máximo de C2 hasta ese momento) y objetivo a `rr` veces el riesgo. Si el precio llega al extremo opuesto de
+# C1 sin haberse completado, el setup queda invalidado. Si la zona común existe y el iFVG se invierte pero el precio sigue sin volver a ella, no
+# hay entrada: «Setup OK sin entrada» (`Setups.no_entry`). Ver docs/estrategia_crt.
+def bullish_fvgs(v: dict, minutes: int) -> dict:
+    """FVG alcistas (en el espacio del corto): máximo de la vela 1 por debajo del mínimo de la vela 3. `formed` = cierre de la vela 3."""
+    ts, h, l = v["ts"], v["high"], v["low"]
+    i = np.arange(2, len(ts))
+    ok = (l[i] > h[i - 2]) & (ts[i] - ts[i - 2] <= 2 * minutes * 60 + 3600)
+    i = i[ok]
+    return {"formed": ts[i] + minutes * 60, "first": ts[i - 2], "bottom": h[i - 2], "top": l[i]}
+
+
+def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg) -> tuple[list, dict]:
+    """Todos los setups de zona común de las velas dadas, con el índice de la vela que cierra bajo el CISD (`jc`); la entrada va aparte
+    (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF y el MTF y `ltf` las velas del FVG de LTF y de la entrada."""
+    htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
+    mtf = {m: aggregate(base, m, cfg) for m in ZONE_TFS if m >= ltf_min}
+    funnel = {"velas HTF con sweep": 0, "con FVG de MTF y de LTF con zona común": 0, "con pullback a la zona": 0, "con CISD": 0, "invalidados": 0,
+              "setup OK sin entrada": 0}
+    setups = Setups()
+    for sign, name in ((1, "short"), (-1, "long")):
+        L, H = view(ltf, sign), view(htf, sign)
+        fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in ZONE_TFS if m >= ltf_min}      # el iFVG (LTF) no puede ser de mayor TF que el FVG
+        lts, lo_, hi_, cl_ = L["ts"], L["low"], L["high"], L["close"]
+        for i in range(1, len(H["ts"])):
+            s2 = int(H["ts"][i])
+            if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60 or H["high"][i] <= H["high"][i - 1]:
+                continue
+            c1h, c1l = H["high"][i - 1], H["low"][i - 1]
+            a, b = int(np.searchsorted(lts, s2)), int(np.searchsorted(lts, s2 + cfg.htf_min * 60))
+            if b - a < 4:
+                continue
+            rel = np.flatnonzero(hi_[a:b] > c1h)
+            if not len(rel):
+                continue
+            s0 = a + int(rel[0])
+            if s0 > a and lo_[a:s0].min() < c1l:                                # C2 tomó antes el otro extremo de C1: el sweep es el del otro lado
+                continue
+            funnel["velas HTF con sweep"] += 1
+            ks_all = 2 + a + np.flatnonzero(lo_[a + 2:b] > hi_[a:b - 2])        # velas 3 de los FVG alcistas de LTF nacidos dentro de C2
+            zones = [(m, float(f["bottom"][q]), float(f["top"][q]), int(f["formed"][q])) for m, f in fv.items()
+                     for q in np.flatnonzero((f["first"] >= s2) & (f["formed"] <= s2 + cfg.htf_min * 60 + 3600))]
+            pairs = []                                                          # (k, zona de MTF, zona común) con zona común no vacía
+            for k in ks_all:
+                for m, zb, zt, formed in zones:
+                    if m == ltf_min and formed == int(lts[k]) + m * 60:         # el mismo hueco: el FVG normal y el iFVG tienen que ser dos distintos
+                        continue
+                    cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
+                    if cb < ct:
+                        pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
+            if not pairs:
+                continue
+            funnel["con FVG de MTF y de LTF con zona común"] += 1
+            hx, ih, touched, inverted, seen_touch, trig, invalidated = float(hi_[s0]), s0, {}, {}, False, None, False
+            for j in range(s0, b):
+                if lo_[j] < c1l:                                                # llega al extremo opuesto de C1 sin setup: invalidado
+                    setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx,
+                                           "motivo": "sin CISD tras el toque" if seen_touch else "sin pullback a la zona común", "c1": (c1l, c1h)})
+                    funnel["invalidados"] += 1
+                    invalidated = True
+                    break
+                if hi_[j] > hx:
+                    hx, ih = float(hi_[j]), j
+                done = [p for p in pairs if p[0] in touched and touched[p[0]] < j and cl_[j] < lo_[p[0] - 1]]            # tocada antes de esta vela y cierra bajo el CISD
+                if done:
+                    k, z, common = max(done, key=lambda p: (p[1][0], p[0], p[1][3]))              # la del FVG de mayor TF
+                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": float(lo_[k - 1]),
+                            "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
+                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "kf": k, "jt": touched[k], "inv": inverted[k], "s0": s0,
+                            "cisd": (k - 1, float(lo_[k - 1])), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
+                    break
+                for k, z, common in pairs:
+                    if k not in inverted:                                       # el iFVG se invierte: una vela cierra bajo su base
+                        if k < j and cl_[j] < hi_[k - 2]:
+                            inverted[k] = j
+                    elif k not in touched and inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0] and cl_[j] <= common[1]:
+                        touched[k] = j                                          # pullback a la zona común, con los dos FVG ya formados
+                        seen_touch = True
+            funnel["con pullback a la zona"] += seen_touch
+            if trig:
+                funnel["con CISD"] += 1
+                setups.append(trig)
+            elif not seen_touch and inverted and (invalidated or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # invertido y el precio siguió (o C2 acabó) sin el pullback
+                k, z, common = max((p for p in pairs if p[0] in inverted), key=lambda p: (p[1][0], p[0], p[1][3]))
+                funnel["setup OK sin entrada"] += 1
+                setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "kf": k, "zones": [z],
+                                        "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": (k - 1, float(lo_[k - 1])),
+                                        "inv": inverted[k], "end": j if invalidated else b - 1})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
 

@@ -1,4 +1,4 @@
-"""Skill CRT: Candle Range Theory (variante B). Solo trabaja en el perfil de estrategia «crt»."""
+"""Skill CRT: Candle Range Theory por zona común (FVG ∩ iFVG, pullback y cierre sobre el CISD). Solo trabaja en el perfil de estrategia «crt»."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -16,19 +16,20 @@ STRATEGY = "crt"
 LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
 MAX_LATE_BARS = 2                                 # una señal se da si la vela de entrada es una de las últimas 2
 MIN_BARS = 200
-ENTRY_NAMES = {1: "vela siguiente al CISD", 2: "retesteo del iFVG", 3: "primera vela sin mecha", 4: "cierre del CISD"}
+ENTRY_NAMES = {1: "vela siguiente al CISD", 4: "cierre del CISD"}
 DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
 
 
 @register_skill("crt")
 class CrtSkill(Skill):
     title = "CRT"
-    description = ("Estrategia CRT (Candle Range Theory, variante B), dentro de C2: una vela H3 (índices) o H4 (forex) barre con "
-                   "una mecha el máximo o mínimo de la anterior; el desplazamiento deja un FVG de M15 y el precio vuelve a él; "
-                   "en las velas del gráfico (M3 o M5) el precio invierte un FVG (iFVG, el CISD) antes de que cierre C2. Entra con "
-                   "una de las cuatro variantes de entrada, con stop en el extremo del sweep y objetivo 2R (el breakeven a 1R lo lleva Setup). "
-                   "Avisa a Cortex, que le da la orden a Setup; solo simulación. Solo actúa en el perfil CRT. Ojo: en el backtest "
-                   "(docs/estrategia_crt) ninguna combinación pasó los criterios.")
+    description = ("Estrategia CRT (Candle Range Theory) por zona común, dentro de C2: una vela H3 (índices) o H4 (forex) barre con una mecha el "
+                   "máximo o mínimo de la anterior; dentro de C2 un FVG (M15 o M5) y un iFVG de las velas del gráfico (M3 o M5, de TF igual o menor que el "
+                   "del FVG; se busca el de mayor TF) comparten una zona. Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
+                   "vela que cierra con el cuerpo más allá del CISD (el extremo de la vela que creó el iFVG) da la entrada, a la apertura de la vela "
+                   "siguiente. Stop en el extremo del sweep y objetivo 2R (el breakeven a +1R lo lleva Setup). Si la zona existe pero el precio sigue "
+                   "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
+                   "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
     publishes = ("crt.signal",)
     slot = "aux2"
@@ -52,7 +53,7 @@ class CrtSkill(Skill):
         self.symbols = s.get_list("SYMBOLS", DEFAULT_SYMBOLS)
         self.entry = s.get_int("ENTRY", 1)
         if self.entry not in ENTRY_NAMES:
-            raise ValueError(f"CRT_ENTRY={self.entry}: usa 1 (vela siguiente al CISD), 2 (retesteo del iFVG), 3 (primera vela sin mecha) o 4 (cierre del CISD)")
+            raise ValueError(f"CRT_ENTRY={self.entry}: usa 1 (apertura de la vela siguiente a la que cierra sobre el CISD) o 4 (cierre de esa vela)")
         rr = s.get_float("RR", 2.0)
         if rr <= 0:
             raise ValueError("CRT_RR debe ser mayor que 0")
@@ -86,7 +87,7 @@ class CrtSkill(Skill):
             self.publish("crt.signal", signal)
             caption(f"señal {symbol}")
         else:
-            caption(f"{symbol}: buscando sweep + FVG de MTF + iFVG + CISD")
+            caption(f"{symbol}: buscando sweep + zona común FVG/iFVG + CISD")
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas de `df` (o None). La última vela puede estar formándose: los setups se
@@ -98,7 +99,7 @@ class CrtSkill(Skill):
         keep = 2 * 1440 // step                                            # lo que cubre C1, C2 y el FVG de MTF que nace en C2
         df = df.tail(keep).reset_index(drop=True)
         closed = len(df) - 1
-        setups, _ = engine.find_setups(df.iloc[:closed], df.iloc[:closed], step, self.rule, cfg)
+        setups, _ = engine.find_zone_setups(df.iloc[:closed], df.iloc[:closed], step, cfg)
         ts = df["ts"].to_numpy().astype(np.int64)
         views = {1: engine.view(df, 1), -1: engine.view(df, -1)}
         n = len(df)
@@ -121,6 +122,6 @@ class CrtSkill(Skill):
                     "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
                     "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
                     "pattern": f"CRT ({ENTRY_NAMES[self.entry]})", "pattern_key": STRATEGY,
-                    "reason": f"CRT: sweep {st['dirección']} en C2, vuelta al FVG de {st['mtf']}, iFVG y CISD en {tf}; "
-                              f"entrada «{ENTRY_NAMES[self.entry]}». No depende del sesgo (el backtest no lo usa)"}
+                    "reason": f"CRT: sweep {st['dirección']} en C2; el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
+                              f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[self.entry]}». No depende del sesgo"}
         return None

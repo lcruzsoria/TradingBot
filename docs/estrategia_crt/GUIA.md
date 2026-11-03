@@ -1,107 +1,80 @@
 # CRT (Candle Range Theory): guía de la estrategia
 
-Estado (02/11/2026): **el setup se define dentro de C2** (definición del usuario, ver sección 3). Con ella ninguna combinación pasa los criterios: lo mejor es NAS100 M3 con el retesteo del iFVG (+0.027 R, t +0.74); forex sigue negativo. Resultados en [RESULTADOS.md](RESULTADOS.md) y los RESULTADOS_*.md; script en `scripts/backtest_crt.py`. Ejemplo dibujado: [setup_c2_2026-10-28.png](setup_c2_2026-10-28.png) (EURUSD, largo). Los dibujos `reglas_crt`, `criterios_htf_mtf`, `regla_fvg_mtf`, `entradas_crt` y `operacion_*` son de la definición anterior (FVG que ya existía y que el extremo tocaba) y están desfasados.
+Estado (03/11/2026): **la skill opera la «zona común»** (definición del usuario, secciones 1 a 4). En el backtest no hay ventaja: bruto ≈ 0 R y neto negativo en todos los mercados y objetivos (ver [RESULTADOS_zona.md](RESULTADOS_zona.md)); el perfil CRT sirve para forwardtest en simulación. Los `RESULTADOS.md`, `RESULTADOS_forex.md` y los dibujos `reglas_crt`, `criterios_htf_mtf`, `regla_fvg_mtf`, `entradas_crt`, `operacion_*` y `setup_c2_*` son de definiciones anteriores (FVG que el extremo tocaba, iFVG tras el toque) y están desfasados.
 
 ## 1. Idea
 
-Tres velas de un timeframe alto (HTF): **C1 = rango** (acumulación), **C2 = manipulación** y **C3 = expansión**. C2 barre con una mecha un extremo de C1; el desplazamiento posterior deja un desequilibrio (FVG) en un timeframe medio, el precio vuelve a él y en un timeframe bajo se busca la confirmación del giro y se entra, antes de que C2 cierre.
+Tres velas de un timeframe alto (HTF): **C1 = rango**, **C2 = manipulación** y **C3 = expansión**. C2 barre con una mecha un extremo de C1 y, dentro de C2, dos FVG de distinto timeframe se solapan. Cuando el precio invierte el de menor TF, vuelve a la zona que comparten y cierra más allá del CISD, se entra a favor del giro antes de que C2 cierre.
 
-Se describe el corto (barrido de un máximo). El largo es el espejo exacto.
+Se describe el largo (barrido de un mínimo); el corto es el espejo exacto. En el largo los dos FVG son **bajistas** (zonas de resistencia que el precio cruzó al caer).
 
 ## 2. Timeframes y mercado
 
 | Papel | Índices | Forex |
 |---|---|---|
 | HTF (sweep) | H3 | H4 |
-| MTF (FVG de confirmación) | M15 | M15 |
-| LTF (iFVG, CISD y entrada) | M5 o M3 | M5 o M3 |
+| FVG «normal» | M15 o M5 | M15 o M5 |
+| iFVG, CISD y entrada | M5 o M3 (el timeframe del gráfico) | M5 o M3 |
 
-- Primer mercado: **NAS100**. Forex en una segunda fase.
-- Cierre de sesión en índices: **18:00 NY**.
-- Perfil aparte en el bot, con su propio skill `crt`.
+- Mercados (`CRT_SYMBOLS`): NAS100.s, SP500.s, DJ30.s, EURUSD y GBPUSD de PUPrime.
+- Sesión: a las **18:00 NY** (índices) o **17:00 NY** (forex) no se abren entradas y lo abierto se cierra.
+- Perfil aparte en el bot (`crt`), con su propia skill y sin Pattern, TBR ni Calendario. No usa el sesgo.
 
 ## 3. Reglas
 
-Todas son obligatorias y se evalúan en este orden. Si falta una, no hay trade. **Todo ocurre dentro de C2**: no se espera a saber si C2 cierra dentro del rango de C1 (eso se descartó como filtro porque solo se conoce al final de C2).
+Se evalúan en este orden y todas son obligatorias. **Todo ocurre dentro de C2.**
 
-### Paso 1 · Sweep en HTF (liquidez externa)
-- Una vela HTF (C2) supera con una mecha el máximo (o mínimo) de la vela anterior (C1). El extremo del sweep es el máximo de C2 hasta el momento; si C2 hace un máximo nuevo, el setup se reinicia con ese extremo.
-- **El primer extremo que toma C2 manda:** si C2 ya había tomado el mínimo de C1 antes de tomar el máximo, el sweep es el del mínimo (largo), no un corto.
-- **Invalidado:** si el precio llega al extremo opuesto de C1 (el objetivo) sin haber encontrado el FVG de MTF, la vuelta a él o el iFVG invertido, el setup queda invalidado: no se opera, se cuenta en el backtest («Invalidados», con su motivo) y se marca en el gráfico («CRT bajista · Invalidado»).
-- Máximo barrido → **corto**. Mínimo barrido → **largo**.
+1. **Sweep.** C2 supera con una mecha el mínimo de C1 (largo) o su máximo (corto). El primer extremo que toma C2 manda: si ya había tomado el otro, el sweep es el del otro lado. Si el precio llega al extremo opuesto de C1 sin que el setup se complete, queda **invalidado**.
+2. **Doble FVG y zona común.** Dentro de C2 hay un FVG «normal» (M15 o M5) y un iFVG de las velas del gráfico (M5 o M3) que **se solapan**; el hueco que comparten es la **zona común**.
+   - El iFVG es de un **TF igual o menor** que el del FVG: con un FVG de M15 vale un iFVG de M5 o M3; con un FVG de M5, M5 o M3, pero no M15. No pueden ser el mismo hueco.
+   - Se busca siempre la combinación del **TF mayor posible**, marcado por el FVG: si hay varias, manda la del FVG de mayor TF (M15 antes que M5).
+   - Ambos nacen dentro de C2 (su primera vela empieza en C2 o después).
+3. **CISD.** Es el extremo de la vela que creó el iFVG: la vela central de sus tres velas (largo: su **máximo**; corto: su mínimo).
+4. **Inversión.** El iFVG se invierte cuando una vela cierra al otro lado de su base (largo: por encima de su techo).
+5. **Pullback a la zona común.** Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (largo: **de arriba abajo**): una vela posterior a la inversión la toca con la mecha sin cerrar al otro lado de ella.
+6. **Entrada.** Tras el pullback, la primera vela que **cierra con el cuerpo más allá del CISD** (largo: por encima) da la señal. Se entra a la **apertura de la vela siguiente** (`CRT_ENTRY=1`; con `4`, al cierre de esa vela). Antes de que cierre C2.
+7. **«Setup OK sin Entrada».** Si la zona común existe y el iFVG se invierte pero el precio **sigue sin volver a ella** (llega al extremo opuesto de C1 o acaba C2), no hay entrada: el gráfico marca el CRT como «Setup OK sin Entrada», con el FVG, el iFVG, la zona común y el CISD. Es solo una anotación.
 
-### Paso 2 · FVG de MTF que nace del desplazamiento, y vuelta a él
-- Tras el extremo del sweep, el desplazamiento deja un **FVG de M15** en la dirección contraria al sweep (corto: FVG **bajista**; largo: FVG alcista). El FVG tiene que nacer **después** del extremo: su primera vela termina después de él.
-- El precio **vuelve** a ese FVG: basta con que lo toque una mecha (no hace falta cerrar dentro).
-- Sin vuelta al FVG: no hay trade.
+### Ejemplo real
+EURUSD, 02/11/2026, C2 de las 21:00 NY (H4), largo:
+- Sweep: el mínimo de C1 (1.11808) cae a las 21:15 y el low de C2 llega a 1.1177.
+- FVG M15 bajista de las velas 21:00-21:30: 1.11814-1.11833. iFVG M5 de las velas 21:10-21:20: 1.11815-1.11834. Zona común: **1.11815-1.11833**.
+- CISD: 1.11841 (máximo de la vela de las 21:15).
+- Inversión: a las 21:55 una vela cierra en 1.1185, sobre 1.11834.
+- Pullback: a las 22:10 el mínimo (1.11825) entra en la zona por arriba.
+- Cierre sobre el CISD: la vela de las 22:25 cierra en 1.11843.
+- **Entrada a las 22:30 en 1.11843**, stop 1.1177 (7,3 pips), objetivo 2R en 1.11989.
 
-### Paso 3 · iFVG en LTF = CISD
-- En M5 o M3, tras el toque al FVG de MTF aparece un FVG de LTF en la dirección del sweep (corto: alcista). Una vela que **cierra al otro lado de su base** lo invierte (iFVG). **Esa inversión es el CISD.**
-- El FVG de LTF se forma **después del toque** (su tercera vela cierra tras el toque), no está ya invertido y **no tiene plazo**: puede invertirse mucho después del toque.
-- El TF donde aparece el iFVG (M5 o M3) es el **TF de entrada**.
-
-### Paso 4 · Entrada
-Cuatro variantes, cada una con su propio backtest, siempre **antes de que cierre C2**:
-
-1. **Vela siguiente al CISD:** entrada a mercado a la apertura de la vela posterior a la que cierra el CISD.
-2. **Retesteo del iFVG:** tras el CISD el precio continúa y vuelve a la zona del iFVG. Entrada al tocarla. Si no vuelve, no hay entrada.
-3. **Primera vela sin mecha:** la primera vela a favor, sin mecha, en el TF de entrada tras el CISD. Se entra a la apertura de la vela siguiente.
-4. **Cierre del CISD:** entrada a mercado al cierre de la propia vela que cierra el CISD, sin esperar a la siguiente.
+`tests/crt_eurusd_20261102.py` trae las velas y los tests comprueban cada paso.
 
 ## 4. Gestión
 
-- **Stop:** en el extremo de la mecha que hizo el sweep (en cortos, su máximo; en largos, su mínimo). En el backtest no lleva colchón: el spread se descuenta como coste.
-- **Objetivo:** 1:2 (2R).
-- **Break even:** al llegar a 1R el stop pasa a la entrada.
-- **Sesión:** a las 18:00 NY no se abren entradas y lo que siga abierto se cierra.
-- Stop y objetivo en la misma vela: cuenta el stop.
-- Una operación por sweep de HTF, sin reentradas tras el stop.
-- **Objetivo alternativo (`--objetivo-c1`):** el extremo opuesto de C1 (si se tomó el máximo, va a por el mínimo). Regla 1: si ese extremo da menos de 2 R, el setup se descarta y se anota el R máximo que habría dado.
+- **Stop:** en el extremo del sweep hasta ese momento (largo: el mínimo de C2; corto: el máximo). Sin colchón.
+- **Objetivo:** `CRT_RR` veces el riesgo (2R).
+- **Breakeven:** en cuanto el precio toca +1 R el stop pasa a la entrada (lo lleva Setup).
+- **Sesión:** a la hora de cierre no se abren entradas y lo abierto se cierra.
+- Stop y objetivo en la misma vela: cuenta el stop. Una operación a la vez por mercado; el bot no abre otra mientras haya una abierta.
 
-## 5. Definiciones operativas que hay que fijar al programar
+## 5. En el bot
 
-Estas son las lecturas para el código. Se congelan antes de ver resultados.
+- **Skill `crt`** (`tradingbot/skills/crt/skill.py`): con cada `candles.loaded` de M3 o M5 busca el setup con `engine.find_zone_setups` y `engine.entry_point`, y publica `crt.signal`; Cortex la convierte en orden para Setup (simulada) sin consultar el sesgo.
+- **Gráfico (botón CRT):** dibuja, además de los CRT del backtest antiguo, **la operación activa de Cortex con todos sus niveles** (`crt/chart.py: live_marks`): el FVG, el iFVG (con el TF), la zona común (recuadro), el CISD, el punto del pullback y la posición (entrada, stop y objetivo); y los **«Setup OK sin Entrada»** (`no_entry_marks`). El setup no se guarda con la orden: se vuelve a buscar con el motor sobre las velas cargadas (solo si el gráfico está en el TF de la orden).
+- **Backtest:** `scripts/backtest_crt_zona.py` (velas M5 de `analisis/m5`), con el mismo motor.
 
-| Concepto | Definición propuesta |
+## 6. Definiciones operativas
+
+| Concepto | Definición |
 |---|---|
-| FVG | Tres velas consecutivas en las que el máximo de la 1.ª es menor que el mínimo de la 3.ª (alcista), o el mínimo de la 1.ª es mayor que el máximo de la 3.ª (bajista). La zona es el hueco entre esos dos niveles |
-| FVG nacido tras el extremo | La primera vela del FVG de MTF termina después de la vela LTF del extremo del sweep, y su 3.ª vela cierra (se forma) antes de la vela LTF que se evalúa |
-| iFVG | Cierre de una vela al otro lado de la base de un FVG de LTF posterior al extremo. Se toma el cierre, no la mecha |
-| Alineación de H3 | Velas H3 agregadas de M5 y alineadas a las 18:00 NY (18, 21, 0 ... 15), no a la hora del servidor (forex: H4 alineadas a las 17:00) |
-| Vuelta al FVG | Una vela LTF cuyo extremo (corto: máximo) entra en la zona del FVG de MTF, ya formado. Sin tolerancia |
-| Ventana del setup | Dentro de C2: el CISD y la apertura de la entrada ocurren antes del cierre de C2 |
-| Entrada 2 (retesteo) | Orden límite en la base del iFVG tras una continuación (nuevo mínimo bajo el de la vela del CISD). Se cancela si toca el stop o el objetivo antes |
-| Entrada 3 (sin mecha) | Vela bajista con máximo = apertura (cortos); entrada en la apertura de la siguiente |
-| Costes | Spread real de MT5 en la vela de entrada |
+| FVG | Tres velas seguidas en las que el máximo de la 1.ª es menor que el mínimo de la 3.ª (alcista) o el mínimo de la 1.ª es mayor que el máximo de la 3.ª (bajista); la zona es el hueco entre esos niveles |
+| FVG nacido en C2 | Su primera vela empieza en C2 o después; el FVG se considera formado al cierre de su 3.ª vela |
+| iFVG invertido | Una vela del gráfico cierra al otro lado de la base del FVG de LTF (el cierre, no la mecha) |
+| Toque | Una vela posterior a la inversión y a la formación de los dos FVG cuya mecha entra en la zona común sin cerrar al otro lado de ella |
+| Alineación de HTF | Velas H3 alineadas a las 18:00 NY (índices) o H4 a las 17:00 NY (forex), no a la hora del servidor |
+| Hora del servidor | NY + 7 h (se estima si el feed no la da) |
 
-## 6. Mercados y muestra
+## 7. Riesgos conocidos
 
-| Parámetro | Propuesta |
-|---|---|
-| Mercado | NAS100 de PUPrime; USTEC de MetaQuotes como control |
-| Selección | 2018-2022 |
-| Validación | 2023 en adelante |
-| Limitación | La profundidad del histórico en M3/M5 manda: hay que comprobar cuántos años hay disponibles |
-
-## 7. Criterios de aceptación (propuesta, siguiendo el estilo del TBR)
-
-Se evalúa cada variante de entrada. Se da por buena si:
-1. NAS100 de PUPrime, todo el histórico disponible: ≥ 100 operaciones y R neto > +0.05 con t > 2.0.
-2. R neto positivo en el periodo de selección y en el de validación.
-3. R neto > 0 en el control (USTEC de MetaQuotes).
-
-Los criterios se congelan antes de ejecutar. Si no pasa, se documenta igual en `docs/estrategia_crt/RESULTADOS.md`, como se hizo con el TBR. Se compararán las cuatro entradas contando que probar cuatro variantes aumenta la probabilidad de un falso positivo.
-
-## 8. Riesgos conocidos
-
-- **Pocas operaciones:** cuatro condiciones encadenadas pueden dejar muy pocos casos. Hay que ver el embudo (cuántos días pasan cada paso) antes de sacar conclusiones.
-- **Subjetividad:** FVG, iFVG y CISD se definen distinto según quién los enseñe. En el bot son reglas numéricas, y los resultados dependen de esas lecturas.
-- **Stop largo:** el stop va tras la mecha del sweep y la entrada llega después del giro, así que el riesgo puede ser grande. Conviene medir la distribución del riesgo en puntos.
-- **Solapamiento con otros skills:** el TBR entra con la rotura de un rango; CRT entra cuando la rotura falla. Hay que comprobar que no duplican señales.
-
-## 9. Siguientes pasos
-
-1. ~~Escribir `scripts/backtest_crt.py`~~ hecho.
-2. ~~Ejecutar las tres variantes de entrada sobre NAS100~~ hecho: no pasa (ver `RESULTADOS.md`).
-3. Decidir qué hacer con el resultado (ver el resumen en `RESULTADOS.md` y la conversación).
-4. Solo si alguna variante pasa: crear el skill `crt` en `tradingbot/skills/crt` (a partir de `_plantilla`) y añadirlo como perfil aparte en `config.toml`.
+- **Sin ventaja demostrada:** el backtest da R bruto ≈ 0 en todas las variantes (ver `RESULTADOS_zona.md`).
+- **Subjetividad:** FVG, iFVG y CISD se definen distinto según quién los enseñe; en el bot son reglas numéricas.
+- **Zonas finas:** a veces la zona común mide pocos puntos; no hay un tamaño mínimo.
+- **Operaciones antiguas:** las abiertas con la secuencia anterior no se dibujan con niveles (el motor no las encuentra con la regla nueva).

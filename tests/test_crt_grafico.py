@@ -144,6 +144,7 @@ def window(tmp_path, monkeypatch, strategy="crt"):
     import tradingbot.skills  # noqa: F401
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr("tradingbot.skills.crt.chart.no_entry_marks", lambda *a, **k: [])       # los «sin entrada» tienen su propio test
     cfg = {"app": {"symbol": "NAS100.r", "timeframe": "5m", "watchlist": ["NAS100.r"], "strategy": strategy}}
     return MainWindow(EventBus(), SkillManager(EventBus(), Services(None, None, cfg, EnvConfig()), [{"type": "setup"}]), cfg, "t")
 
@@ -179,7 +180,7 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     amber = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
     assert len(amber) >= 1                                                               # el FVG de LTF, siempre al lado del nivel barrido
     labels = sorted(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText") and not it.__class__.__name__ == "CrtPill")
-    assert labels == ["FVG M5"]                                                          # solo su nombre con el timeframe: sin nombres de vela ni CISD
+    assert labels == ["FVG M15", "entrada 103.100", "iFVG M5"]                           # solo nombres y timeframe: sin nombres de vela ni CISD (el del backtest antiguo no es este)
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
     assert len(boxes) == 1 + sum(c["state"] in NEUTRAL for c in chart._crts)         # C2 (y las velas sin sweep) en gris claro, no del color de las velas
@@ -198,7 +199,7 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert "FVG en MTF" not in text and "M15" in text and "M5" in text and "Orden límite en el nivel de C1" in text and "13/10 06:00" in text
     assert "M3·1" in text                                                                # y los otros LTF del backtest
     assert "FVG M15" in text and "107.500" in text and "110.000" in text                 # la zona del FVG de MTF, en la ficha
-    assert "103.1" in text and "108.5" in text and "92.3" in text and "FVG de LTF" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
+    assert "103.1" in text and "108.5" in text and "92.3" in text and "iFVG M5" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
     chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not chart._card.isVisible()
     win.crt_btn.setChecked(False)                                                        # el botón las quita y las vuelve a poner
@@ -274,3 +275,77 @@ def test_las_velas_sin_sweep_tambien_llevan_caja_neutra(tmp_path, monkeypatch):
     win._on_candles(candles_event())
     texts = [p.toPlainText() for p in win.chart._crt_pills]
     assert any("sin sweep" in t or "sin evaluar" in t for t in texts) and any("CRT bajista" in t for t in texts)
+
+
+def test_las_operaciones_en_directo_se_dibujan_con_todos_sus_niveles():
+    from types import SimpleNamespace
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt.chart import live_marks
+    df = eurusd()
+    x_in = int((df["ts"] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD).to_numpy().argmax())
+    order = SimpleNamespace(symbol="EURUSD", pattern_key="crt", timeframe="5m", direction="long", entry_ts=int(df["ts"][x_in]),
+                            price=1.11843, stop=1.1177, target=1.11989)
+    marks = live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1)
+    assert len(marks) == 1
+    m = marks[0]
+    assert m["state"] == "abierta" and m["direction"] == "long"
+    assert (m["fvgs"][0]["name"], m["fvgs"][0]["bottom"], m["fvgs"][0]["top"]) == ("M15", pytest.approx(1.11814), pytest.approx(1.11833))
+    assert (m["ifvg"]["bottom"], m["ifvg"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11834))
+    assert (m["common"]["bottom"], m["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833))
+    assert m["cisd"]["level"] == pytest.approx(1.11841) and m["cisd"]["x1"] == x_in - 1          # la vela de las 22:25 cierra sobre el CISD
+    assert m["touch"]["x"] == x_in - 4                                                           # el pullback de las 22:10, de arriba abajo
+    assert m["pos"]["x0"] == x_in and (m["pos"]["entry"], m["pos"]["stop"], m["pos"]["target"]) == (1.11843, 1.1177, 1.11989)
+    order.timeframe = "3m"                                                                       # otro LTF que el del gráfico: no se dibuja
+    assert live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1) == []
+
+
+def ny_2100(st) -> bool:
+    return int(st["C2"]) == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD
+
+
+def test_el_setup_sin_toque_de_la_zona_se_marca_setup_ok_sin_entrada():
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt import engine
+    from tradingbot.skills.crt.chart import no_entry_marks
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    cut = df[df["ts"] < pd.Timestamp("2026-11-02 22:00").value // 10**9 + AHEAD].reset_index(drop=True)      # hasta justo después de invertirse el iFVG (21:55)
+    assert [x for x in no_entry_marks(cut, "EURUSD", AHEAD, 5) if x["when"] == "02/11 21:00"] == []       # C2 sigue en curso: aún puede tocarla
+    bars = df.copy()
+    bars.loc[bars["ts"] >= pd.Timestamp("2026-11-02 22:00").value // 10**9 + AHEAD, ["open", "high", "low", "close"]] = 1.1200      # tras invertirse sube hasta el extremo opuesto de C1 (1.11976) sin volver a la zona
+    marks = no_entry_marks(bars, "EURUSD", AHEAD, 5)
+    m = [x for x in marks if x["when"] == "02/11 21:00"]
+    assert len(m) == 1 and m[0]["state"] == "sin_entrada" and m[0]["direction"] == "long" and "pos" not in m[0]
+    assert (m[0]["common"]["bottom"], m[0]["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833))
+    assert m[0]["cisd"]["level"] == pytest.approx(1.11841)
+    assert [x for x in engine.find_zone_setups(df, df, 5, cfg)[0].no_entry if ny_2100(x)] == []           # con el toque real no es «sin entrada»
+
+
+def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt.chart import live_marks
+    from tradingbot.ui.chart import CrtPill
+    df = eurusd()
+    x_in = int((df["ts"] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD).to_numpy().argmax())
+    order = SimpleNamespace(symbol="EURUSD", pattern_key="crt", timeframe="5m", direction="long", entry_ts=int(df["ts"][x_in]),
+                            price=1.11843, stop=1.1177, target=1.11989)
+    mark = live_marks([SimpleNamespace(order=order, closed=None)], df, "EURUSD", AHEAD, 5, 1)[0]
+    assert mark["touch"]["when"] == "02/11 22:10"
+    win = window(tmp_path, monkeypatch)
+    pill = CrtPill(mark)
+    assert "FVG M15 + iFVG M5" in pill.toPlainText()                                             # los TF, en la propia etiqueta
+    chart = win.chart
+    chart.set_crts([mark])
+    chart.resize(900, 500)
+    vb = chart.getPlotItem().getViewBox()
+    vb.setXRange(mark["x0"] - 20, mark["x0"] + 120, padding=0)
+    vb.setYRange(1.1170, 1.1205, padding=0)
+    vb.updateMatrix()
+    chart._mouse_moved(chart._crt_pills[0].sceneBoundingRect().center())
+    text = chart._card.toPlainText()
+    assert "FVG M15" in text and "1.11814" in text and "1.11833" in text                         # el FVG, con su TF y su zona
+    assert "iFVG M5" in text and "1.11815" in text and "1.11834" in text                         # el iFVG, con su TF y su zona
+    assert "Zona común" in text and "1.11815" in text                                            # el área común (doble FVG)
+    assert "Retest de la zona" in text and "02/11 22:10" in text                                 # el retest
+    assert "CISD" in text and "1.11841" in text                                                  # el nivel del CISD
