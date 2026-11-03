@@ -919,15 +919,12 @@ class ChartView(pg.PlotWidget):
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                     + (crt_row("Sweep", str(data["sweep"])) if data.get("sweep") else "")
-                    + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
                     + (crt_row("LTF (FVG, retesteo y entrada)", f"M{data.get('ltf', '-')}") if not data.get("live") else "")
                     + (crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}") if data.get("entry") else "")
                     + crt_row("Resultado", word + ("" if data.get("live") else " (objetivo 2R)"))
                     + (crt_row("Entrada · SL · TP", f"{fmt_price(data['pos']['entry'])} · {fmt_price(data['pos']['stop'])} · "
                                f"{fmt_price(data['pos']['target'])}") if data.get("pos") else "")
-                    + (crt_row(f"iFVG M{data.get('ltf', '-')}", f"{fmt_price(data['ifvg']['bottom'])} – {fmt_price(data['ifvg']['top'])}")
-                       if data.get("ifvg") else "")
-                    + (crt_row("BPR (zona común)", f"{fmt_price(data['common']['bottom'])} – {fmt_price(data['common']['top'])}")
+                    + (crt_row(f"BPR M{data.get('ltf', '-')}", f"{fmt_price(data['common']['bottom'])} – {fmt_price(data['common']['top'])}")
                        if data.get("common") else "")
                     + (crt_row("CISD", fmt_price(data['cisd']['level'])) if data.get("cisd") else "")
                     + (crt_row("Retest del BPR", f"{data['touch'].get('when', '')} NY · {fmt_price(data['touch']['price'])}")
@@ -1097,41 +1094,21 @@ class ChartView(pg.PlotWidget):
             self._crt_items.append(item)
 
         amber = "#FFA726"
-        fvg, pos = crt.get("ifvg"), crt.get("pos")
-        if fvg:                                                 # el FVG de LTF tras el máximo del sweep: siempre al lado del nivel barrido
-            left, right = float(fvg["x0"]), max(float(fvg["x1"]) + 1, float(fvg["x0"]) + 1)
-            box = QGraphicsRectItem(QRectF(left, fvg["bottom"], right - left, max(fvg["top"] - fvg["bottom"], 1e-9)))
-            box.setBrush(_alpha(amber, 45))
-            pen = QPen(QColor(amber), 1.2)
-            pen.setCosmetic(True)
-            box.setPen(pen)
-            add(box, -3)
-            label = pg.TextItem(anchor=(0, 0.5))                  # lo único con texto en el dibujo: el nombre del FVG y su timeframe
-            label.setHtml(f'<span style="font-size:7pt; color:{amber}">iFVG M{crt.get("ltf") or ""}</span>')
-            label.setPos(right, (fvg["bottom"] + fvg["top"]) / 2)
-            add(label, 7)
-        blue = "#42A5F5"
-        for zone in crt.get("fvgs") or []:                      # el FVG de MTF que toca el extremo del sweep, en cada TF (azul, para no confundirlo con el iFVG)
-            left, right = float(zone["x0"]), float(zone["x1"]) + 1
-            box = QGraphicsRectItem(QRectF(left, zone["bottom"], max(right - left, 0.5), max(zone["top"] - zone["bottom"], 1e-9)))
-            box.setBrush(_alpha(blue, 40))
-            pen = QPen(QColor(blue), 1.2)
-            pen.setCosmetic(True)
-            box.setPen(pen)
-            add(box, -4)
-            label = pg.TextItem(anchor=(0, 0.5))
-            label.setHtml(f'<span style="font-size:7pt; color:{blue}">FVG {html.escape(str(zone.get("name") or ""))}</span>')
-            label.setPos(right, (zone["bottom"] + zone["top"]) / 2)
-            add(label, 7)
+        pos = crt.get("pos")                                    # solo se dibuja el BPR de entrada, no el FVG ni el iFVG que lo forman
         common, cisd = crt.get("common"), crt.get("cisd")
-        if common:                                              # la zona que comparten el FVG de MTF y el iFVG de LTF: el precio la toca antes de entrar
+        if common:                                              # el BPR: la zona que comparten el iFVG y el FVG de sentido contrario; el precio la retestea antes de entrar
+            green = "#26A69A"
             left, right = float(common["x0"]), float(common["x1"]) + 1
             box = QGraphicsRectItem(QRectF(left, common["bottom"], max(right - left, 0.5), max(common["top"] - common["bottom"], 1e-9)))
-            box.setBrush(_alpha(theme.TEXT, 35))
-            pen = QPen(QColor(theme.TEXT), 1.6)
+            box.setBrush(_alpha(green, 55))
+            pen = QPen(QColor(green), 1.4)
             pen.setCosmetic(True)
             box.setPen(pen)
             add(box, -2)
+            label = pg.TextItem(anchor=(0, 0.5))
+            label.setHtml(f'<span style="font-size:7pt; color:{green}">BPR M{crt.get("ltf") or ""}</span>')
+            label.setPos(right, (common["bottom"] + common["top"]) / 2)
+            add(label, 7)
         if cisd and cisd.get("label") == "CISD":                 # el CISD: el extremo de la vela que creó el iFVG; el cierre con cuerpo más allá da la entrada
             pink = "#EC407A"
             left, right = float(cisd["x0"]), float(cisd["x1"]) + 1

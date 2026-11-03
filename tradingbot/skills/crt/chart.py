@@ -181,12 +181,21 @@ def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
         return min(max(int(np.searchsorted(ts, int(minute) * 60 + ahead, "right")) - 1, 0), n - 1)
 
     x_in, x_out = at(d["e"]), at(d["x"])
-    return {"pos": {"x0": x_in, "x1": max(x_out, x_in), "entry": d["pe"], "stop": d["ps"], "target": d["pt"]},
-            "ifvg": {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]},
-            "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"], "label": "CISD"},
-            "extreme": {"x": at(d["th"]), "price": d["ps"]},
-            "fvgs": [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
-                     for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]}
+    fvgs = [{"tf": tf, "name": MTF_TFS[tf], "x0": at(t), "x1": max(at(d["tt"]), at(t) + 1), "bottom": a, "top": b}
+            for tf, (a, b, t) in sorted(d.get("fvg", {}).items())]
+    ifvg = {"x0": at(d["ti"]), "x1": at(d["tv"]), "bottom": d["pa"], "top": d["pb"]}
+    out = {"pos": {"x0": x_in, "x1": max(x_out, x_in), "entry": d["pe"], "stop": d["ps"], "target": d["pt"]},
+           "ifvg": ifvg, "fvgs": fvgs,
+           "cisd": {"x0": at(d["tq"]), "x1": at(d["tj"]), "level": d["pc"], "label": "CISD"},
+           "extreme": {"x": at(d["th"]), "price": d["ps"]}}
+    for z in fvgs:                                               # el BPR de entrada: la zona que comparten el iFVG y el FVG de sentido contrario
+        lo_, hi_ = max(min(d["pa"], d["pb"]), z["bottom"]), min(max(d["pa"], d["pb"]), z["top"])
+        if lo_ < hi_:
+            out["common"] = {"x0": max(ifvg["x0"], z["x0"]), "x1": at(d["tt"]), "bottom": lo_, "top": hi_}
+            out["touch"] = {"x": at(d["tt"]), "price": hi_ if d["pe"] > d["ps"] else lo_,
+                            "when": datetime.fromtimestamp(int(d["tt"]) * 60, timezone.utc).strftime("%d/%m %H:%M")}
+            break
+    return out
 
 
 NO_ENTRY_DAYS = 4                                                # días de velas en los que se buscan los «Setup OK sin entrada»
