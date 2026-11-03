@@ -332,7 +332,9 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
                     if cb < ct and cisd_of(k)[1] < cb:                          # BPR (zona común) no vacío y con el CISD más allá de él (largo: un máximo por encima del BPR)
                         pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
-            if not pairs:
+            if not pairs:                                                       # barre C1 pero no se forma ningún BPR: sweep sin setup
+                setups.nosetup.append({"sign": sign, "dirección": name, "C2": s2, "ih": a + int(np.argmax(hi_[a:b])), "stop": top,
+                                       "motivo": "sin BPR (iFVG y FVG de sentido contrario)"})
                 continue
             funnel["con FVG de MTF y de LTF con zona común"] += 1
             pid = lambda p: (p[0], p[1][3], p[1][0])                        # identidad de una pareja: iFVG (vela 3), FVG (cierre y TF)
@@ -386,6 +388,9 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                 setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "zones": [z],
                                         "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": cisd_of(k),
                                         "inv": inverted[k], "end": j if invalidated else b - 1})
+            elif not invalidated:                                               # pareja(s) formadas pero ninguna llegó a entrada ni a «setup OK»
+                setups.nosetup.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx,
+                                       "motivo": "BPR sin retest válido y cierre sobre el CISD" if seen_touch else "BPR sin invertirse el iFVG"})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
 

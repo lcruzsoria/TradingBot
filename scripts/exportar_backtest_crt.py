@@ -49,7 +49,8 @@ OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}
 EPOCH = pd.Timestamp("1970-01-01")
 INVALID_REASONS = ["sin pullback a la zona común", "sin CISD tras el toque"]
-NO_ENTRY_REASONS = ["setup OK sin entrada: el precio no volvió a la zona común"]
+NO_ENTRY_REASONS = ["setup OK sin entrada: el precio no volvió a la zona común", "sin BPR (iFVG y FVG de sentido contrario)",
+                    "BPR sin retest válido y cierre sobre el CISD", "BPR sin invertirse el iFVG"]
 
 
 def tbr_zone(ts: pd.Series) -> pd.Series:
@@ -120,6 +121,8 @@ def simulate() -> pd.DataFrame:
                              "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.invalid]
                 noentry += [{"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": NO_ENTRY_REASONS[0],
                              "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.no_entry]
+                noentry += [{"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
+                             "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.nosetup]
                 entries = 0
                 for code, (_, rule) in TARGETS.items():
                     busy, mine = -1, []
@@ -223,7 +226,7 @@ def marks_cols(saved: dict, table: str, gkey: str, markets: list[str], reasons: 
             other = other[other["grupo"] == gkey]
             taken |= set(map(tuple, other[["mercado", "C2", "d"]].to_numpy().tolist()))
     df = df[[(m, c, d) not in taken for m, c, d in df[["mercado", "C2", "d"]].to_numpy().tolist()]]
-    df = df.sort_values(["mercado", "C2", "d", "ltf"]).drop_duplicates(["mercado", "C2", "d"]).reset_index(drop=True)
+    df = df.assign(_mo=df["motivo"].map({r: i for i, r in enumerate(reasons)})).sort_values(["mercado", "C2", "d", "_mo", "ltf"]).drop_duplicates(["mercado", "C2", "d"]).reset_index(drop=True)
     df = df[df["mercado"].isin(markets)].reset_index(drop=True)
     return {"m": df["mercado"].map({m: i for i, m in enumerate(markets)}).astype(int).tolist(),
             "c": ((df["C2"].astype(np.int64) - AHEAD) // 60).tolist(), "d": df["d"].astype(int).tolist(),
