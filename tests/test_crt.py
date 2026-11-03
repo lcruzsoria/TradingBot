@@ -386,3 +386,22 @@ def test_la_skill_no_pide_velas_a_mt5_con_el_perfil_en_5_min():
     manager.stop()
     assert source.calls == []                                                            # las de 15 min salen de las de 5 y no hay combinaciones con 3 min
     assert len(out["signal"]) == 1 and out["signal"][0].payload["timeframe"] == "5m"
+
+def test_los_niveles_que_c2_puede_barrer_son_el_pdh_los_swings_de_h4_y_las_velas_de_h12_intactos():
+    import numpy as np
+    day, h4, h12, ahead = 86400, 14400, 43200, 7 * 3600
+    t0 = pd.Timestamp("2026-10-27 18:00").value // 10**9 + ahead              # inicio de un día de sesión (NY)
+
+    def candles(step, highs):
+        n = len(highs)
+        return {"ts": np.array([t0 + i * step for i in range(n)]), "high": np.array(highs, dtype=float)}
+
+    dv = candles(day, [100, 105, 103, 101])                                    # 4 días cerrados: el último (PDH) llega a 101
+    sv = candles(h4, [100, 110, 100, 99, 98, 97, 120, 96, 95, 94] + [93] * 14)     # pivotes en 1 (110) y 6 (120)
+    tv = candles(h12, [100, 108, 104, 99, 99, 99, 99, 99])
+    s2 = t0 + 4 * day                                                           # C2 empieza justo al cerrar el día 4
+    hv = candles(3 * 3600, [90] * (4 * 8))                                      # ninguna vela HTF supera nada hasta C2
+    hv["high"][8] = 112                                                         # salvo una que supera el swing de 110 (día 2)
+    got = dict((n.split(" ")[0] + " " + n.split(" ")[1], p) for p, n in engine.sweep_levels(s2, hv, dv, tv, sv, ahead, ("PDH", "máx")))
+    assert got["PDH día"] == 101 and got["swing H4"] == 120                      # el swing de 110 ya lo barrió una vela HTF: no está intacto
+    assert any(n.startswith("máx H12") for _, n in engine.sweep_levels(s2, hv, dv, tv, sv, ahead, ("PDH", "máx")))

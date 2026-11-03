@@ -197,7 +197,7 @@ def _window(series: dict, first_ts: int) -> dict:
     return {m: d[d["ts"] >= first_ts].reset_index(drop=True) for m, d in series.items()}
 
 
-def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES, fvg_series: dict | None = None) -> list[dict]:
+def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES, fvg_series: dict | None = None, hist=None) -> list[dict]:
     """Marcas de los CRT de las últimas velas que dejaron la zona común (FVG de MTF ∩ iFVG de LTF) sin que el precio la tocara: «Setup OK sin
     Entrada». Se dibujan el FVG, el iFVG, la zona común y el CISD, sin posición."""
     ts_all = df["ts"].to_numpy().astype(np.int64)
@@ -210,7 +210,7 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
     cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
     htf, out = base.htf_min, []
     fvg = _window(fvg_series, ts[0]) if fvg_series else None
-    for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg)[0].no_entry:
+    for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg, hist)[0].no_entry:
         sgn, start = st["sign"], int(st["C2"])
 
         def zone(a: float, b: float) -> tuple[float, float]:
@@ -229,7 +229,7 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
             "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
             "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
             "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": None, "htf": htf, "start": start, "others": [], "live": True,
-            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "motivo": "Setup OK sin Entrada: el precio siguió sin tocar la zona común",
+            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "sweep": st.get("sweep"), "motivo": "Setup OK sin Entrada: el precio siguió sin tocar la zona común",
             "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
             "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
             "common": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zb, "top": zt},
@@ -244,7 +244,7 @@ HOW_STATES = {"objetivo": "objetivo", "stop": "stop", "BE": "be", "sesión": "ti
 
 
 def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES,
-                 fvg_series: dict | None = None) -> list[dict]:
+                 fvg_series: dict | None = None, hist=None) -> list[dict]:
     """Marcas de los setups de zona común de las últimas velas que dieron entrada (cierre sobre el CISD tras el pullback), con la operación que
     habría salido sobre las velas cargadas (stop, objetivo, breakeven a +`be` R y cierre de sesión), aunque el bot no la abriera: así un setup válido
     no se queda como «sin evaluar». Las operaciones que sí abrió el bot se reconocen por su hora de entrada y su estado manda sobre el simulado (lo hace la ventana)."""
@@ -258,7 +258,7 @@ def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: 
     rule = engine.Rule(rr=rr, be_at=be)
     htf, out, closed_bars = base.htf_min, [], n - 1                      # la última vela puede estar formándose
     fvg = _window(fvg_series, ts[0]) if fvg_series else None
-    setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg, fvg)
+    setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg, fvg, hist)
     views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
     for st in setups:
         L = views[st["sign"]]
@@ -287,7 +287,7 @@ def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: 
             "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
             "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
             "mtf": [st["mtf"]], "ltf": ltf, "entry": entry, "entry_name": CRT_ENTRIES.get(entry, ""), "htf": htf, "start": start, "others": [],
-            "fvg_all": [st["mtf"]], "live": True, "simulated": True, "entry_ts": int(ts[x_in]),
+            "fvg_all": [st["mtf"]], "sweep": st.get("sweep"), "live": True, "simulated": True, "entry_ts": int(ts[x_in]),
             "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
             "pos": {"x0": lo + x_in, "x1": lo + max(x_out, x_in), "entry": sgn * ep["entry"], "stop": sgn * st["stop"], "target": sgn * res["target"]},
             "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + st["jc"], "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
@@ -320,7 +320,7 @@ def complete_series(series: dict, cfg) -> dict:
 
 
 def zone_marks(series, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES,
-               ref_ts=None) -> list[dict]:
+               ref_ts=None, hist=None) -> list[dict]:
     """Los setups de zona común de las últimas velas con todas las combinaciones de TF (FVG e iFVG de 15 o 5 min con TF del FVG >= TF del iFVG): los que
     dieron entrada (con la operación simulada) y los «Setup OK sin Entrada». `series` = {TF: velas} (o unas velas sueltas, de `ltf` minutos). Cada combinación se
     evalúa con las velas del TF de su iFVG y las marcas se pasan a las velas `ref_ts` (las del TF del perfil por defecto). Por cada C2 y lado sale una sola
@@ -335,7 +335,7 @@ def zone_marks(series, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr
     found: dict[tuple, dict] = {}
     for i in tfs:
         fvg = {m: series[m] for m in tfs if m >= i}
-        marks = signal_marks(series[i], symbol, ahead, i, entry, rr, be, indices, fvg) + no_entry_marks(series[i], symbol, ahead, i, indices, fvg)
+        marks = signal_marks(series[i], symbol, ahead, i, entry, rr, be, indices, fvg, hist) + no_entry_marks(series[i], symbol, ahead, i, indices, fvg, hist)
         for m in retime(marks, series[i]["ts"].to_numpy(), ref_ts):
             key = (m["start"], m["direction"])
             old = found.get(key)

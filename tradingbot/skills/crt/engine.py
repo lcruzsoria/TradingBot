@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -209,12 +210,52 @@ def bullish_fvgs(v: dict, minutes: int) -> dict:
     return {"formed": ts[i] + minutes * 60, "first": ts[i - 2], "bottom": h[i - 2], "top": l[i]}
 
 
-def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None) -> tuple[list, dict]:
+H12_LOOKBACK = 20                                                    # velas de H12 (10 días) cuyo máximo o mínimo puede barrerse
+SWING_TF, SWING_LOOKBACK = 240, 60                                   # los swings (pivote clásico de 3 velas) se miran en H4, hasta 60 velas atrás (10 días)
+
+
+def _stamp(ts: int, ahead: int, day: bool = False) -> str:
+    """Fecha (y hora) en Nueva York de una hora de servidor. Con `day`, la del día de la sesión que ese inicio abre (las velas diarias empiezan a las 17:00 / 18:00)."""
+    t = datetime.fromtimestamp(ts - ahead + (12 * 3600 if day else 0), timezone.utc)
+    return t.strftime("%d/%m" if day else "%d/%m %H:%M")
+
+
+def sweep_levels(s2: int, hv: dict, dv: dict, tv: dict, sv: dict, ahead: int, names: tuple) -> list[tuple[float, str]]:
+    """Niveles que C2 puede barrer además del extremo de C1 (en el espacio del corto: máximos): el máximo del día anterior (PDH), los swings de H4
+    (pivote clásico de 3 velas) y el máximo de las velas de H12 de los últimos 10 días. Solo cuentan los que siguen intactos: ninguna vela HTF los superó
+    entre su formación y el inicio de C2. `hv`, `dv`, `tv` y `sv`: velas HTF, diarias, H12 y H4 (en el espacio del corto). `names`: cómo se llaman los
+    niveles de ese lado (PDH y máx H12 en un corto; PDL y mín H12 en un largo)."""
+    out = []
+
+    def intact(level: float, since: int) -> bool:
+        a, b = int(np.searchsorted(hv["ts"], since)), int(np.searchsorted(hv["ts"], s2))
+        return a >= b or float(hv["high"][a:b].max()) < level
+
+    j = int(np.searchsorted(dv["ts"] + 1440 * 60, s2, side="right")) - 1            # el último día cerrado
+    if j >= 0 and intact(float(dv["high"][j]), int(dv["ts"][j]) + 1440 * 60):
+        out.append((float(dv["high"][j]), f"{names[0]} día {_stamp(int(dv['ts'][j]), ahead, True)}"))
+    j = int(np.searchsorted(sv["ts"] + SWING_TF * 60, s2, side="right")) - 1        # la última vela de H4 cerrada
+    for q in range(max(1, j - SWING_LOOKBACK), j):                                  # pivote en q: confirmado por la vela q + 1 (cerrada)
+        hq = float(sv["high"][q])
+        if hq > sv["high"][q - 1] and hq > sv["high"][q + 1] and intact(hq, int(sv["ts"][q + 1]) + SWING_TF * 60):
+            out.append((hq, f"swing H4 {_stamp(int(sv['ts'][q]), ahead)}"))
+    j = int(np.searchsorted(tv["ts"] + 720 * 60, s2, side="right")) - 1             # las velas de H12 cerradas de los últimos 10 días
+    for q in range(max(0, j - H12_LOOKBACK), j + 1):
+        if intact(float(tv["high"][q]), int(tv["ts"][q]) + 720 * 60):
+            out.append((float(tv["high"][q]), f"{names[1]} H12 {_stamp(int(tv['ts'][q]), ahead)}"))
+    return out
+
+
+def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None, hist: pd.DataFrame | None = None) -> tuple[list, dict]:
     """Todos los setups de zona común de las velas dadas, con el índice de la vela que cierra bajo el CISD (`jc`); la entrada va aparte
     (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF (y el FVG normal si no se pasan `fvg_series`) y `ltf` las velas del iFVG, del CISD
     y de la entrada (de `ltf_min` minutos). `fvg_series`: {TF en minutos: velas de ese TF} de los FVG normales (TF >= `ltf_min`); sin ella se agrupan desde `base`
-    los múltiplos de `ltf_min`."""
+    los múltiplos de `ltf_min`. `hist`: velas de largo recorrido (de un TF corto) de las que salen los niveles que C2 puede barrer (PDH/PDL, swings de
+    H4, H12); sin ellas se usan las de `base`."""
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
+    src = base if hist is None else hist
+    big = {"h": aggregate(src, cfg.htf_min, cfg, cfg.origin), "d": aggregate(src, 1440, cfg, cfg.origin), "t": aggregate(src, 720, cfg, cfg.origin),
+           "s": aggregate(src, SWING_TF, cfg, cfg.origin)}
     mtf = ({m: fvg_series[m] for m in ZONE_TFS if m >= ltf_min and m in fvg_series} if fvg_series is not None
            else {m: aggregate(base, m, cfg) for m in ZONE_TFS if m >= ltf_min and m % ltf_min == 0})
     funnel = {"velas HTF con sweep": 0, "con FVG de MTF y de LTF con zona común": 0, "con pullback a la zona": 0, "con CISD": 0, "invalidados": 0,
@@ -222,19 +263,27 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
     setups = Setups()
     for sign, name in ((1, "short"), (-1, "long")):
         L, H = view(ltf, sign), view(htf, sign)
+        bv = {k: view(v, sign) for k, v in big.items()}
+        names = ("PDH", "máx") if sign > 0 else ("PDL", "mín")
         fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in mtf}                          # el iFVG (LTF) no puede ser de mayor TF que el FVG
         lts, lo_, hi_, cl_ = L["ts"], L["low"], L["high"], L["close"]
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
-            if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60 or H["high"][i] <= H["high"][i - 1]:
+            if s2 - int(H["ts"][i - 1]) > cfg.htf_min * 60:
                 continue
             c1h, c1l = H["high"][i - 1], H["low"][i - 1]
             a, b = int(np.searchsorted(lts, s2)), int(np.searchsorted(lts, s2 + cfg.htf_min * 60))
             if b - a < 4:
                 continue
-            rel = np.flatnonzero(hi_[a:b] > c1h)
-            if not len(rel):
+            top = float(hi_[a:b].max())
+            cands = [(float(c1h), "vela C1")]                                    # lo que C2 puede barrer: el máximo de C1 o un nivel anterior (PDH, swing de H4, H12)
+            cands += [(p, n) for p, n in sweep_levels(s2, bv["h"], bv["d"], bv["t"], bv["s"], cfg.ahead, names) if p < top]
+            broke = [(p, n) for p, n in cands if top > p]
+            if not broke:
                 continue
+            swept_level = min(broke, key=lambda x: x[0])[0]                        # el más bajo: el primero que barre el precio (arranca el patrón)
+            swept_name = max(broke, key=lambda x: x[0])[1]                         # la etiqueta, la del nivel más profundo que barre C2 (vela C1, PDH/PDL, swing de H4, H12)
+            rel = np.flatnonzero(hi_[a:b] > swept_level)
             s0 = a + int(rel[0])
             if s0 > a and lo_[a:s0].min() < c1l:                                # C2 tomó antes el otro extremo de C1: el sweep es el del otro lado
                 continue
@@ -263,7 +312,7 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             for j in range(s0, b):
                 if lo_[j] < c1l:                                                # llega al extremo opuesto de C1 sin setup: invalidado
                     setups.invalid.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx,
-                                           "motivo": "sin CISD tras el toque" if seen_touch else "sin pullback a la zona común", "c1": (c1l, c1h)})
+                                           "motivo": "sin CISD tras el toque" if seen_touch else "sin pullback a la zona común", "c1": (c1l, c1h), "sweep": swept_name})
                     funnel["invalidados"] += 1
                     invalidated = True
                     break
@@ -274,7 +323,7 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     k, z, common = max(done, key=lambda p: (p[1][0], p[0], p[1][3]))              # la del FVG de mayor TF
                     trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": float(lo_[k - 1]),
                             "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
-                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
+                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
                             "cisd": (k - 1, float(lo_[k - 1])), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
                     break
                 for k, z, common in pairs:
@@ -298,14 +347,14 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             elif not seen_touch and inverted and (invalidated or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # invertido y el precio siguió (o C2 acabó) sin el pullback
                 k, z, common = max((p for p in pairs if p[0] in inverted), key=lambda p: (p[1][0], p[0], p[1][3]))
                 funnel["setup OK sin entrada"] += 1
-                setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "kf": k, "zones": [z],
+                setups.no_entry.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "zones": [z],
                                         "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": (k - 1, float(lo_[k - 1])),
                                         "inv": inverted[k], "end": j if invalidated else b - 1})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
 
 
-def find_multi_setups(series: dict, cfg: Cfg) -> tuple[list, dict]:
+def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) -> tuple[list, dict]:
     """Los setups de zona común de todas las combinaciones de timeframes: FVG normal y iFVG de 15 o 5 minutos con TF del FVG >= TF del iFVG. `series` =
     {TF en minutos: velas de ese TF} (las que haya de 3, 5 y 15). Cada combinación se evalúa con las velas del TF del iFVG: la inversión, el CISD, el cierre
     sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Cada setup lleva `ltf` (TF del iFVG, que es el de su CISD y su entrada) y sus
@@ -313,7 +362,7 @@ def find_multi_setups(series: dict, cfg: Cfg) -> tuple[list, dict]:
     out, funnel = [], {}
     for i in sorted(t for t in series if t in ZONE_TFS):
         fvg = {m: v for m, v in series.items() if m >= i and m in ZONE_TFS}
-        setups, f = find_zone_setups(series[i], series[i], i, cfg, fvg)
+        setups, f = find_zone_setups(series[i], series[i], i, cfg, fvg, hist)
         for st in setups:
             st["ltf"] = i
             st["t_cisd"] = int(series[i]["ts"].iloc[st["jc"]])

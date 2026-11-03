@@ -33,7 +33,7 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
             "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
             "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY,
             "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
-            "reason": f"CRT: sweep {st['dirección']} en C2; el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
+            "reason": f"CRT: sweep {st['dirección']} en C2 ({st.get('sweep', 'vela C1')}); el FVG de {st['mtf']} y el iFVG de {tf} comparten una zona; con el iFVG invertido el "
                       f"precio vuelve a ella y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
 
 
@@ -155,7 +155,7 @@ class CrtSkill(Skill):
         try:
             series = {m: d.tail(NO_ENTRY_DAYS * 1440 // m + 60).reset_index(drop=True) for m, d in self._series(symbol, tf, df, cfg).items()}
             series[step] = tail
-            marks = zone_marks(series, symbol, ahead, step, self.entry, self.rule.rr, 1.0, self.indices, tail["ts"].to_numpy())
+            marks = zone_marks(series, symbol, ahead, step, self.entry, self.rule.rr, 1.0, self.indices, tail["ts"].to_numpy(), df)
         except Exception as exc:                                         # un fallo del dibujo no puede parar la señal
             self.set_caption(f"marcas del gráfico: {exc}")
             return
@@ -197,7 +197,7 @@ class CrtSkill(Skill):
         cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
         series = {m: d.tail(2 * 1440 // m).reset_index(drop=True) for m, d in self._series(symbol, tf, df, cfg).items()}    # lo que cubre C1, C2 y los FVG de C2
         closed = {m: len(d) - 1 for m, d in series.items()}
-        setups, _ = engine.find_multi_setups({m: d.iloc[:closed[m]] for m, d in series.items()}, cfg)
+        setups, _ = engine.find_multi_setups({m: d.iloc[:closed[m]] for m, d in series.items()}, cfg, full)
         ts = {m: d["ts"].to_numpy().astype(np.int64) for m, d in series.items()}
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]

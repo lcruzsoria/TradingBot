@@ -102,7 +102,7 @@ def main() -> None:
         bars[symbol] = df                                                       # con estas velas se sigue la posición (el TF del perfil)
         base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
         cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, AHEAD)
-        setups, _ = engine.find_multi_setups(series, cfg)
+        setups, _ = engine.find_multi_setups(series, cfg, df)
         zones = crt_bias.zone_cache(df, cfg, bias_cfg)
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
         seen = set()

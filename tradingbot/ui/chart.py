@@ -918,6 +918,7 @@ class ChartView(pg.PlotWidget):
                     if data["direction"] != "none" else f'<b>Vela {htf}</b> · {"sin sweep" if data["state"] == "sin_sweep" else "sin evaluar"}')
             body = ('<table cellspacing="0" cellpadding="0">'
                     + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
+                    + (crt_row("Sweep", str(data["sweep"])) if data.get("sweep") else "")
                     + "".join(crt_row(f"FVG {z['name']}", f"{fmt_price(z['bottom'])} – {fmt_price(z['top'])}") for z in data.get("fvgs") or [])
                     + (crt_row("LTF (FVG, retesteo y entrada)", f"M{data.get('ltf', '-')}") if not data.get("live") else "")
                     + (crt_row("Entrada", f"{data.get('entry', '-')} · {data.get('entry_name', '')}") if data.get("entry") else "")
