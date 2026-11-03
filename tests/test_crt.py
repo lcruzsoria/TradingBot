@@ -205,7 +205,7 @@ def test_h4_en_forex_y_cfg_del_mercado():
 
 # -- skill, Cortex y Setup -----------------------------------------------------------------------------------------------
 
-def run(strategy="crt", env_text="", skills=("crt", "cortex", "setup")):
+def run(strategy="crt", env_text="", skills=("crt", "cortex", "setup"), source=None):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus = EventBus()
@@ -214,7 +214,7 @@ def run(strategy="crt", env_text="", skills=("crt", "cortex", "setup")):
     bus.subscribe("t", "setup.order", out["order"].append)
     bus.subscribe("t", "setup.executed", out["executed"].append)
     app = {"strategy": strategy} if strategy else {}
-    manager = SkillManager(bus, Services(None, None, {"app": app}, EnvConfig(parse(env_text))), [{"type": s} for s in skills])
+    manager = SkillManager(bus, Services(source, None, {"app": app}, EnvConfig(parse(env_text))), [{"type": s} for s in skills])
     manager.start()
     bus.publish("clock.offset", {"server_offset": None, "offset_source": "test"}, source="quotes")   # None = +7 h estimado
     return manager, bus, out
@@ -271,6 +271,22 @@ def test_un_retest_que_cierra_con_cuerpo_bajo_la_zona_invalida_la_pareja_y_vale_
     assert sorted((-st["z_bottom"], -st["z_top"])) == pytest.approx([27966.4, 27969.9])
     ep = engine.entry_point(engine.view(df, -1), st, 1, 5, RULE, cfg)
     assert ny(df["ts"][ep["start"]]) == "2026-11-03 02:50" and -ep["entry"] == pytest.approx(28024.9)
+
+
+def test_las_combinaciones_de_tf_se_miran_con_las_velas_del_tf_del_ifvg():
+    from tradingbot.skills.crt.chart import complete_series
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    series = complete_series({5: df}, cfg)
+    assert sorted(series) == [5, 15]                                                   # el de 15 min sale del de 5; el de 3 no se puede sacar
+    setups, _ = engine.find_multi_setups(series, cfg)
+    assert {st["ltf"] for st in setups} <= {5, 15}
+    five = [st for st in setups if st["ltf"] == 5 and ny(st["C2"]) == "2026-11-02 21:00"]
+    assert five and ny(df["ts"][five[0]["jc"]]) == "2026-11-02 22:25"                  # la combinación de siempre (FVG M15 + iFVG M5) sigue dando la misma entrada
+    ordered = [st["t_cisd"] for st in setups]
+    assert ordered == sorted(ordered)                                                  # salen en orden de la hora del cierre sobre el CISD
+    for st in setups:                                                                  # TF del FVG >= TF del iFVG
+        assert int(st["mtf"][1:]) >= st["ltf"]
 
 
 def test_cada_pareja_ifvg_fvg_lleva_su_propio_estado():
@@ -362,3 +378,23 @@ def test_el_perfil_crt_trae_su_skill_y_quita_pattern_tbr_y_calendario(tmp_path):
     assert [s["type"] for s in kept] == ["cortex", "setup", "crt"]
     assert kept[-1]["slot"] == "aux2"
     assert strategy_skills([{"type": "cortex"}], "calendario") == [{"type": "cortex"}]      # CRT no se cuela en otros perfiles
+
+
+def test_la_skill_pide_a_mt5_las_velas_de_3_min_que_le_faltan_y_sigue_si_no_las_da():
+    class Source:
+        def __init__(self, fail=False):
+            self.calls, self.fail = [], fail
+
+        def load_recent(self, symbol, timeframe, bars):
+            self.calls.append((symbol, timeframe))
+            if self.fail:
+                raise RuntimeError("sin velas")
+            return eurusd().tail(bars).reset_index(drop=True)                      # velas «de 3 min» de mentira: solo importa que se pidan
+
+    for fail in (False, True):
+        source = Source(fail)
+        manager, bus, out = run(source=source)
+        loaded(bus, until_entry(eurusd()), "EURUSD")
+        manager.stop()
+        assert ("EURUSD", "3m") in source.calls and all(tf == "3m" for _, tf in source.calls)         # con el perfil en 5 min solo falta la de 3
+        assert len(out["signal"]) == 1 and out["signal"][0].payload["timeframe"] == "5m"            # la señal sigue saliendo (y con el TF del perfil)

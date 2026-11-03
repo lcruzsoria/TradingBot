@@ -192,7 +192,12 @@ def audit_marks(d: dict, ts, ahead: int, n: int, entry: int = 1) -> dict:
 NO_ENTRY_DAYS = 4                                                # días de velas en los que se buscan los «Setup OK sin entrada»
 
 
-def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES) -> list[dict]:
+def _window(series: dict, first_ts: int) -> dict:
+    """Las velas de cada TF desde `first_ts` (hora de servidor): los FVG normales del mismo tramo que las velas del iFVG."""
+    return {m: d[d["ts"] >= first_ts].reset_index(drop=True) for m, d in series.items()}
+
+
+def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES, fvg_series: dict | None = None) -> list[dict]:
     """Marcas de los CRT de las últimas velas que dejaron la zona común (FVG de MTF ∩ iFVG de LTF) sin que el precio la tocara: «Setup OK sin
     Entrada». Se dibujan el FVG, el iFVG, la zona común y el CISD, sin posición."""
     ts_all = df["ts"].to_numpy().astype(np.int64)
@@ -204,7 +209,8 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
     base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
     cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
     htf, out = base.htf_min, []
-    for st in engine.find_zone_setups(sub, sub, ltf, cfg)[0].no_entry:
+    fvg = _window(fvg_series, ts[0]) if fvg_series else None
+    for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg)[0].no_entry:
         sgn, start = st["sign"], int(st["C2"])
 
         def zone(a: float, b: float) -> tuple[float, float]:
@@ -237,7 +243,8 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
 HOW_STATES = {"objetivo": "objetivo", "stop": "stop", "BE": "be", "sesión": "tiempo"}      # cómo acaba `engine.manage` -> estado del gráfico
 
 
-def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES) -> list[dict]:
+def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES,
+                 fvg_series: dict | None = None) -> list[dict]:
     """Marcas de los setups de zona común de las últimas velas que dieron entrada (cierre sobre el CISD tras el pullback), con la operación que
     habría salido sobre las velas cargadas (stop, objetivo, breakeven a +`be` R y cierre de sesión), aunque el bot no la abriera: así un setup válido
     no se queda como «sin evaluar». Las operaciones que sí abrió el bot se reconocen por su hora de entrada y su estado manda sobre el simulado (lo hace la ventana)."""
@@ -250,7 +257,8 @@ def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: 
     cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, ahead)
     rule = engine.Rule(rr=rr, be_at=be)
     htf, out, closed_bars = base.htf_min, [], n - 1                      # la última vela puede estar formándose
-    setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg)
+    fvg = _window(fvg_series, ts[0]) if fvg_series else None
+    setups, _ = engine.find_zone_setups(sub.iloc[:closed_bars], sub.iloc[:closed_bars], ltf, cfg, fvg)
     views = {1: engine.view(sub, 1), -1: engine.view(sub, -1)}
     for st in setups:
         L = views[st["sign"]]
@@ -298,9 +306,42 @@ POINT_KEYS = (("pos", "x0"), ("pos", "x1"), ("ifvg", "x0"), ("ifvg", "x1"), ("co
               ("touch", "x"), ("extreme", "x"))
 
 
-def zone_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES) -> list[dict]:
-    """Los setups de zona común de las últimas velas: los que dieron entrada (con la operación simulada) y los «Setup OK sin Entrada»."""
-    return signal_marks(df, symbol, ahead, ltf, entry, rr, be, indices) + no_entry_marks(df, symbol, ahead, ltf, indices)
+def complete_series(series: dict, cfg) -> dict:
+    """Las velas de los TF de la zona común (15, 5 y 3 min) que se pueden sacar de las que hay: el TF que falte se agrupa desde el menor que lo divida (el de
+    15 min sale del de 5 o del de 3; el de 5 y el de 3 no salen el uno del otro)."""
+    out = dict(series)
+    for m in engine.ZONE_TFS:
+        if m in out:
+            continue
+        smaller = [t for t in sorted(series) if t < m and m % t == 0]
+        if smaller:
+            out[m] = engine.aggregate(series[smaller[-1]], m, cfg)
+    return out
+
+
+def zone_marks(series, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: float = 2.0, be: float = 1.0, indices=DEFAULT_US_INDICES,
+               ref_ts=None) -> list[dict]:
+    """Los setups de zona común de las últimas velas con todas las combinaciones de TF (FVG e iFVG de 15, 5 o 3 min con TF del FVG >= TF del iFVG): los que
+    dieron entrada (con la operación simulada) y los «Setup OK sin Entrada». `series` = {TF: velas} (o unas velas sueltas, de `ltf` minutos). Cada combinación se
+    evalúa con las velas del TF de su iFVG y las marcas se pasan a las velas `ref_ts` (las del TF del perfil por defecto). Por cada C2 y lado sale una sola
+    marca: la de la entrada más temprana (o, sin entradas, la de «sin entrada»)."""
+    if not isinstance(series, dict):
+        series = {ltf: series}
+    base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
+    series = complete_series(series, engine.Cfg(base.htf_min, base.origin, base.session_end, ahead))
+    tfs = sorted(m for m in series if m in engine.ZONE_TFS)
+    ref = series[ltf] if ltf in series else series[tfs[0]]
+    ref_ts = ref["ts"].to_numpy() if ref_ts is None else ref_ts
+    found: dict[tuple, dict] = {}
+    for i in tfs:
+        fvg = {m: series[m] for m in tfs if m >= i}
+        marks = signal_marks(series[i], symbol, ahead, i, entry, rr, be, indices, fvg) + no_entry_marks(series[i], symbol, ahead, i, indices, fvg)
+        for m in retime(marks, series[i]["ts"].to_numpy(), ref_ts):
+            key = (m["start"], m["direction"])
+            old = found.get(key)
+            if old is None or (m.get("simulated") is not None and (old.get("simulated") is None or m["entry_ts"] < old["entry_ts"])):
+                found[key] = m
+    return sorted(found.values(), key=lambda m: m["x0"])
 
 
 def retime(marks: list[dict], ts_src, ts_dst) -> list[dict]:

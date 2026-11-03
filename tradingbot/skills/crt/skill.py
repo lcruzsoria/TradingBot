@@ -12,6 +12,7 @@ from ..calendario.skill import matches
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..bias.models import Bias, BiasResult
 from . import bias as crt_bias, engine
+from .chart import complete_series as engine_complete
 
 STRATEGY = "crt"
 LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
@@ -40,8 +41,8 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
 class CrtSkill(Skill):
     title = "CRT"
     description = ("Estrategia CRT (Candle Range Theory) por zona común, dentro de C2: una vela H3 (índices) o H4 (forex) barre con una mecha el "
-                   "máximo o mínimo de la anterior; dentro de C2 un FVG (M15 o M5) y un iFVG de las velas del gráfico (M3 o M5, de TF igual o menor que el "
-                   "del FVG; se busca el de mayor TF) comparten una zona. Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
+                   "máximo o mínimo de la anterior; dentro de C2 un FVG y un iFVG, de 15, 5 o 3 min con TF del FVG >= TF del iFVG (se busca el de mayor TF; el CISD y la "
+                   "entrada son del TF del iFVG), comparten una zona. Con el iFVG ya invertido, el precio vuelve a esa zona (pullback) y la primera "
                    "vela que cierra con el cuerpo más allá del CISD (el extremo de la vela que creó el iFVG) da la entrada, a la apertura de la vela "
                    "siguiente. Stop en el extremo del sweep y objetivo 2R (el breakeven a +1R lo lleva Setup). Si la zona existe pero el precio sigue "
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
@@ -54,6 +55,7 @@ class CrtSkill(Skill):
         self.error = "Configuración CRT no válida"
         self._offset: int | None = None
         self._seen: set = set()
+        self._extra: dict[tuple, tuple] = {}             # (símbolo, TF) -> (última vela del perfil, velas que se pidieron a MT5)
         self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
         self._card: dict[str, tuple] = {}                # símbolo -> lo último que se publicó a la tarjeta (solo se publica si cambia)
         self.marks: dict[str, dict] = {}                 # símbolo -> {ts, marks, key}: los setups de los últimos días, con las velas de la skill (M5 o M3)
@@ -147,42 +149,71 @@ class CrtSkill(Skill):
         if self.marks.get(symbol, {}).get("key") == key:
             return
         ahead, _ = server_minus_ny(self._offset)
+        base_cfg = engine.INDICES if is_us_index(symbol, self.indices) else engine.FOREX
+        cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
         tail = df.tail(NO_ENTRY_DAYS * 1440 // step + 60).reset_index(drop=True)
         try:
-            marks = zone_marks(tail, symbol, ahead, step, self.entry, self.rule.rr, 1.0, self.indices)
+            series = {m: d.tail(NO_ENTRY_DAYS * 1440 // m + 60).reset_index(drop=True) for m, d in self._series(symbol, tf, df, cfg).items()}
+            series[step] = tail
+            marks = zone_marks(series, symbol, ahead, step, self.entry, self.rule.rr, 1.0, self.indices, tail["ts"].to_numpy())
         except Exception as exc:                                         # un fallo del dibujo no puede parar la señal
             self.set_caption(f"marcas del gráfico: {exc}")
             return
         self.marks[symbol] = {"key": key, "ts": tail["ts"].to_numpy().copy(), "marks": marks, "ltf": step}
 
+    def _series(self, symbol: str, tf: str, df, cfg: engine.Cfg) -> dict:
+        """Las velas de los TF de la zona común (15, 5 y 3 min) de un mercado: las del perfil (`df`), las que se agrupan desde ellas (la de 15 min) y las que hay
+        que pedirle a MT5 (la de 3 con el perfil en 5, la de 5 con el perfil en 3). Si MT5 no las da, esa combinación no se mira."""
+        step = minutes(tf)
+        series = {step: df}
+        last = int(df["ts"].iloc[-1])
+        source = getattr(self.services, "source", None)
+        for m in engine.ZONE_TFS:
+            if m == step or (m % step == 0 and m > step):
+                continue                                                          # las de múltiplo del TF del perfil salen de sus velas
+            cached = self._extra.get((symbol, m))
+            if cached is not None and cached[0] == last:
+                series[m] = cached[1]
+                continue
+            if source is None or not hasattr(source, "load_recent"):
+                continue
+            try:
+                extra = source.load_recent(symbol, f"{m}m", 2 * 1440 // m + 60)
+            except Exception as exc:                                              # sin esas velas solo se pierden las combinaciones con ese TF
+                self.set_caption(f"{symbol}: sin velas de {m}m ({type(exc).__name__})")
+                continue
+            self._extra[(symbol, m)] = (last, extra)
+            series[m] = extra
+        return engine_complete(series, cfg)
+
     def scan(self, symbol: str, tf: str, df) -> dict | None:
-        """La señal de entrada de las últimas velas de `df` (o None). La última vela puede estar formándose: los setups se
-        buscan solo con las cerradas y la entrada, que es a su apertura, sí puede ser la de la vela en curso."""
+        """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15, 5 y 3 min, TF del FVG >= TF del iFVG). Cada
+        combinación se mira con las velas del TF de su iFVG (el CISD y la entrada son de ese TF). La última vela puede estar formándose: los setups se buscan solo
+        con las cerradas y la entrada, que es a su apertura, sí puede ser la de la vela en curso."""
         step = minutes(tf)
         full = df                                                          # todo el histórico: el sesgo mira hasta 10 días atrás
         ahead, _ = server_minus_ny(self._offset)
         base_cfg = engine.INDICES if is_us_index(symbol, self.indices) else engine.FOREX
         cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
-        keep = 2 * 1440 // step                                            # lo que cubre C1, C2 y el FVG de MTF que nace en C2
-        df = df.tail(keep).reset_index(drop=True)
-        closed = len(df) - 1
-        setups, _ = engine.find_zone_setups(df.iloc[:closed], df.iloc[:closed], step, cfg)
-        ts = df["ts"].to_numpy().astype(np.int64)
-        views = {1: engine.view(df, 1), -1: engine.view(df, -1)}
-        n = len(df)
-        recent = [x for x in setups if x["jc"] >= n - 1 - 36 * 60 // step]
+        series = {m: d.tail(2 * 1440 // m).reset_index(drop=True) for m, d in self._series(symbol, tf, df, cfg).items()}    # lo que cubre C1, C2 y los FVG de C2
+        closed = {m: len(d) - 1 for m, d in series.items()}
+        setups, _ = engine.find_multi_setups({m: d.iloc[:closed[m]] for m, d in series.items()}, cfg)
+        ts = {m: d["ts"].to_numpy().astype(np.int64) for m, d in series.items()}
+        views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
+        recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):
-            if st["jc"] < n - 1 - 36 * 60 // step:                         # nada que mirar: hace más de 36 h (y de una sesión)
-                break
+            m = st["ltf"]
+            n = len(series[m])
+            if st["jc"] < n - 1 - 36 * 60 // m:                            # nada que mirar: hace más de 36 h (y de una sesión)
+                continue
             key = (symbol, st["C2"], st["sign"])
             if key in self._seen:
                 continue
-            L = views[st["sign"]]
-            ep = engine.entry_point(L, st, self.entry, step, self.rule, cfg, closed)
+            ep = engine.entry_point(views[m][st["sign"]], st, self.entry, m, self.rule, cfg, closed[m])
             if ep is None or ep["start"] < n - MAX_LATE_BARS:
                 continue
             self._seen.add(key)
             points = self._points(full, cfg, st, ahead)
-            return build_signal(symbol, tf, st, ep, ts, ahead, self.rule, self.entry, points)
+            return build_signal(symbol, tf, st, ep, ts[m], ahead, self.rule, self.entry, points)
         return None

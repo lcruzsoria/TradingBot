@@ -94,31 +94,43 @@ def main() -> None:
         symbol = source.resolve_symbol(want)
         mt5 = source._mt5
         mt5.symbol_select(symbol, True)
-        df = pd.DataFrame(mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, args.barras)).rename(columns={"time": "ts"})[["ts", "open", "high", "low", "close"]]
-        df = df.iloc[:-1].reset_index(drop=True)                                 # sin la vela que se está formando
-        bars[symbol] = df
+        series = {}
+        for m in engine.ZONE_TFS:                                                # velas de 3, 5 y 15 min de MT5 (las de 15 también se podrían agrupar desde las de 5)
+            raw = pd.DataFrame(mt5.copy_rates_from_pos(symbol, getattr(mt5, f"TIMEFRAME_M{m}"), 0, args.barras)).rename(columns={"time": "ts"})
+            series[m] = raw[["ts", "open", "high", "low", "close"]].iloc[:-1].reset_index(drop=True)      # sin la vela que se está formando
+        df = series[5]
+        bars[symbol] = df                                                       # con estas velas se sigue la posición (el TF del perfil)
         base = engine.INDICES if is_us_index(symbol, indices) else engine.FOREX
         cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, AHEAD)
-        setups, _ = engine.find_zone_setups(df, df, 5, cfg)
+        setups, _ = engine.find_multi_setups(series, cfg)
         zones = crt_bias.zone_cache(df, cfg, bias_cfg)
-        view = {1: engine.view(df, 1), -1: engine.view(df, -1)}
-        ts = df["ts"].to_numpy().astype(np.int64)
-        for st in setups:
-            ep = engine.entry_point(view[st["sign"]], st, entry_model, 5, rule, cfg)
-            if ep is None or int(ts[ep["start"]]) < since:
+        views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
+        seen = set()
+        for st in setups:                                                       # por la hora del cierre sobre el CISD: el primero de cada C2 y lado
+            m = st["ltf"]
+            key = (st["C2"], st["sign"])
+            ep = engine.entry_point(views[m][st["sign"]], st, entry_model, m, rule, cfg)
+            if ep is None or key in seen:
                 continue
+            ts = series[m]["ts"].to_numpy().astype(np.int64)
+            if int(ts[ep["start"]]) < since:
+                continue
+            seen.add(key)
             sgn = st["sign"]
             points = crt_bias.evaluate(df, st["dirección"], int(st["C2"]), (sgn * st["z_bottom"], sgn * st["z_top"]), cfg, bias_cfg, AHEAD, zones)
             payload = build_signal(symbol, "5m", st, ep, ts, AHEAD, rule, entry_model, points)
+            payload["combinacion"] = f"FVG {st['mtf']} + iFVG M{m}"
             if not points.go:                                                      # CRT_BIAS_ENFORCE=true y sin los puntos: NO GO
                 continue
-            orders.append(build_calendar_order(payload, payload["bias_result"], payload["reason"]))
-        print(f"  {symbol}: {len(df)} velas M5 hasta {local_naive(int(ts[-1]))}, setups {len(setups)}", flush=True)
+            order = build_calendar_order(payload, payload["bias_result"], payload["reason"])
+            orders.append((order, payload["combinacion"]))
+        print(f"  {symbol}: velas M3/M5/M15 hasta {local_naive(int(df['ts'].iloc[-1]))}, setups {len(setups)}", flush=True)
     source.close()
 
     now = max(int(df["ts"].iloc[-1]) for df in bars.values()) + STEP
-    taken, last_exit = [], {}                                                   # Cortex: una posición por mercado
-    for order in sorted(orders, key=lambda o: o.entry_ts):
+    taken, last_exit, order_combo = [], {}, {}                                  # Cortex: una posición por mercado
+    combos = {id(o): c for o, c in orders}
+    for order in sorted((o for o, _ in orders), key=lambda o: o.entry_ts):
         prev = last_exit.get(order.symbol, -1)
         if prev is None or order.entry_ts <= prev:                              # sigue abierta (None) o cierra a la vez/después de la entrada
             continue
@@ -126,12 +138,13 @@ def main() -> None:
         closed = resolve(order, df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy(), be_r, STEP, now)
         last_exit[order.symbol] = None if closed is None else int(closed.exit_ts)
         taken.append((order, closed))
+        order_combo[id(order)] = combos[id(order)]
 
     print(f"\n{len(taken)} operaciones desde {account.since}:")
     for order, closed in taken:
         res = "abierta" if closed is None else f"{closed.result} {closed.r:+.2f} R (cierra {local_naive(closed.exit_ts):%d/%m %H:%M})"
         print(f"  {local_naive(order.entry_ts):%d/%m %H:%M} {order.symbol:9} {order.direction:5} entrada {order.price:.5g} stop {order.stop:.5g} obj. {order.target:.5g} · "
-              f"sesgo {order.bias} {order.score:+g} · {res}")
+              f"sesgo {order.bias} {order.score:+g} · {order_combo[id(order)]} · {res}")
     done = [c for _, c in taken if c is not None]
     print(f"cerradas {len(done)}: {sum(c.r for c in done):+.2f} R; abiertas {sum(c is None for _, c in taken)}")
     if not args.aplicar:

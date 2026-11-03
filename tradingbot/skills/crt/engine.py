@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 MTF = (15,)                                              # timeframes del FVG de confirmación (minutos)
-ZONE_TFS = (15, 5)                                       # timeframes del FVG (no invertido) de la zona común, del mayor al menor; el iFVG es de un TF igual o menor
+ZONE_TFS = (15, 5, 3)                                    # timeframes del FVG (no invertido) y del iFVG de la zona común; el iFVG es de un TF igual o menor que el FVG
 
 
 @dataclass(frozen=True)
@@ -208,17 +208,20 @@ def bullish_fvgs(v: dict, minutes: int) -> dict:
     return {"formed": ts[i] + minutes * 60, "first": ts[i - 2], "bottom": h[i - 2], "top": l[i]}
 
 
-def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg) -> tuple[list, dict]:
+def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None) -> tuple[list, dict]:
     """Todos los setups de zona común de las velas dadas, con el índice de la vela que cierra bajo el CISD (`jc`); la entrada va aparte
-    (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF y el MTF y `ltf` las velas del FVG de LTF y de la entrada."""
+    (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF (y el FVG normal si no se pasan `fvg_series`) y `ltf` las velas del iFVG, del CISD
+    y de la entrada (de `ltf_min` minutos). `fvg_series`: {TF en minutos: velas de ese TF} de los FVG normales (TF >= `ltf_min`); sin ella se agrupan desde `base`
+    los múltiplos de `ltf_min`."""
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
-    mtf = {m: aggregate(base, m, cfg) for m in ZONE_TFS if m >= ltf_min}
+    mtf = ({m: fvg_series[m] for m in ZONE_TFS if m >= ltf_min and m in fvg_series} if fvg_series is not None
+           else {m: aggregate(base, m, cfg) for m in ZONE_TFS if m >= ltf_min and m % ltf_min == 0})
     funnel = {"velas HTF con sweep": 0, "con FVG de MTF y de LTF con zona común": 0, "con pullback a la zona": 0, "con CISD": 0, "invalidados": 0,
               "setup OK sin entrada": 0}
     setups = Setups()
     for sign, name in ((1, "short"), (-1, "long")):
         L, H = view(ltf, sign), view(htf, sign)
-        fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in ZONE_TFS if m >= ltf_min}      # el iFVG (LTF) no puede ser de mayor TF que el FVG
+        fv = {m: bullish_fvgs(view(mtf[m], sign), m) for m in mtf}                          # el iFVG (LTF) no puede ser de mayor TF que el FVG
         lts, lo_, hi_, cl_ = L["ts"], L["low"], L["high"], L["close"]
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
@@ -294,6 +297,25 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                                         "inv": inverted[k], "end": j if invalidated else b - 1})
     setups.sort(key=lambda s: s["jc"] * 10 + (0 if s["sign"] > 0 else 1))
     return setups, funnel
+
+
+def find_multi_setups(series: dict, cfg: Cfg) -> tuple[list, dict]:
+    """Los setups de zona común de todas las combinaciones de timeframes: FVG normal y iFVG de 15, 5 o 3 minutos con TF del FVG >= TF del iFVG. `series` =
+    {TF en minutos: velas de ese TF} (las que haya de 3, 5 y 15). Cada combinación se evalúa con las velas del TF del iFVG: la inversión, el CISD, el cierre
+    sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Cada setup lleva `ltf` (TF del iFVG, que es el de su CISD y su entrada) y sus
+    índices son de las velas de ese TF. Salen en orden de la hora de su cierre sobre el CISD."""
+    out, funnel = [], {}
+    for i in sorted(t for t in series if t in ZONE_TFS):
+        fvg = {m: v for m, v in series.items() if m >= i and m in ZONE_TFS}
+        setups, f = find_zone_setups(series[i], series[i], i, cfg, fvg)
+        for st in setups:
+            st["ltf"] = i
+            st["t_cisd"] = int(series[i]["ts"].iloc[st["jc"]])
+        out += setups
+        for k, v in f.items():
+            funnel[k] = funnel.get(k, 0) + v
+    out.sort(key=lambda st: (st["t_cisd"], -st["ltf"]))
+    return out, funnel
 
 
 # -- entradas y gestión --------------------------------------------------------------------------------------------------

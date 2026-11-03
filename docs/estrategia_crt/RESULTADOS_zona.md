@@ -25,3 +25,23 @@ Embudo (variante del bot), NAS100: 4 686 velas con sweep, 3 756 con doble FVG y 
 - **Regla final (03/11/2026):** un retest que cierra con cuerpo bajo la zona invalida la pareja y cada pareja iFVG + FVG lleva su propio estado: 3 344 operaciones, +0,054 / -0,041. Se quitaron 1 385 entradas que la regla anterior daba por buenas.
 
 **Conclusión: no hay ventaja neta.** Con la regla final el bruto es ligeramente positivo (+0,054 R) pero el spread supuesto lo deja en negativo en todas las variantes probadas, salvo DJ30 (+0,021 R neto, con un intervalo de -0,08 a +0,12). El perfil CRT sirve para forwardtest en simulación, como hasta ahora.
+
+## Todas las combinaciones de TF (03/11/2026)
+
+`scripts/backtest_crt_combinaciones.py`: FVG e iFVG de 15, 5 o 3 min con TF del FVG ≥ TF del iFVG, cada combinación con las velas del TF de su iFVG (CISD y entrada de ese TF). Velas de PUPrime de 3, 5 y 15 min (tramo común: desde feb.-mar. de 2025 hasta el 03/11/2026, unos 20 meses), 2R, BE a +1R, spread supuesto como arriba. Cada combinación se simula por separado (una operación a la vez por mercado y combinación); «todas» es lo que haría el bot con todas a la vez (primer cierre sobre el CISD de cada C2 y lado, una posición por mercado).
+
+| Combinación | n | R bruto | R neto | IC95 neto |
+|---|---|---|---|---|
+| FVG M15 + iFVG M15 | 16 | -0,164 | -0,214 | -0,77..+0,34 |
+| FVG M15 + iFVG M5 | 1 400 | +0,010 | -0,075 | -0,13..-0,02 |
+| FVG M15 + iFVG M3 | 1 225 | -0,004 | -0,102 | -0,17..-0,04 |
+| FVG M5 + iFVG M5 | 741 | +0,143 | +0,041 | -0,04..+0,13 |
+| FVG M5 + iFVG M3 | 4 422 | -0,045 | -0,165 | -0,20..-0,13 |
+| FVG M3 + iFVG M3 | 732 | -0,031 | -0,164 | -0,25..-0,08 |
+| **todas (el bot)** | 6 282 | -0,034 | -0,150 | -0,18..-0,12 |
+
+- **Las combinaciones con iFVG de 3 min empeoran el conjunto:** son las que más setups dan (FVG M5 + iFVG M3: 4 422) y las que peor salen, porque sus stops son cortos y el spread pesa más; además, como entran antes que las de 5 o 15 min, «todas» se queda con ellas.
+- **FVG M5 + iFVG M5 es la única con bruto claro (+0,143 R) y neto positivo (+0,041 R), pero con un intervalo de -0,04 a +0,13:** no es concluyente.
+- **iFVG de 15 min:** solo 16 operaciones; con tan pocas no se puede decir nada.
+- **Sesgo CRT:** con «todas», 0 a 3 puntos dan -0,128, -0,160, -0,169 y -0,127 R netos: tampoco ordena.
+- **Conclusión:** añadir las combinaciones de 3 min empeora el resultado respecto a quedarse con las de 5 y 15 (≈ -0,04 R neto en el tramo largo). No hay ventaja neta con ninguna combinación salvo, sin significación, FVG M5 + iFVG M5.
