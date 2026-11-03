@@ -191,7 +191,7 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
 #      dentro de C2, que comparten una zona (se solapan): la zona común. El iFVG tiene que ser de un TF igual o menor que el del FVG (con un FVG de
 #      M5 vale M5 o M3, no M15) y no puede ser el mismo hueco. Se busca siempre la combinación del TF mayor posible: si hay varias, manda la del FVG de
 #      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
-#      El primero de los dos huecos en nacer (FVG o iFVG) tiene que seguir activo, sin cerrarse del todo con mecha o cuerpo, hasta que empiece a formarse el segundo.
+#      El primer hueco en nacer es siempre el iFVG, y tiene que seguir activo (sin cerrarse del todo con mecha o cuerpo, ni invertirse) hasta que nace el FVG normal.
 #      CISD = el mínimo de la vela de desplazamiento que lo creó (la vela central del FVG de LTF).
 #   3. Con el iFVG ya invertido y los dos FVG formados, el precio vuelve a la zona común (pullback): una vela posterior a la inversión la toca con la
 #      mecha sin cerrar al otro lado de ella. Si después del retest (o en él) una vela CIERRA con cuerpo al otro lado de la zona, esa pareja queda invalidada
@@ -247,15 +247,11 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                 for m, zb, zt, formed in zones:
                     if m == ltf_min and formed == int(lts[k]) + m * 60:         # el mismo hueco: el FVG normal y el iFVG tienen que ser dos distintos
                         continue
-                    f0 = int(np.searchsorted(lts, formed - 3 * m * 60))        # primera vela del FVG normal
-                    i_end = int(lts[k]) + ltf_min * 60                          # cierre del iFVG
-                    if formed <= int(lts[k - 2]):                               # el FVG normal es el primero: no puede estar cerrado del todo (mecha o cuerpo) antes de empezar el iFVG
-                        e0 = int(np.searchsorted(lts, formed))
-                        if e0 < k - 2 and lo_[e0:k - 2].min() <= zb:
-                            continue
-                    elif i_end <= formed - 3 * m * 60:                          # el iFVG es el primero: tampoco puede cerrarse del todo antes de empezar el FVG normal
-                        if k + 1 < f0 and lo_[k + 1:f0].min() <= hi_[k - 2]:
-                            continue
+                    f0 = int(np.searchsorted(lts, formed))                      # velas anteriores al cierre del FVG normal
+                    if int(lts[k]) + ltf_min * 60 > formed:                     # el primer hueco siempre es el iFVG: el FVG normal se forma después de él
+                        continue
+                    if k + 1 < f0 and lo_[k + 1:f0].min() <= hi_[k - 2]:        # y tiene que seguir activo (sin cerrarse del todo, con mecha o cuerpo) hasta que se forma el FVG
+                        continue
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
                     if cb < ct:
                         pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
