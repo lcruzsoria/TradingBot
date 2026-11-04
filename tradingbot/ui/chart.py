@@ -957,6 +957,9 @@ class ChartView(pg.PlotWidget):
                 verdict = f'<div style="margin-top:4px; color:{muted}">{html.escape(str(data.get("motivo", "")))}</div>'
                 if not data.get("common"):                      # marca del backtest: sin dibujo del setup
                     body = '<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY") + '</table>'
+            elif data["state"] == "sin_cierre" and not data.get("common"):      # marca del backtest: sin dibujo del setup
+                body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY") + '</table>')
+                verdict = f'<div style="margin-top:4px; color:{muted}">{html.escape(str(data.get("motivo", "")))}</div>'
             elif data["state"] == "invalido":                   # sin operación: llegó al extremo opuesto de C1 sin completar el setup
                 body = ('<table cellspacing="0" cellpadding="0">' + crt_row(f"Vela {htf} del sweep", f"{data.get('when', '')} NY")
                         + crt_row("Motivo", str(data.get("motivo", ""))) + '</table>')
@@ -1091,7 +1094,7 @@ class ChartView(pg.PlotWidget):
             tone = CRT_COLORS.get(crt["direction"], HTF_BOX)
             c3 = crt.get("c3")                                              # la vela de expansión, si ya hay velas de ella
             boxes = [(c2lo, c2hi, _alpha(HTF_BOX, 22), _alpha(HTF_BOX, 210), 1.5, x0, x1)]       # C2, la vela que lleva la etiqueta
-            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion", "sin_sweep", "sin_evaluar")                 and not (crt["state"] == "sin_entrada_sl" and not crt.get("common"))
+            operated = crt["state"] not in ("invalido", "sin_setup", "sin_operacion", "sin_sweep", "sin_evaluar")                 and not (crt["state"] in ("sin_entrada_sl", "sin_cierre") and not crt.get("common"))
             if operated:                                         # C1 y C3 solo en los CRT con operación, con el color de su lado
                 boxes.insert(0, (c1lo, c1hi, _alpha(tone, 12), _alpha(tone, 110), 1.0, xc1, x0))
                 if c3:

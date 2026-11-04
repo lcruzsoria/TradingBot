@@ -50,6 +50,7 @@ OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}
 EPOCH = pd.Timestamp("1970-01-01")
 INVALID_REASONS = ["sin pullback a la zona común", "sin CISD tras el toque"]
+NO_CLOSE_REASONS = ["setup OK sin cierre: hubo retest del BPR pero ninguna vela cerró más allá del CISD"]
 SL_REASONS = ["setup OK sin entrada: el stop supera el máximo permitido"]
 NO_ENTRY_REASONS = ["setup OK sin entrada: el precio no volvió a la zona común", "sin BPR (iFVG y FVG de sentido contrario)",
                     "BPR sin retest válido y cierre sobre el CISD", "BPR sin invertirse el iFVG"]
@@ -100,7 +101,7 @@ def trade_row(ts: np.ndarray, st: dict, ep: dict, res: dict, kind: str) -> dict:
 
 
 def simulate() -> pd.DataFrame:
-    rows, funnels, data, invalid, valid, noentry, slbig = [], [], [], [], [], [], []
+    rows, funnels, data, invalid, valid, noentry, slbig, noclose = [], [], [], [], [], [], [], []
     for gkey, (gname, symbols) in GROUPS.items():
         kind = "indices" if gkey == "indices" else "forex"
         base = engine.INDICES if kind == "indices" else engine.FOREX
@@ -126,6 +127,9 @@ def simulate() -> pd.DataFrame:
                              "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.no_entry]
                 noentry += [{"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": x["motivo"],
                              "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.nosetup]
+                noclose += [{"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": x["C2"], "d": int(x["sign"] > 0), "motivo": NO_CLOSE_REASONS[0],
+                             "t extremo": int(ts[x["ih"]]), "precio": x["sign"] * x["stop"]} for x in setups.no_close
+                            if ltf == 15 or int(ts[x["jt"]]) < first15.get((x["C2"], x["sign"]), 1 << 62)]
                 entries = 0
                 for code, (_, rule) in TARGETS.items():
                     busy, mine = -1, []
@@ -154,7 +158,7 @@ def simulate() -> pd.DataFrame:
     trades["zona"] = tbr_zone(trades["entrada (NY)"])
     TRADES.parent.mkdir(exist_ok=True)
     pd.to_pickle({"operaciones": trades, "embudo": pd.DataFrame(funnels), "datos": pd.DataFrame(data),
-                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid), "sinsetup": pd.DataFrame(noentry), "slgrande": pd.DataFrame(slbig)}, TRADES)
+                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid), "sinsetup": pd.DataFrame(noentry), "slgrande": pd.DataFrame(slbig), "sincierre": pd.DataFrame(noclose)}, TRADES)
     print(f"{len(trades)} operaciones -> {TRADES}")
     return trades
 
@@ -214,6 +218,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
                         "ifvg": int(r["con CISD"]), "e1": int(r["entradas"]), "inv": int(r["invalidados"])}
                        for _, r in funnel.iterrows()],
         "sl_grande": marks_cols(saved, "slgrande", gkey, markets, SL_REASONS, []),
+        "sin_cierre": marks_cols(saved, "sincierre", gkey, markets, NO_CLOSE_REASONS, ["validos"]),
         "invalidos": marks_cols(saved, "invalidos", gkey, markets, INVALID_REASONS, ["validos"]),
         "sin_setup": marks_cols(saved, "sinsetup", gkey, markets, NO_ENTRY_REASONS, ["validos", "invalidos"]),
         "metodologia": methodology(gkey)}
