@@ -62,8 +62,11 @@ if ($Solo -in "todo", "tbr") {
 }
 
 if ($Solo -in "todo", "crt") {
-    Paso "CRT: descargar velas M5 y M3" { uv run python scripts/exportar_backtest_crt.py --descargar } | Out-Null
-    Paso "CRT: simular y exportar" { uv run python scripts/exportar_backtest_crt.py --simular } | Out-Null
+    foreach ($tf in "5m", "15m") {
+        Paso "CRT: descargar velas $tf" { uv run --with pyarrow python scripts/descargar_velas.py --tf $tf } | Out-Null
+    }
+    Paso "CRT: simular" { uv run --with pyarrow python scripts/exportar_backtest_crt.py --simular } | Out-Null
+    Paso "CRT: escribir en backtest.json.gz" { uv run --with pyarrow python scripts/exportar_backtest_crt.py } | Out-Null
 }
 
 if ($Fallos.Count -gt 0) {
