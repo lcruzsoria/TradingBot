@@ -30,7 +30,7 @@ MTF_TFS = {15: "M15", 5: "M5"}                                            # f15a
 STATES = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo", "invalido": "invalido"}       # resultado del backtest -> estado del gráfico
 RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "T", "invalido": "Invalidado", "sin_setup": "Sin setup",
                 "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep"}
-LTF_ORDER = (5, 15)
+LTF_ORDER = (5, 3, 15)
 
 
 def htf_minutes(symbol: str, indices=DEFAULT_US_INDICES) -> int:
@@ -115,7 +115,8 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
                 "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
                 "extreme": {"x": n_ext, "price": price}})
             continue
-        rows = sorted(rows, key=lambda r: (ltf_pref.index(r[0]), entry_pref.index(r[1])))
+        pos = lambda order, v: order.index(v) if v in order else len(order)      # un TF o una entrada que ya no se calcula (backtests viejos) va al final
+        rows = sorted(rows, key=lambda r: (pos(ltf_pref, r[0]), pos(entry_pref, r[1])))
         if (rows[0][0], rows[0][1]) != (ltf, entry):            # solo se dibuja la operación del LTF y la entrada elegidos: cada combinación del
             out.append({                                        # backtest tiene una sola operación abierta a la vez, y mezclarlas las solapaba
                 "x0": x0, "x1": x1, "xc1": xc1, "direction": "short" if direction else "long", "state": "sin_operacion", "label": "CRT",
@@ -135,7 +136,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
             "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))),
             "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
             "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
-            "mtf": mtf_names(best[3]), "ltf": best[0], "entry": best[1], "entry_name": CRT_ENTRIES[best[1]], "htf": htf,
+            "mtf": mtf_names(best[3]), "ltf": best[0], "entry": best[1], "entry_name": CRT_ENTRIES.get(best[1], ""), "htf": htf,
             "start": start, "fvg_all": fvg, "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
             "others": [(r[0], r[1], STATES.get(r[2], "tiempo")) for r in rows[1:]]}
         if best[4]:

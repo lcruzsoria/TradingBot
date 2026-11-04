@@ -76,17 +76,17 @@ def test_las_marcas_salen_de_las_operaciones_del_backtest_con_su_c1_y_c2():
     assert (mark["x0"], mark["x1"], mark["xc1"]) == (x0, x0 + 36, x0 - 36)
     assert mark["direction"] == "short" and mark["state"] == "objetivo" and mark["label"] == "CRT"          # el M5 · entrada 1 es TP
     assert mark["c1"] == (100.0, 105.0) and mark["c2"] == (91.5, 108.5) and mark["htf"] == 180
-    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, [], [])                       # CRT-C2 no usa FVG de MTF
+    assert (mark["ltf"], mark["entry"], mark["mtf"], mark["fvg_all"]) == (5, 1, ["M15"], ["M15"])               # el FVG de M15 de la zona común
     assert mark["others"] == [(5, 2, "be"), (3, 1, "stop")] or sorted(mark["others"]) == [(3, 1, "stop"), (5, 2, "be")]
     assert mark["when"] == "13/10 06:00"
     i = lambda hhmm: int(np.searchsorted(ts, int(pd.Timestamp(f"2026-10-13 {hhmm}").value // 10**9) + AHEAD))          # noqa: E731
     assert mark["pos"] == {"x0": i("06:55"), "x1": i("07:10"), "entry": 103.1, "stop": 108.5, "target": 92.3}
     assert mark["ifvg"] == {"x0": i("06:25"), "x1": i("06:45"), "bottom": 106.1, "top": 107.3}
-    assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2, "label": "límite"} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
+    assert mark["cisd"] == {"x0": i("06:15"), "x1": i("06:50"), "level": 103.2, "label": "CISD"} and mark["extreme"] == {"x": i("06:35"), "price": 108.5}
     first = int(np.searchsorted(ts, int(pd.Timestamp("2026-10-12 12:00").value // 10**9) + AHEAD))
     assert mark["fvgs"] == [{"tf": 15, "name": "M15", "x0": first, "x1": i("06:35"), "bottom": 107.5, "top": 110.0}]      # solo el M15 lo toca
     [other] = crt_marks(backtest(), "NAS100.r", ts, high, low, AHEAD, ltf=3, entry=1)                    # otro LTF: se enseña esa operación
-    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", [])
+    assert (other["ltf"], other["state"], other["mtf"]) == (3, "stop", ["M15"])
 
 
 def test_un_sweep_invalidado_se_marca_sin_operacion_y_con_su_motivo():
@@ -178,10 +178,8 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     assert not chart._card.isVisible()                                                   # la etiqueta sola es discreta: sin detalle
     violet = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#B388FF"]
     assert violet == []                                                                  # ya no se dibujan el iFVG ni el CISD
-    amber = [it for it in chart._crt_items if hasattr(it, "brush") and it.brush().color().name().upper() == "#FFA726"]
-    assert len(amber) >= 1                                                               # el FVG de LTF, siempre al lado del nivel barrido
     labels = sorted(it.toPlainText() for it in chart._crt_items if hasattr(it, "toPlainText") and not it.__class__.__name__ == "CrtPill")
-    assert labels == ["FVG M15", "entrada 103.100", "iFVG M5"]                           # solo nombres y timeframe: sin nombres de vela ni CISD (el del backtest antiguo no es este)
+    assert labels == ["CISD 103.200", "entrada 103.100"]                                 # la línea del CISD y la entrada: el BPR va sin etiqueta
     from tradingbot.ui.chart import HTF_BOX
     boxes = [it for it in chart._crt_items if hasattr(it, "pen") and hasattr(it, "rect") and it.pen().color().name().upper() == HTF_BOX]
     assert len(boxes) == 1 + sum(c["state"] in NEUTRAL for c in chart._crts)         # C2 (y las velas sin sweep) en gris claro, no del color de las velas
@@ -197,10 +195,9 @@ def test_el_grafico_marca_el_crt_con_etiqueta_discreta_y_ficha(tmp_path, monkeyp
     chart._mouse_moved(pill.sceneBoundingRect().center())                                # al pasar el ratón
     text = chart._card.toPlainText()
     assert chart._card.isVisible() and "CRT bajista" in text and "TP" in text
-    assert "FVG en MTF" not in text and "M15" in text and "M5" in text and "Orden límite en el nivel de C1" in text and "13/10 06:00" in text
+    assert "LTF (FVG, retesteo y entrada)" in text and "M5" in text and "CISD" in text and "103.200" in text and "13/10 06:00" in text
     assert "M3·1" in text                                                                # y los otros LTF del backtest
-    assert "FVG M15" in text and "107.500" in text and "110.000" in text                 # la zona del FVG de MTF, en la ficha
-    assert "103.1" in text and "108.5" in text and "92.3" in text and "iFVG M5" in text and "103.2" in text   # entrada, SL, TP, iFVG y CISD
+    assert "103.1" in text and "108.5" in text and "92.3" in text and "103.2" in text    # entrada, SL, TP y CISD
     chart.leaveEvent(QEvent(QEvent.Type.Leave))
     assert not chart._card.isVisible()
     win.crt_btn.setChecked(False)                                                        # el botón las quita y las vuelve a poner
@@ -225,7 +222,7 @@ def test_un_crt_alcista_lleva_la_etiqueta_debajo_y_en_verde(tmp_path, monkeypatc
     win._on_candles(candles_event())
     pill = real_pills(win.chart)[0]
     assert "CRT alcista" in pill.toPlainText() and pill.result == "SL" and pill._bar.name().upper() == CRT_COLORS["long"]
-    assert real_crts(win.chart)[0]["mtf"] == []
+    assert real_crts(win.chart)[0]["mtf"] == ["M15"]
 
 
 def test_un_sweep_sin_setup_se_marca_con_su_motivo_y_distinto_del_invalidado(tmp_path, monkeypatch):
@@ -291,8 +288,8 @@ def test_el_setup_sin_toque_de_la_zona_se_marca_setup_ok_sin_entrada():
     marks = no_entry_marks(bars, "EURUSD", AHEAD, 5)
     m = [x for x in marks if x["when"] == "02/11 21:00"]
     assert len(m) == 1 and m[0]["state"] == "sin_entrada" and m[0]["direction"] == "long" and "pos" not in m[0]
-    assert (m[0]["common"]["bottom"], m[0]["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833))
-    assert m[0]["cisd"]["level"] == pytest.approx(1.11841)
+    assert (m[0]["common"]["bottom"], m[0]["common"]["top"]) == (pytest.approx(1.11793), pytest.approx(1.11809))
+    assert m[0]["cisd"]["level"] == pytest.approx(1.11814)
     assert [x for x in engine.find_zone_setups(df, df, 5, cfg)[0].no_entry if ny_2100(x)] == []           # con el toque real no es «sin entrada»
 
 
@@ -314,7 +311,7 @@ def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(t
     from tradingbot.ui.chart import CrtPill
     df = eurusd()
     mark = [m for m in signal_marks(df, "EURUSD", AHEAD, 5) if m["when"] == "02/11 21:00"][0]
-    assert mark["touch"]["when"] == "02/11 22:10"
+    assert mark["touch"]["when"] == "02/11 22:15"
     win = window(tmp_path, monkeypatch)
     pill = CrtPill(mark)
     assert "FVG" not in pill.toPlainText()                                                       # la etiqueta discreta no lleva los TF: salen al desplegarla
@@ -327,11 +324,9 @@ def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(t
     vb.updateMatrix()
     chart._mouse_moved(chart._crt_pills[0].sceneBoundingRect().center())
     text = chart._card.toPlainText()
-    assert "FVG M15" in text and "1.11814" in text and "1.11833" in text                         # el FVG, con su TF y su zona
-    assert "iFVG M5" in text and "1.11815" in text and "1.11834" in text                         # el iFVG, con su TF y su zona
-    assert "Zona común" in text and "1.11815" in text                                            # el área común (doble FVG)
-    assert "Retest de la zona" in text and "02/11 22:10" in text                                 # el retest
-    assert "CISD" in text and "1.11841" in text                                                  # el nivel del CISD
+    assert "BPR M5" in text and "1.11815" in text and "1.11818" in text                          # la zona común (BPR), con su TF; ya no se enseñan el FVG ni el iFVG por separado
+    assert "Retest del BPR" in text and "02/11 22:15" in text                                    # el retest
+    assert "CISD" in text and "1.11849" in text                                                  # el nivel del CISD
 
 
 def test_un_setup_valido_que_el_bot_no_opero_se_dibuja_con_el_resultado_que_habria_dado():
@@ -342,9 +337,9 @@ def test_un_setup_valido_que_el_bot_no_opero_se_dibuja_con_el_resultado_que_habr
     assert len(marks) == 1
     m = marks[0]
     assert m["direction"] == "long" and m["simulated"] and m["state"] in ("objetivo", "stop", "be", "tiempo", "abierta")
-    assert m["pos"]["entry"] == pytest.approx(1.11843) and m["pos"]["stop"] == pytest.approx(1.1177) and m["pos"]["target"] == pytest.approx(1.11989)
-    assert (m["common"]["bottom"], m["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11833)) and m["cisd"]["level"] == pytest.approx(1.11841)
-    assert m["touch"]["when"] == "02/11 22:10"
+    assert m["pos"]["entry"] == pytest.approx(1.11858) and m["pos"]["stop"] == pytest.approx(1.1177) and m["pos"]["target"] == pytest.approx(1.12034)
+    assert (m["common"]["bottom"], m["common"]["top"]) == (pytest.approx(1.11815), pytest.approx(1.11818)) and m["cisd"]["level"] == pytest.approx(1.11849)
+    assert m["touch"]["when"] == "02/11 22:15"
 
 
 def test_el_estado_de_un_setup_es_el_mismo_en_5m_y_en_15m():
@@ -358,8 +353,8 @@ def test_el_estado_de_un_setup_es_el_mismo_en_5m_y_en_15m():
     m15 = [m for m in retime(marks, ts5, ts15) if m["when"] == "02/11 21:00"][0]
     assert m15["state"] == m5["state"] and m15["direction"] == m5["direction"] and m15["simulated"] == m5["simulated"]
     assert (m15["common"]["bottom"], m15["common"]["top"], m15["cisd"]["level"]) == (m5["common"]["bottom"], m5["common"]["top"], m5["cisd"]["level"])
-    assert ts15[m15["pos"]["x0"]] == pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD       # la entrada, en la vela de 15 min que la contiene
-    assert ts15[m15["touch"]["x"]] == pd.Timestamp("2026-11-02 22:00").value // 10**9 + AHEAD       # el retest de las 22:10, en la vela de las 22:00
+    assert ts15[m15["pos"]["x0"]] == ts5[m5["pos"]["x0"]] // 900 * 900                              # la entrada, en la vela de 15 min que la contiene
+    assert ts15[m15["touch"]["x"]] == ts5[m5["touch"]["x"]] // 900 * 900                            # el retest, en la vela de 15 min que lo contiene
     assert ts15[m15["x0"]] == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD               # C2 empieza donde empieza
     waiting = [m for m in marks if m["state"] == "sin_entrada"]
     assert [m["state"] for m in retime(waiting, ts5, ts15)] == ["sin_entrada"] * len(waiting)

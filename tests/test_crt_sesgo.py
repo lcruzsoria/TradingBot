@@ -132,6 +132,32 @@ def test_la_configuracion_del_sesgo_crt_se_lee_del_env_y_se_valida():
 
 # -- skill y Cortex --------------------------------------------------------------------------------------------------------
 
+@pytest.fixture
+def fvg_sin_mitigar(monkeypatch):
+    """El FVG de 1 h del escenario EURUSD (1.11832-1.11846) lo toca el precio a las 19:40, antes de la C2 de las 21:00, y no llega a la zona común (BPR 1.11815-1.11818):
+    con las reglas de zonas sin mitigar y de solape ya no puntúa. Aquí se da por sin mitigar y sobre el BPR para probar los puntos del sesgo y el GO / NO GO."""
+    real = bias.zones
+
+    def zones(*a, **k):
+        out = real(*a, **k)
+        for z in out:
+            if z["rule"] == "fvg":
+                z["dead"], z["bottom"], z["top"] = None, 1.1181, 1.1183
+        return out
+    monkeypatch.setattr(bias, "zones", zones)
+
+
+@pytest.fixture(autouse=True)
+def solo_m5(monkeypatch):
+    """Estos tests miran el sesgo, no la prioridad de M15: el escenario (EURUSD) tiene un BPR de M15 con retest que descartaría su setup de M5."""
+    def only_m5(series, cfg, hist=None):
+        setups, funnel = engine.find_zone_setups(series[5], series[5], 5, cfg, {5: series[5]}, hist)
+        for st in setups:
+            st["ltf"], st["t_cisd"] = 5, int(series[5]["ts"].iloc[st["jc"]])
+        return setups, funnel
+    monkeypatch.setattr(engine, "find_multi_setups", only_m5)
+
+
 def run(env_text=""):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
@@ -148,7 +174,7 @@ def run(env_text=""):
 
 def load_entry(bus, symbol="EURUSD"):
     df = eurusd()
-    df = df[df["ts"] <= pd.Timestamp("2026-11-02 22:30").value // 10**9 + AHEAD].reset_index(drop=True)
+    df = df[df["ts"] <= pd.Timestamp("2026-11-02 22:35").value // 10**9 + AHEAD].reset_index(drop=True)      # la vela de las 22:35 se está formando: la entrada es a su apertura
     bus.publish("candles.loaded", {"symbol": symbol, "timeframe": "5m", "df": df}, source="feed")
     time.sleep(0.6)
 
@@ -165,7 +191,7 @@ def test_con_el_sesgo_apagado_el_setup_es_go_y_la_tarjeta_dice_sesgo_cero():
     assert out["executed"][0].payload["order"].bias == "No Bias" and out["executed"][0].payload["order"].score == 0
 
 
-def test_con_el_sesgo_encendido_el_setup_es_go_con_los_puntos_que_pide_y_no_go_si_no_llega():
+def test_con_el_sesgo_encendido_el_setup_es_go_con_los_puntos_que_pide_y_no_go_si_no_llega(fvg_sin_mitigar):
     manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_ENFORCE=true\nCRT_BIAS_MIN_SCORE=1")
     load_entry(bus)
     manager.stop()
@@ -220,7 +246,7 @@ def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monke
     assert llamadas == ["1d"]                                                                     # con las tres reglas validadas en 1d no se mira más
 
 
-def test_con_el_sesgo_encendido_sin_enforce_se_calcula_pero_no_anula_el_trade():
+def test_con_el_sesgo_encendido_sin_enforce_se_calcula_pero_no_anula_el_trade(fvg_sin_mitigar):
     manager, bus, out = run("CRT_BIAS_ENABLED=true\nCRT_BIAS_MIN_SCORE=2")                # 1 punto < 2, pero CRT_BIAS_ENFORCE=false (por defecto)
     load_entry(bus)
     manager.stop()

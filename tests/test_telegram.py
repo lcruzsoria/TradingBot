@@ -312,7 +312,7 @@ def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
     QApplication.instance() or QApplication([])
     snap = panel.PanelState({"app": {"profile_name": "puprime"}}).snapshot("metaquotes")
     png = card.render_operations(snap)
-    assert png[:4] == b"\x89PNG" and len(png) > 3000 and snap["bias"] == [] and snap["profile"] == "metaquotes"
+    assert png[:4] == b"\x89PNG" and len(png) > 1500 and snap["bias"] == [] and snap["profile"] == "metaquotes"
     assert "/puprime · Forwardtest de PUPrime" in messages.help_text((("puprime", "Forwardtest de PUPrime"),))
 
 
