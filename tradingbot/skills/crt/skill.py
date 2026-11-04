@@ -12,7 +12,7 @@ from ..calendario.skill import matches
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..bias.models import Bias, BiasResult
 from . import bias as crt_bias, engine
-from .chart import complete_series as engine_complete
+from .chart import complete_series as engine_complete, sl_text
 
 STRATEGY = "crt"
 LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
@@ -48,13 +48,14 @@ class CrtSkill(Skill):
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
                    "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
-    publishes = ("crt.signal", "bias.updated", "bias.history")
+    publishes = ("crt.signal", "crt.blocked", "bias.updated", "bias.history")
     slot = "aux2"
 
     def on_start(self) -> None:
         self.error = "Configuración CRT no válida"
         self._offset: int | None = None
         self._seen: set = set()
+        self._blocked_seen: set = set()                  # setups sin entrada por el stop máximo que ya se avisaron
         self._extra: dict[tuple, tuple] = {}             # (símbolo, TF) -> (última vela del perfil, velas que se pidieron a MT5)
         self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
         self._hist_key: dict[str, tuple] = {}            # símbolo -> clave del último histograma publicado
@@ -245,6 +246,19 @@ class CrtSkill(Skill):
         setups, _ = engine.find_multi_setups({m: d.iloc[:closed[m]] for m, d in series.items()}, cfg, full)
         ts = {m: d["ts"].to_numpy().astype(np.int64) for m, d in series.items()}
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
+        for st in setups:                                                  # un setup con entrada que el stop máximo cancela: se avisa (no hay señal)
+            m = st["ltf"]
+            key = (symbol, st["C2"], st["sign"])
+            if key in self._blocked_seen or st["jc"] + 1 < len(series[m]) - MAX_LATE_BARS:
+                continue
+            if engine.entry_point(views[m][st["sign"]], st, self.entry, m, self.rule, cfg, closed[m]) is not None:
+                continue
+            risk = engine.sl_blocked(views[m][st["sign"]], st, self.entry, m, self.rule, cfg, closed[m])
+            if risk is None:
+                continue
+            self._blocked_seen.add(key)
+            self.publish("crt.blocked", {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "stop": st["sign"] * st["stop"],
+                                         "entry_ts": int(ts[m][st["jc"]]) + m * 60, "text": sl_text(risk, cfg, long=True), "strategy": STRATEGY})
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):

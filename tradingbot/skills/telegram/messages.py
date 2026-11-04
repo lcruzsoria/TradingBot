@@ -54,6 +54,11 @@ def opened(order, profile: str | None = None) -> str:
             f"Sesgo {_bias_text(order.bias, order.score, order.lateral, order.efficiency)}{_footer(profile)}")
 
 
+def blocked(payload: dict, profile: str | None = None) -> str:
+    return (f"<b>Estrategia:</b> CRT\n🟠 <b>NO GO · sin entrada · {SIDE.get(payload['direction'], payload['direction'])} {_e(payload['symbol'])}</b> "
+            f"{_e(payload['timeframe'])}\n{_e(payload['text'])}\nStop {fmt_price(payload['stop'])}{_footer(profile)}")
+
+
 def closed(order, result, profile: str | None = None) -> str:
     icon, short = RESULT.get(result.result, ("•", result.result))
     peak = f" · máx. {result.max_r:+.2f} R" if result.max_r is not None else ""

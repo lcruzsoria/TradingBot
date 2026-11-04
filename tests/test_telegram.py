@@ -479,3 +479,10 @@ def test_dibujar_sin_velas_cargadas_lo_dice(sent, tmp_path):
     manager.skills["telegram"].tick()
     manager.stop()
     assert PHOTOS == [] and "Aún no tengo las velas de EURUSD" in sent[-1][2]
+
+
+def test_aviso_de_un_setup_crt_sin_entrada_por_el_stop_maximo():
+    from tradingbot.skills.telegram import messages
+    text = messages.blocked({"symbol": "NAS100.s", "timeframe": "5m", "direction": "short", "stop": 28857.05,
+                             "text": "Setup OK sin entrada: el stop (334 puntos) supera el máximo permitido (125 puntos)"}, "crt")
+    assert "NO GO" in text and "Corto NAS100.s" in text and "334 puntos" in text and "Stop" in text
