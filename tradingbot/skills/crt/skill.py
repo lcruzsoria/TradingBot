@@ -48,7 +48,7 @@ class CrtSkill(Skill):
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
                    "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
-    publishes = ("crt.signal", "bias.updated")
+    publishes = ("crt.signal", "bias.updated", "bias.history")
     slot = "aux2"
 
     def on_start(self) -> None:
@@ -57,6 +57,7 @@ class CrtSkill(Skill):
         self._seen: set = set()
         self._extra: dict[tuple, tuple] = {}             # (símbolo, TF) -> (última vela del perfil, velas que se pidieron a MT5)
         self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
+        self._hist_key: dict[str, tuple] = {}            # símbolo -> clave del último histograma publicado
         self._card: dict[str, tuple] = {}                # símbolo -> lo último que se publicó a la tarjeta (solo se publica si cambia)
         self.marks: dict[str, dict] = {}                 # símbolo -> {ts, marks, key}: los setups de los últimos días, con las velas de la skill (M5 o M3)
         app = (self.services.app_cfg or {}).get("app", {})
@@ -112,6 +113,7 @@ class CrtSkill(Skill):
         signal = self.scan(symbol, tf, df)
         if not background:
             self._publish_bias(symbol, tf)
+            self._publish_history(symbol, tf, df)
         if signal is not None:
             self.publish("crt.signal", signal)
             caption(f"señal {symbol}")
@@ -123,6 +125,45 @@ class CrtSkill(Skill):
         sgn = st["sign"]
         common = (sgn * st["z_bottom"], sgn * st["z_top"])
         return crt_bias.evaluate(full, st["dirección"], int(st["C2"]), common, cfg, self.bias_cfg, ahead)
+
+    HISTORY_HOURS = 36                                                  # un setup da sesgo a las velas siguientes durante 36 h (como la tarjeta)
+
+    def _publish_history(self, symbol: str, tf: str, df) -> None:
+        """El histograma del sesgo CRT: en cada vela, los puntos (± según el lado) del último setup con entrada de las 36 h anteriores, con los votos
+        de cada regla HTF (FVG, rejection block, order block). Solo se recalcula con velas nuevas."""
+        step = minutes(tf)
+        key = (symbol, step, len(df), int(df["ts"].iloc[-1]), self._offset, self.bias_cfg)
+        if self._hist_key.get(symbol) == key:
+            return
+        self._hist_key[symbol] = key
+        ahead, _ = server_minus_ny(self._offset)
+        base_cfg = engine.INDICES if is_us_index(symbol, self.indices) else engine.FOREX
+        cfg = engine.Cfg(base_cfg.htf_min, base_cfg.origin, base_cfg.session_end, ahead)
+        n, ts = len(df), df["ts"].to_numpy().astype(np.int64)
+        scores, votes = np.zeros(n), np.zeros((n, len(crt_bias.RULES)))
+        try:
+            series = self._series(symbol, tf, df, cfg)
+            setups, _ = engine.find_multi_setups({m: d.iloc[:len(d) - 1] for m, d in series.items()}, cfg, df)
+            cache = crt_bias.zone_cache(df, cfg, self.bias_cfg) if self.bias_cfg.enabled else None
+            known = []                                                    # (hora en que se conoce el setup, puntos con signo, votos con signo)
+            for st in setups:
+                sgn = st["sign"]
+                points = crt_bias.evaluate(df, st["dirección"], int(st["C2"]), (sgn * st["z_bottom"], sgn * st["z_top"]), cfg, self.bias_cfg, ahead, cache)
+                side = 1 if st["dirección"] == "long" else -1
+                counts = points.counts()
+                known.append((int(series[st["ltf"]]["ts"].iloc[st["jc"]]) + st["ltf"] * 60, side * points.score,
+                              [side if counts[k] else 0 for k, _t in crt_bias.RULES]))
+            known.sort(key=lambda x: x[0])
+            starts = np.array([k[0] for k in known], dtype=np.int64)
+            for i in range(n):
+                j = int(np.searchsorted(starts, ts[i], "right")) - 1
+                if j >= 0 and ts[i] - starts[j] <= self.HISTORY_HOURS * 3600:
+                    scores[i], votes[i] = known[j][1], known[j][2]
+        except Exception as exc:                                          # un fallo del histograma no puede parar la señal
+            self.set_caption(f"histograma del sesgo: {exc}")
+            return
+        self.publish("bias.history", {"symbol": symbol, "timeframe": tf, "scores": scores, "min_score": max(self.bias_cfg.min_score, 1e-9), "lateral": None,
+                                      "rules": [(title, 1.0) for _k, title in crt_bias.RULES], "votes": votes, "ts": ts})
 
     def _publish_bias(self, symbol: str, tf: str) -> None:
         """La tarjeta del sesgo enseña el del último setup reciente del mercado del gráfico (o «sin setup»); solo se publica si cambia."""

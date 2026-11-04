@@ -1197,7 +1197,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_rules_view(self) -> None:
         """Panel de reglas: las de la vela marcada en el histograma o, si no hay ninguna, las de la vela actual."""
-        index = self.bias_hist.selected if self.bias_hist.isVisibleTo(self) and self.strategy != "crt" else None
+        index = self.bias_hist.selected if self.bias_hist.isVisibleTo(self) else None
         shown = self._historic_result(index) if index is not None else None
         tf = f"TF={display_label(self.current_tf())}"
         if shown is not None:
