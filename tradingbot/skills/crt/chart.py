@@ -259,6 +259,16 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
                           "Setup OK sin Entrada: el precio siguió sin tocar la zona común")
         if mark:
             out.append(mark)
+    for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg, hist)[0].no_close:       # BPR, iFVG y retest hechos, pero ninguna vela cerró más allá del CISD
+        if (st["C2"], st["sign"]) in first15:
+            continue
+        mark = _idle_mark(st, lo, ts, highs, lows, ahead, ltf, htf, min(int(st["end"]), n - 1), "sin_cierre",
+                          "Setup OK sin cierre: hubo retest del BPR pero ninguna vela cerró más allá del CISD")
+        if mark:
+            zb, zt = min(st["sign"] * st["common"][0], st["sign"] * st["common"][1]), max(st["sign"] * st["common"][0], st["sign"] * st["common"][1])
+            mark["touch"] = {"x": lo + st["jt"], "price": zt if st["sign"] < 0 else zb,
+                             "when": datetime.fromtimestamp(int(ts[st["jt"]]) - ahead, timezone.utc).strftime("%d/%m %H:%M")}
+            out.append(mark)
     return out
 
 

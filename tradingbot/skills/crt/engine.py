@@ -105,6 +105,7 @@ class Setups(list):
         self.nosetup: list[dict] = []                    # sweeps cuyo patrón no se completó ni se invalidó (la vela C2 acabó antes)
         self.waiting: list[dict] = []                    # setups completos (BPR, iFVG invertido y retest) a los que solo les falta que una vela cierre más allá del CISD, con C2 en curso
         self.no_entry: list[dict] = []                   # «Setup OK sin entrada»: la zona común existe pero el precio siguió sin tocarla
+        self.no_close: list[dict] = []                   # «Setup OK sin cierre»: BPR, iFVG invertido y retest hechos, pero ninguna vela cerró más allá del CISD
         self.contacts: list[tuple] = []                  # (C2, sign, nivel del BPR, hora) del primer contacto con un BPR de cada nivel (0: FVG e iFVG de M15, 1: los dos de M5, 2: FVG de M15 e iFVG de M5)
 
 
@@ -399,6 +400,13 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     setups.waiting.append({"sign": sign, "dirección": name, "C2": s2, "ltf": ltf_min, "mtf": f"M{z[0]}", "stop": hx, "level": cisd_of(k)[1],
                                            "z_bottom": common[0], "z_top": common[1], "t_touch": int(lts[touched[(k, z[3], z[0])]]), "c1": (c1l, c1h),
                                            "sweep": swept_name})
+            if not trig and touched and (invalidated or dead or lts[-1] + ltf_min * 60 >= s2 + cfg.htf_min * 60):    # con retest y sin cierre sobre el CISD: ya no puede darse (C2 acabó, retest invalidado o llegó al otro extremo de C1)
+                lost = [p for p in pairs if pid(p) in touched and not any(lvl(q) < lvl(p) and contact.get(pid(q), b) < b for q in pairs)]
+                if lost:
+                    k, z, common = max(lost, key=lambda p: (-p[1][0], p[0], p[1][3]))
+                    setups.no_close.append({"sign": sign, "dirección": name, "C2": s2, "ih": ih, "stop": hx, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level),
+                                            "kf": k, "zones": [z], "common": common, "ifvg": (float(hi_[k - 2]), float(lo_[k])), "cisd": cisd_of(k), "inv": inverted[k],
+                                            "jt": touched[(k, z[3], z[0])], "end": j if invalidated else b - 1})
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
@@ -440,6 +448,7 @@ def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) 
             if i == 15 or st["t_cisd"] < first15.get((st["C2"], st["sign"]), st["t_cisd"] + 1):
                 out.append(st)
         out.waiting += [w for w in setups.waiting if i == 15 or w["t_touch"] < first15.get((w["C2"], w["sign"]), w["t_touch"] + 1)]
+        out.no_close += [dict(w, ltf=i) for w in setups.no_close if i == 15 or int(series[i]["ts"].iloc[w["jt"]]) < first15.get((w["C2"], w["sign"]), 1 << 62)]
         for k, v in f.items():
             funnel[k] = funnel.get(k, 0) + v
     out.sort(key=lambda st: (st["t_cisd"], -st["ltf"]))

@@ -48,7 +48,7 @@ RESULTS = {"objetivo": ("TP", "#26A69A"), "stop": ("SL", "#EF5350"), "be": ("BE"
            "tiempo": ("T", None), "abierta": ("…", None), "invalido": ("Invalidado", "#B0BEC5"),
            "sin_setup": ("Sin setup", "#78909C"), "sin_operacion": ("Sin operación", "#78909C"),
            "sin_sweep": ("Sin sweep", None), "sin_evaluar": ("Sin evaluar", None), "sin_entrada": ("Setup OK sin Entrada", "#FFA726"),
-           "sin_entrada_sl": ("SL grande", "#FFA726")}
+           "sin_cierre": ("Setup OK sin cierre", "#FFA726"), "sin_entrada_sl": ("SL grande", "#FFA726")}
 RESULT_TEXT = {"TP": "#2ECC71", "Setup OK sin Entrada": "#FFA726", "SL grande": "#FFA726", "Invalidado": "#B0BEC5", "Sin setup": "#78909C", "Sin operación": "#78909C"}    # letras del resultado con otro color que el borde: TP en un verde más vivo
 BOX_BORDER = {"objetivo": "#26A69A", "be": BE_GRAY}     # borde de la caja de la posición: verde si fue TP, gris si fue BE
 
@@ -114,7 +114,8 @@ HTF_BOX = "#C9CDD6"                                       # cajas de las velas C
 CRT_PILL_OPACITY = 0.85
 CRT_RESULT_WORDS = {"objetivo": "TP", "stop": "SL", "be": "BE", "tiempo": "cerrado por tiempo", "invalido": "Invalidado",
                     "sin_setup": "Sin setup", "sin_operacion": "Sin operación", "sin_sweep": "Sin sweep",
-                    "sin_evaluar": "Sin evaluar", "sin_entrada": "Setup OK sin Entrada", "sin_entrada_sl": "Setup OK sin entrada: SL demasiado grande",
+                    "sin_evaluar": "Sin evaluar", "sin_entrada": "Setup OK sin Entrada", "sin_cierre": "Setup OK sin cierre sobre el CISD",
+                    "sin_entrada_sl": "Setup OK sin entrada: SL demasiado grande",
                     "abierta": "abierta"}
 
 
