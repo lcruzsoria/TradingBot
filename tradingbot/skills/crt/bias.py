@@ -109,6 +109,12 @@ def zones(df: pd.DataFrame, direction: str, cfg: engine.Cfg, tfs=("1h", "4h", "1
     return out
 
 
+def zone_text(z: dict, ahead: int = 0) -> str:
+    """La zona HTF que da un punto: su TF, la vela que la define (hora NY de su primera vela) y su rango."""
+    when = datetime.fromtimestamp(int(z["candle"]) - ahead, timezone.utc)
+    return f"{z['tf']} · vela {when:%d/%m %H:%M} NY · {z['bottom']:.5g}-{z['top']:.5g}"
+
+
 @dataclass
 class SetupBias:
     """Puntos de un setup: las zonas que cuentan (una por punto) y el resultado para la tarjeta del sesgo."""
@@ -118,6 +124,7 @@ class SetupBias:
     enforce: bool = True                                         # False: se calcula y se enseña pero no anula el trade
     zones: list[dict] = field(default_factory=list)
     when: datetime | None = None
+    ahead: int = 0                                               # servidor - Nueva York (s): para dar la hora de la vela de cada zona
 
     @property
     def score(self) -> float:
@@ -146,8 +153,9 @@ class SetupBias:
         counts = self.counts()
         votes = tuple(RuleVote(title, sign if counts[key] and self.enabled else 0,
                                "deshabilitada" if not self.enabled else
-                               "; ".join(f"{z['tf']} {z['bottom']:.5g}-{z['top']:.5g}" for z in self.zones if z["rule"] == key) or "sin zona",
-                               float(counts[key]) if counts[key] and self.enabled else 1.0) for key, title in RULES)
+                               "; ".join(zone_text(z, self.ahead) for z in self.zones if z["rule"] == key) or "sin zona",
+                               float(counts[key]) if counts[key] and self.enabled else 1.0,
+                               tuple(z for z in self.zones if z["rule"] == key) if self.enabled else ()) for key, title in RULES)
         if self.enabled and self.score >= self.min_score:
             bias = Bias.BULLISH if sign > 0 else Bias.BEARISH
         else:
@@ -169,7 +177,7 @@ def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[floa
     mucho un punto, el del TF mayor en que se cumple; en cuanto se cumple no se sigue con los TF menores. `cache` (`zone_cache`): zonas ya calculadas."""
     when = datetime.fromtimestamp(c2_start - ahead, timezone.utc)
     if not bias_cfg.enabled:
-        return SetupBias(False, direction, bias_cfg.min_score, bias_cfg.enforce, [], when)
+        return SetupBias(False, direction, bias_cfg.min_score, bias_cfg.enforce, [], when, ahead)
     lo, hi = min(common), max(common)
     first = c2_start - int(bias_cfg.lookback_days * 86400)
     history = df[df["ts"] < c2_start] if cache is None else None
@@ -187,4 +195,4 @@ def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[floa
                 found.append(hits[-1])                                                         # la más reciente de ese TF; el TF mayor ya da el punto
                 pending.remove(key)
     found.sort(key=lambda z: [k for k, _ in RULES].index(z["rule"]))
-    return SetupBias(True, direction, bias_cfg.min_score, bias_cfg.enforce, found, when)
+    return SetupBias(True, direction, bias_cfg.min_score, bias_cfg.enforce, found, when, ahead)

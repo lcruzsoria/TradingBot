@@ -410,6 +410,7 @@ class ChartView(pg.PlotWidget):
         self._crts: list[dict] = []               # CRT del backtest (perfil CRT): {x0, x1, xc1, c1, c2, direction, state, mtf, ltf, entry...}
         self._crt_visible = True
         self._crt_items: list = []
+        self._bias_items: list = []               # zonas HTF del sesgo CRT que se están enseñando (al pinchar una regla)
         self._crt_pills: list = []                # la etiqueta de cada CRT, en el mismo orden que _crts
         self._hover: tuple[str, int] | None = None    # ("pos", "fib" o "crt", índice) bajo el ratón
         self._pinned: tuple[str, int] | None = None   # el que tiene la ficha fijada por un clic
@@ -1026,6 +1027,33 @@ class ChartView(pg.PlotWidget):
     def fib_count(self) -> int:
         """Fibonacci dibujados (cada uno son tres niveles)."""
         return 0 if not self._fib_visible else len(self._fibs)
+
+    def set_bias_zones(self, zones: list[dict]) -> None:
+        """Pinta las zonas HTF que dan el sesgo CRT (rango de la zona desde su vela hasta el borde derecho) y las quita al llamarla con []."""
+        pi = self.getPlotItem()
+        for item in self._bias_items:
+            pi.removeItem(item)
+        self._bias_items.clear()
+        if not zones or not len(self._ts):
+            return
+        names = {"fvg": "FVG", "rejection": "Rejection", "ob": "OB"}
+        color = "#AB47BC"
+        for z in zones:
+            left, right = float(np.searchsorted(self._ts, int(z["candle"]), "left")), float(len(self._ts) + 2)
+            lo, hi = float(z["bottom"]), float(z["top"])
+            box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
+            box.setBrush(_alpha(color, 40))
+            pen = QPen(QColor(color), 1.4)
+            pen.setCosmetic(True)
+            box.setPen(pen)
+            box.setZValue(-6)
+            pi.addItem(box, ignoreBounds=True)
+            label = pg.TextItem(anchor=(0, 1))
+            label.setHtml(f'<span style="font-size:7pt; color:{color}">{names.get(z["rule"], z["rule"])} {html.escape(str(z["tf"]))}</span>')
+            label.setPos(left, hi)
+            label.setZValue(7)
+            pi.addItem(label, ignoreBounds=True)
+            self._bias_items += [box, label]
 
     # -- CRT del backtest (botón CRT del perfil CRT) --------------------------------------------------------
     def set_crts(self, crts: list[dict]) -> None:

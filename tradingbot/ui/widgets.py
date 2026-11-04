@@ -321,6 +321,8 @@ class BiasCard(QFrame):
 class RulesList(QWidget):
     """Reglas activas del Bias, una línea cada una: voto, nombre, valor actual y peso (los precios van en la ayuda emergente)."""
 
+    vote_clicked = Signal(object)                          # zonas de una regla con zona HTF (perfil CRT): se pinchó su línea
+
     def __init__(self) -> None:
         super().__init__()
         self._rows = QVBoxLayout(self)
@@ -352,9 +354,9 @@ class RulesList(QWidget):
                 widget.setParent(None)                     # sale ya de la interfaz; el borrado real llega después
                 widget.deleteLater()
 
-    def _line(self, mark: str, color: str, name: str, weight: float, tip: str, points: float | None = None, vote: int = 0) -> QWidget:
+    def _line(self, mark: str, color: str, name: str, weight: float, tip: str, points: float | None = None, vote: int = 0, zones: tuple = ()) -> QWidget:
         row = QWidget()
-        row.setToolTip(tip)
+        row.setToolTip(tip + ("\n\nPulsa para ver la zona HTF en el gráfico" if zones else ""))
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
@@ -373,6 +375,10 @@ class RulesList(QWidget):
         h.addWidget(name_label, 1)
         h.addWidget(value_label)
         h.addWidget(weight_label)
+        if zones:                                          # regla con zona HTF (CRT): clicable, subrayada
+            name_label.setStyleSheet("font-weight: 600; text-decoration: underline;")
+            row.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.mousePressEvent = lambda _event, z=zones: self.vote_clicked.emit(z)
         return row
 
     def _render(self) -> None:
@@ -382,7 +388,7 @@ class RulesList(QWidget):
             colors = {1: theme.BULL, -1: theme.BEAR, 0: theme.NEUTRAL}
             marks = {1: "▲", -1: "▼", 0: "–"}
             for vote in result.votes:
-                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points, vote.vote))
+                self._rows.addWidget(self._line(marks[vote.vote], colors[vote.vote], vote.rule, vote.weight, vote.detail, vote.points, vote.vote, vote.zones))
             tone = {Bias.BULLISH: theme.BULL, Bias.BEARISH: theme.BEAR}.get(result.bias, theme.MUTED)
             threshold = {Bias.BULLISH: f"+{result.min_score:g}", Bias.BEARISH: f"-{result.min_score:g}"}.get(result.bias, f"±{result.min_score:g}")
             lateral = "  ·  lateral" if getattr(result, "lateral", False) else ""

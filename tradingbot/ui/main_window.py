@@ -505,6 +505,8 @@ class MainWindow(QMainWindow):
         rules.note.linkActivated.connect(lambda _link: self.open_rules_editor())
         self._refresh_rules_link()
         self.rules_list = RulesList()
+        self.rules_list.vote_clicked.connect(self._show_bias_zones)
+        self._bias_shown: tuple | None = None                          # zonas HTF del sesgo CRT pintadas ahora
         rules.body.addWidget(self.rules_list)
         self.recalc_btn = QPushButton("Recalcular sesgo")
         rules.body.addWidget(self.recalc_btn)
@@ -520,9 +522,53 @@ class MainWindow(QMainWindow):
         return [(r.title or r.key, r.weight) for r in getattr(engine, "rules", [])] if engine is not None else []
 
     def _sync_rules(self) -> None:
+        if self.strategy == "crt":                                   # las reglas del sesgo CRT, no las del TBR
+            from ..skills.crt.bias import RULES as CRT_RULES
+            self.rules_list.set_rules([(title, 1.0) for _key, title in CRT_RULES])
+            return
         self.rules_list.set_rules(self._engine_rules())
 
+    def _show_bias_zones(self, zones: tuple) -> None:
+        """Pinchar una regla del sesgo CRT: pinta su(s) zona(s) HTF en el gráfico y dice TF, hora de la vela y rango (otro clic la quita)."""
+        from ..skills.crt.bias import zone_text
+        marker = tuple((z["rule"], z["tf"], z["candle"]) for z in zones)
+        if not zones or self._bias_shown == marker:
+            self._bias_shown = None
+            self.chart.set_bias_zones([])
+            self._refresh_rules_view()
+            return
+        self._bias_shown = marker
+        self.chart.set_bias_zones(list(zones))
+        text = " · ".join(zone_text(z, self.ny_shift) for z in zones)
+        self.rules_when.setText(f"  ·  {text}")
+        self.log(f"sesgo CRT: zona HTF {text}", "Zona(s) HTF que dan el sesgo del último setup (pulsa de nuevo la regla para quitarla):\n"
+                 + "\n".join("  " + zone_text(z, self.ny_shift) for z in zones))
+
+    def _crt_rules_dialog(self) -> None:
+        """«Voto de cada regla» en el perfil CRT: las reglas del sesgo CRT y cómo están configuradas (no las del TBR)."""
+        from ..skills.crt import bias as crt_bias
+        skill = self.manager.skills.get("crt")
+        cfg = getattr(skill, "bias_cfg", None)
+        rows = "".join(f"<li><b>{title}</b></li>" for _key, title in crt_bias.RULES)
+        state = "" if cfg is None else (
+            f"<p>Sesgo {'activado' if cfg.enabled else 'desactivado (CRT_BIAS_ENABLED=false)'} · "
+            f"{'anula' if cfg.enforce else 'solo informa, no anula'} el trade (CRT_BIAS_ENFORCE) · TF {', '.join(cfg.tfs)} · "
+            f"zonas de hasta {cfg.lookback_days:g} días antes de la C2 · puntos para GO: {cfg.min_score:g} · swing de {cfg.swing_width} vela(s) · "
+            f"mecha del rejection block &gt; {cfg.rb_min_wick_pct:g} %</p>")
+        box = QMessageBox(self)
+        box.setWindowTitle("Reglas del sesgo CRT")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText("<p>El sesgo del perfil CRT son los <b>puntos</b> que da un setup por las zonas de reversión del HTF (1h, 4h, 1d) "
+                    "a su favor (soporte en largos, resistencia en cortos) con las que se solapa su BPR. Una regla da como mucho un punto, "
+                    "el del TF mayor en que se cumple.</p><ul>" + rows + "</ul>" + state +
+                    "<p>Pulsa una regla del panel para ver su zona: TF, hora de la vela que la define y rango (y se pinta en el gráfico). "
+                    "Se configura con las variables CRT_BIAS_* de tradingbot.env.</p>")
+        box.exec()
+
     def open_rules_editor(self) -> None:
+        if self.strategy == "crt":
+            self._crt_rules_dialog()
+            return
         engine = self.engine
         if engine is None:
             return
@@ -1151,14 +1197,14 @@ class MainWindow(QMainWindow):
 
     def _refresh_rules_view(self) -> None:
         """Panel de reglas: las de la vela marcada en el histograma o, si no hay ninguna, las de la vela actual."""
-        index = self.bias_hist.selected if self.bias_hist.isVisibleTo(self) else None
+        index = self.bias_hist.selected if self.bias_hist.isVisibleTo(self) and self.strategy != "crt" else None
         shown = self._historic_result(index) if index is not None else None
         tf = f"TF={display_label(self.current_tf())}"
         if shown is not None:
             self.rules_when.setText(f"  ·  {tf}  ·  {self._bar_time(index)}")
             self.rules_list.set_result(shown)
         else:
-            self.rules_when.setText(f"  ·  {tf}  ·  Vela actual")
+            self.rules_when.setText("  ·  Último setup CRT" if self.strategy == "crt" else f"  ·  {tf}  ·  Vela actual")
             self.rules_list.set_result(self._live_result)
 
     def _on_bias_history(self, p: dict) -> None:

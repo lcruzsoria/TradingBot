@@ -24,6 +24,7 @@ class RuleVote:
     vote: int
     detail: str
     weight: float = 1.0
+    zones: tuple = ()           # zonas que dan el voto (perfil CRT): {rule, tf, bottom, top, candle, created}; se pueden pinchar y pintar
 
     @property
     def points(self) -> float:
