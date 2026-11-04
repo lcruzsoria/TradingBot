@@ -53,7 +53,7 @@ def main() -> None:
         source = Mt5Source(select_profile(profiles, default, name), 2_000_000)
         print(f"\n== {name}: {sum(len(v) for v in lines.values())} líneas, conectado: {source.connect()}")
         candles: dict[tuple, tuple | None] = {}
-        changes, kept, skipped = [], 0, Counter()
+        changes, odd, kept, skipped = [], [], 0, Counter()
         for f in files:
             for i, line in enumerate(lines[f]):
                 try:
@@ -85,12 +85,18 @@ def main() -> None:
                 if new.result == old.get("result") and int(new.exit_ts) == int(old.get("exit_ts", -1)):
                     kept += 1
                     continue
-                changes.append((f, i, order, old, new))
+                if new.result == "breakeven" and old.get("result") != "breakeven":
+                    changes.append((f, i, order, old, new))
+                else:                                                       # no lo explica el breakeven (velas distintas a las del bot en directo): no se toca
+                    odd.append((f, order, old, new))
         moved = Counter(f"{o['result']} -> {n.result}" for _, _, _, o, n in changes)
-        print(f"  cierres sin cambio: {kept}; cambian: {len(changes)} {dict(moved)}; sin tocar: {dict(skipped)}")
+        print(f"  cierres sin cambio: {kept}; pasan a breakeven: {len(changes)} {dict(moved)}; dudosos sin tocar: {len(odd)}; sin velas: {dict(skipped)}")
         for f, i, order, old, new in changes[:80]:
             print(f"   {f.name} {order.symbol:11} {order.direction:5} {order.pattern_key:12} día TBR {order.tbr_day}: {old['result']} {old['r']:+.2f} R -> "
                   f"{new.result} {new.r:+.2f} R")
+        for f, order, old, new in odd:
+            print(f"   SIN TOCAR (no es de breakeven) {f.name} {order.symbol:11} {order.direction:5} {order.pattern_key:12} día TBR {order.tbr_day}: "
+                  f"{old['result']} {old['r']:+.2f} R vs {new.result} {new.r:+.2f} R")
         if not changes:
             source.close()
             continue
@@ -111,7 +117,7 @@ def main() -> None:
             for t in account.trades:
                 if t["id"] in swap:
                     n = swap[t["id"]]
-                    t = {**t, "result": n.result, "r": round(n.r, 4), "cierre_ts": int(n.exit_ts)}
+                    t = {**t, "result": n.result, "r": round(n.r, 4) + 0.0, "cierre_ts": int(n.exit_ts)}
                 out.append({**t, "consolidada_ts": schedule.due(t["symbol"], t["cierre_ts"])})
             out.sort(key=lambda t: (t["consolidada_ts"], t["cierre_ts"]))
             for t in out:
@@ -137,7 +143,7 @@ def main() -> None:
             for fi, i, order, old, new in changes:
                 if fi == f:
                     rec = json.loads(lines[f][i])
-                    rec["closed"].update({"result": new.result, "exit_price": new.exit_price, "exit_ts": int(new.exit_ts), "r": new.r, "pct": new.pct,
+                    rec["closed"].update({"result": new.result, "exit_price": new.exit_price, "exit_ts": int(new.exit_ts), "r": new.r + 0.0, "pct": new.pct + 0.0,
                                           "be_ts": new.be_ts, "max_r": new.max_r, "min_r": new.min_r})
                     lines[f][i] = json.dumps(rec, ensure_ascii=False)
                     edited = True
