@@ -76,7 +76,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
             trades.setdefault((int(chosen["c"][i]), int(chosen["d"][i])), []).append(
                 (int(chosen["l"][i]), int(chosen["n"][i]), str(names[i]), int(chosen["t"][i]), detail))
     invalid: dict[tuple, tuple] = {}                           # (inicio de C2, dirección) -> (hora del extremo, precio, motivo, estado)
-    for table, state in (("sl_grande", "sin_entrada_sl"), ("invalidos", "invalido"), ("sin_setup", "sin_setup")):    # invalidados, sweeps sin setup y entradas con stop demasiado grande
+    for table, state in (("sl_grande", "sin_entrada_sl"), ("sin_cierre", "sin_cierre"), ("invalidos", "invalido"), ("sin_setup", "sin_setup")):    # invalidados, sweeps sin setup y entradas con stop demasiado grande
         for group in backtest.groups_of("crt"):
             inv = group.raw.get(table) if group.is_crt else None
             if not inv:
