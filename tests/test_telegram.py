@@ -489,3 +489,9 @@ def test_el_aviso_de_setup_pendiente_dice_que_falta_y_hacia_donde_debe_cerrar():
     assert text.split("\n") == ["<b>Estrategia:</b> CRT", "⏳ <b>Setup completo Corto EURUSD</b>", "Solo falta una vela de M15 que cierre por debajo del CISD 1.12442",
                                 "BPR 1.12507–1.12524 (FVG M15 + iFVG M15) · Stop 1.12651", "C2 04/11 05:00 NY · sweep vela C1", "<i>perfil crt</i>"]
     assert "por encima" in messages.pending({**p, "direction": "long"})
+
+def test_aviso_de_un_setup_crt_sin_entrada_por_el_stop_maximo():
+    from tradingbot.skills.telegram import messages
+    text = messages.blocked({"symbol": "NAS100.s", "timeframe": "5m", "direction": "short", "stop": 28857.05,
+                             "text": "Setup OK sin entrada: el stop (334 puntos) supera el máximo permitido (125 puntos)"}, "crt")
+    assert "NO GO" in text and "Corto NAS100.s" in text and "334 puntos" in text and "Stop" in text

@@ -21,7 +21,7 @@ class StatsSkill(Skill):
                    "lo publica para la ventana Forwardtest (acierto, R, drawdown, rachas, libros...). Backtest: carga el "
                    "histórico de los patrones (2018-2026, índices, forex, oro y cripto) y de la estrategia Calendario para la "
                    "ventana Backtest. No opera ni decide nada.")
-    subscribes = ("clock.offset", "cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload")
+    subscribes = ("clock.offset", "cortex.decision", "setup.executed", "setup.closed", "stats.reset", "stats.reload", "crt.blocked")
     publishes = ("stats.session", "stats.backtest")
     slot = "aux3"
 
@@ -62,6 +62,10 @@ class StatsSkill(Skill):
             decision = p["decision"]
             signal = _signal(p)
             if self.counts(signal.ts) and self.stats.decision(decision.allowed, signal):
+                self._save(self.journal.signal, signal)
+        elif event.topic == "crt.blocked":             # CRT: entrada cancelada por el stop máximo = un NO GO («SL») en el diario
+            signal = Signal(False, p["symbol"], p["timeframe"], "CRT", p["direction"], "SL: " + p["text"], p["entry_ts"])
+            if self.counts(signal.ts) and self.stats.decision(False, signal):
                 self._save(self.journal.signal, signal)
         elif event.topic == "setup.executed":
             order = p["order"]
