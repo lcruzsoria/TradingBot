@@ -1034,12 +1034,12 @@ class ChartView(pg.PlotWidget):
         for item in self._bias_items:
             pi.removeItem(item)
         self._bias_items.clear()
-        if not zones or not len(self._ts):
+        if not zones or not len(self.time_axis._ts):
             return
         names = {"fvg": "FVG", "rejection": "Rejection", "ob": "OB"}
         color = "#AB47BC"
         for z in zones:
-            left, right = float(np.searchsorted(self._ts, int(z["candle"]), "left")), float(len(self._ts) + 2)
+            left, right = float(np.searchsorted(self.time_axis._ts, int(z["candle"]), "left")), float(len(self.time_axis._ts) + 2)
             lo, hi = float(z["bottom"]), float(z["top"])
             box = QGraphicsRectItem(QRectF(left, lo, max(right - left, 0.5), max(hi - lo, 1e-9)))
             box.setBrush(_alpha(color, 40))
