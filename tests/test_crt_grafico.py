@@ -296,6 +296,17 @@ def test_el_setup_sin_toque_de_la_zona_se_marca_setup_ok_sin_entrada():
     assert [x for x in engine.find_zone_setups(df, df, 5, cfg)[0].no_entry if ny_2100(x)] == []           # con el toque real no es «sin entrada»
 
 
+def test_el_setup_con_retest_pero_sin_cierre_sobre_el_cisd_se_marca_setup_ok_sin_cierre():
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt.chart import no_entry_marks
+    df = eurusd()
+    bars = df.copy()
+    bars.loc[bars["ts"] >= pd.Timestamp("2026-11-02 22:15").value // 10**9 + AHEAD, ["open", "high", "low", "close"]] = 1.1180      # tras el retest cierra por debajo de la zona: el retest se invalida y nunca cierra sobre el CISD (1.11841)
+    m = [x for x in no_entry_marks(bars, "EURUSD", AHEAD, 5) if x["when"] == "02/11 21:00"]
+    assert len(m) == 1 and m[0]["state"] == "sin_cierre" and m[0]["direction"] == "long" and "pos" not in m[0]
+    assert m[0]["touch"]["when"] == "02/11 22:15" and m[0]["cisd"]["level"] > 0
+
+
 def test_la_etiqueta_y_la_ficha_dicen_los_tf_la_zona_comun_el_retest_y_el_cisd(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from crt_scenarios import eurusd
