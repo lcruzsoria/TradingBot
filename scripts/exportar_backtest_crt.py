@@ -41,6 +41,7 @@ ENTRIES = {1: "A la apertura de la vela siguiente al cierre con cuerpo sobre el 
 # Objetivos: código -> (nombre, regla); BE a +1R en todos (como el bot)
 TARGETS = {1: ("1R", engine.Rule(rr=1.0, be_at=1.0)), 2: ("2R", engine.Rule(rr=2.0, be_at=1.0)), 3: ("3R", engine.Rule(rr=3.0, be_at=1.0))}
 GROUPS = {"indices": ("Índices", ("NAS100.s", "SP500.s", "DJ30.s")), "forex": ("Forex", ("EURUSD", "GBPUSD"))}
+SINCE = {"indices": "2024-01-01", "forex": "2024-02-01"}                                 # el histórico del backtest empieza aquí aunque haya velas anteriores
 SPREAD_BP = {"indices": 1.5, "forex": 0.7}
 MTF_BIT = {15: 1, 5: 2}                                                                 # columna t: TF del FVG normal
 ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
@@ -49,6 +50,7 @@ OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}
 EPOCH = pd.Timestamp("1970-01-01")
 INVALID_REASONS = ["sin pullback a la zona común", "sin CISD tras el toque"]
+SL_REASONS = ["setup OK sin entrada: el stop supera el máximo permitido"]
 NO_ENTRY_REASONS = ["setup OK sin entrada: el precio no volvió a la zona común", "sin BPR (iFVG y FVG de sentido contrario)",
                     "BPR sin retest válido y cierre sobre el CISD", "BPR sin invertirse el iFVG"]
 
@@ -98,14 +100,15 @@ def trade_row(ts: np.ndarray, st: dict, ep: dict, res: dict, kind: str) -> dict:
 
 
 def simulate() -> pd.DataFrame:
-    rows, funnels, data, invalid, valid, noentry = [], [], [], [], [], []
+    rows, funnels, data, invalid, valid, noentry, slbig = [], [], [], [], [], [], []
     for gkey, (gname, symbols) in GROUPS.items():
         kind = "indices" if gkey == "indices" else "forex"
         base = engine.INDICES if kind == "indices" else engine.FOREX
         cfg = engine.Cfg(base.htf_min, base.origin, base.session_end, AHEAD)
         for sym in symbols:
             series = {m: load(m, sym) for m in engine.ZONE_TFS}
-            start = max(int(d["ts"].iloc[0]) for d in series.values())                  # el tramo común a los dos TF
+            start = max(max(int(d["ts"].iloc[0]) for d in series.values()),            # el tramo común a los dos TF, desde la fecha fija del histórico
+                        int(pd.Timestamp(SINCE[kind]).timestamp()) + AHEAD)
             series = {m: d[d["ts"] >= start].reset_index(drop=True) for m, d in series.items()}
             views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
             first15 = engine.m15_retests(series[15], cfg)                                # el BPR de M15 que ya tuvo su retest no se sustituye por uno de M5
@@ -130,6 +133,9 @@ def simulate() -> pd.DataFrame:
                         L = views[ltf][st["sign"]]
                         ep = engine.entry_point(L, st, 1, ltf, rule, cfg)
                         if ep is None:
+                            if code == 2 and engine.sl_blocked(L, st, 1, ltf, rule, cfg) is not None:      # habría entrada, pero el stop supera el máximo
+                                slbig.append({"grupo": gkey, "mercado": sym, "ltf": ltf, "C2": st["C2"], "d": int(st["sign"] > 0), "motivo": SL_REASONS[0],
+                                              "t extremo": int(ts[st["ih"]]), "precio": st["sign"] * st["stop"]})
                             continue
                         res = engine.manage(L, st, ep, rule)
                         if res is None or int(ts[ep["start"]]) < busy:                  # una operación a la vez por mercado y TF
@@ -148,7 +154,7 @@ def simulate() -> pd.DataFrame:
     trades["zona"] = tbr_zone(trades["entrada (NY)"])
     TRADES.parent.mkdir(exist_ok=True)
     pd.to_pickle({"operaciones": trades, "embudo": pd.DataFrame(funnels), "datos": pd.DataFrame(data),
-                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid), "sinsetup": pd.DataFrame(noentry)}, TRADES)
+                  "invalidos": pd.DataFrame(invalid), "validos": pd.DataFrame(valid), "sinsetup": pd.DataFrame(noentry), "slgrande": pd.DataFrame(slbig)}, TRADES)
     print(f"{len(trades)} operaciones -> {TRADES}")
     return trades
 
@@ -207,6 +213,7 @@ def group_json(gkey: str, saved: dict, updated: str) -> dict:
                         "fvg": int(r["con FVG de MTF y de LTF con zona común"]), "toque": int(r["con pullback a la zona"]),
                         "ifvg": int(r["con CISD"]), "e1": int(r["entradas"]), "inv": int(r["invalidados"])}
                        for _, r in funnel.iterrows()],
+        "sl_grande": marks_cols(saved, "slgrande", gkey, markets, SL_REASONS, []),
         "invalidos": marks_cols(saved, "invalidos", gkey, markets, INVALID_REASONS, ["validos"]),
         "sin_setup": marks_cols(saved, "sinsetup", gkey, markets, NO_ENTRY_REASONS, ["validos", "invalidos"]),
         "metodologia": methodology(gkey)}
@@ -242,7 +249,7 @@ def methodology(gkey: str) -> list[list[str]]:
                    "skill (tradingbot/skills/crt/engine.py, find_zone_setups). Las TBR solo sirven para clasificar cada entrada."],
         ["Sweep", f"Una vela {htf} (C2) toma con una mecha el máximo (mínimo) de la anterior (C1); si tomó antes el otro extremo, el sweep es el del otro "
                   "lado. El extremo del sweep es su máximo vigente: uno nuevo reinicia el patrón."],
-        ["Doble FVG", "Dentro de C2 nacen un FVG normal (M15 o M5) y un iFVG (M15 o M5, de TF igual o menor que el del FVG) que se solapan: el hueco que "
+        ["Doble FVG", "Un iFVG (nacido en C1 o en C2; M15 o M5, de TF igual o menor que el del FVG) y un FVG normal de sentido contrario nacido en C2 (M15 o M5) que se solapan: el hueco que "
                       "comparten es la zona común. El primero de los dos en nacer tiene que seguir sin cerrarse del todo (con mecha o cuerpo) hasta que empieza "
                       "a formarse el segundo."],
         ["iFVG e inversión", "El iFVG se invierte cuando una vela cierra al otro lado de su base. CISD = el extremo de la vela de desplazamiento que lo creó."],
@@ -251,7 +258,7 @@ def methodology(gkey: str) -> list[list[str]]:
         ["Entrada", "La primera vela que cierra con cuerpo más allá del CISD tras el pullback da la entrada: a la apertura de la vela siguiente del TF "
                     "del iFVG (el CISD y la entrada son de ese TF). Antes de que cierre C2."],
         ["Objetivos", "Tres backtests: 1R, 2R (el del bot) y 3R, los tres con breakeven al tocar +1R."],
-        ["Gestión", f"Stop en el extremo del sweep, sin límite de tamaño. A las {close} NY no se abren entradas y lo abierto se cierra. Una operación a la "
+        ["Gestión", f"Stop en el extremo del sweep; si la distancia de la entrada al stop supera el máximo (125 puntos en índices, 25 pips en forex) no se entra y se marca «SL grande». A las {close} NY no se abren entradas y lo abierto se cierra. Una operación a la "
                     "vez por mercado y TF del iFVG. Stop y objetivo en la misma vela: cuenta el stop."],
         ["Invalidados", "Si el precio llega al extremo opuesto de C1 sin completar el patrón, no se opera y se marca en el gráfico. El «setup OK sin entrada» "
                         "(zona común e iFVG invertido pero sin pullback) también se marca."],

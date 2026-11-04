@@ -441,3 +441,35 @@ def test_el_stop_maximo_cancela_la_entrada(monkeypatch):
     assert engine.entry_point(view, st, 1, 5, RULE, cfg) is None
     monkeypatch.setattr(engine, "MAX_SL_FOREX", 0.0)                                               # 0 = sin límite
     assert engine.entry_point(view, st, 1, 5, RULE, cfg) is not None
+
+
+def test_el_ifvg_puede_nacer_en_c1_y_el_fvg_en_c2():
+    """NAS100 03/11 (tests/crt_scenarios.py::nas100_noche): el iFVG de M15 (28203.51-28284.65) es de C1 (16:00) y el FVG bajista (28258.16-28338.16) de C2 (18:45): hay BPR.
+    Con el cierre de las 18:30 tal como lo vio otro feed (28186: invierte el iFVG con esa vela) el precio vuelve al BPR a las 19:00; la vela de las 19:15 cierra bajo el CISD
+    pero ya ha llegado al mínimo de C1: invalidado."""
+    from crt_scenarios import nas100_noche
+    from tradingbot.skills.crt.chart import complete_series
+    df, cfg = nas100_noche(), engine.Cfg(180, 18 * 3600, 18 * 3600, AHEAD)
+    series = complete_series({5: df}, cfg)
+    setups, funnel = engine.find_zone_setups(series[15], series[15], 15, cfg, {15: series[15]})
+    assert funnel["con FVG de MTF y de LTF con zona común"] == 1                               # el BPR existe aunque el iFVG naciera antes de C2
+    assert [(ny(x["C2"]), x["motivo"]) for x in setups.invalid] == [("2026-11-03 18:00", "sin pullback a la zona común")]       # el precio no volvió al BPR tras invertirse el iFVG
+    i = df.index[[ny(t) == "2026-11-03 18:40" for t in df["ts"]]][0]
+    df.loc[i, ["close", "low"]] = 28186.0
+    series = complete_series({5: df}, cfg)
+    setups, funnel = engine.find_zone_setups(series[15], series[15], 15, cfg, {15: series[15]})
+    assert funnel["con pullback a la zona"] == 1 and ny(series[15]["ts"][0]) == "2026-11-03 15:00"
+    assert [(ny(x["C2"]), x["motivo"]) for x in setups.invalid] == [("2026-11-03 18:00", "sin CISD tras el toque")]
+
+
+def test_un_setup_con_entrada_cancelada_por_el_stop_lo_dice(monkeypatch):
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    st = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny(x["C2"]) == "2026-11-02 21:00"][0]
+    view = engine.view(df, -1)
+    assert engine.sl_blocked(view, st, 1, 5, RULE, cfg) is None                                   # dentro del límite de 25 pips
+    monkeypatch.setattr(engine, "MAX_SL_FOREX", 8 * 1e-4)
+    assert engine.entry_point(view, st, 1, 5, RULE, cfg) is None
+    assert engine.sl_blocked(view, st, 1, 5, RULE, cfg) == pytest.approx(0.00088)                 # el riesgo que habría tenido
+    from tradingbot.skills.crt.chart import sl_text
+    assert sl_text(0.00088, cfg) == "SL grande 9 > 8" and "9 pips" in sl_text(0.00088, cfg, long=True)

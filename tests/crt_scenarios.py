@@ -106,3 +106,11 @@ def nas100() -> pd.DataFrame:
     from crt_nas100_20261103 import BARS
     rows = [(_server_ts(f"2026-11-{hhmm[:2]} {hhmm[3:]}"), o, h, l, c) for hhmm, o, h, l, c in BARS]
     return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])
+
+
+def nas100_noche() -> pd.DataFrame:
+    """NAS100.s M5 real del 03/11/2026 de las 15:00 a las 21:00 NY (tests/crt_nas100_20261103_noche.py): corto en C2 de las 18:00 (H3) que barre el máximo de C1
+    (28335.55). El iFVG nace en C1 (FVG alcista de M15 28203.51-28284.65, 16:00-16:30) y el FVG bajista de M15 en C2 (28258.16-28338.16, 18:15-18:45): BPR 28258.16-28284.65."""
+    from crt_nas100_20261103_noche import BARS
+    rows = [(_server_ts(f"2026-11-{hhmm[:2]} {hhmm[3:]}"), o, h, l, c) for hhmm, o, h, l, c in BARS]
+    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])

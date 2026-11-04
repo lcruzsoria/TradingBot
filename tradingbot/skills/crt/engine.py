@@ -196,10 +196,10 @@ def find_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, rule: Rule,
 
 
 # -- CRT por zona común: FVG de MTF ∩ iFVG de LTF ---------------------------------------------------------------------------
-# Corto (el largo es el espejo, ver `view`). Todo dentro de C2:
+# Corto (el largo es el espejo, ver `view`):
 #   1. C2 supera el máximo de C1 (sweep). Si C2 tomó antes el mínimo de C1, el sweep es el del otro lado.
-#   2. Durante la subida quedan un FVG alcista «normal» (M15 o M5, `ZONE_TFS`) y un FVG alcista de LTF (el iFVG: M5, M3 o M1), los dos nacidos
-#      dentro de C2, que comparten una zona (se solapan): la zona común. El iFVG tiene que ser de un TF igual o menor que el del FVG (con un FVG de
+#   2. Quedan un FVG bajista «normal» (M15 o M5, `ZONE_TFS`, nacido dentro de C2) y un FVG alcista de LTF (el iFVG: M15 o M5, nacido dentro de C1 o de C2),
+#      que comparten una zona (se solapan): la zona común. El iFVG tiene que ser de un TF igual o menor que el del FVG (con un FVG de
 #      M5 vale M5 o M3, no M15) y no puede ser el mismo hueco. Se busca siempre la combinación del TF mayor posible: si hay varias, manda la del FVG de
 #      mayor TF. El iFVG queda invertido cuando el precio cae y cierra bajo su base.
 #      El primer hueco en nacer es siempre el iFVG, y tiene que seguir activo (sin cerrarse del todo con mecha o cuerpo, ni invertirse) hasta que nace el FVG normal.
@@ -318,7 +318,8 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             if s0 > a and lo_[a:s0].min() < c1l:                                # C2 tomó antes el otro extremo de C1: el sweep es el del otro lado
                 continue
             funnel["velas HTF con sweep"] += 1
-            ks_all = 2 + a + np.flatnonzero(lo_[a + 2:b] > hi_[a:b - 2])        # velas 3 de los FVG alcistas de LTF nacidos dentro de C2
+            a1 = int(np.searchsorted(lts, int(H["ts"][i - 1])))
+            ks_all = 2 + a1 + np.flatnonzero((lo_[a1 + 2:b] > hi_[a1:b - 2]) & (lts[a1 + 2:b] - lts[a1:b - 2] <= 2 * ltf_min * 60))     # velas 3 de los FVG alcistas de LTF (los iFVG) nacidos dentro de C1 o de C2, de tres velas seguidas (sin el corte de la sesión en medio)
             zones = [(m, float(f["bottom"][q]), float(f["top"][q]), int(f["formed"][q])) for m, f in fv.items()
                      for q in np.flatnonzero((f["first"] >= s2) & (f["formed"] <= s2 + cfg.htf_min * 60 + 3600))]
             pairs = []                                                          # (k, zona de MTF, zona común) con zona común no vacía
@@ -437,7 +438,7 @@ def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) 
 
 # -- entradas y gestión --------------------------------------------------------------------------------------------------
 
-def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: Cfg, closed: int | None = None) -> dict | None:
+def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: Cfg, closed: int | None = None, ignore_sl: bool = False) -> dict | None:
     """Dónde y cuándo se entra en un setup (espacio del corto: stop por encima, objetivo por debajo), o None si no hay entrada.
 
     `closed` es el número de velas ya cerradas (por defecto todas): la vela de la entrada puede ser la que aún se forma, pero la
@@ -495,10 +496,18 @@ def entry_point(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: 
     risk = hx - entry
     if risk <= 0:
         return None
-    limit_sl = max_sl(cfg)
+    limit_sl = 0 if ignore_sl else max_sl(cfg)
     if limit_sl and risk > limit_sl + 1e-9:               # el stop es demasiado grande (forex > 25 pips, índices > 125 puntos): la entrada se cancela
         return None
     return {"entry": float(entry), "start": int(start), "fill": fill, "risk": float(risk), "end": int(end)}
+
+
+def sl_blocked(L: dict, st: dict, variant: int, ltf_min: int, rule: Rule, cfg: Cfg, closed: int | None = None) -> float | None:
+    """Si el setup habría dado entrada de no ser por el límite del stop (`max_sl`), el riesgo de esa entrada (distancia al extremo del sweep); si no, None."""
+    if entry_point(L, st, variant, ltf_min, rule, cfg, closed) is not None:
+        return None
+    ep = entry_point(L, st, variant, ltf_min, rule, cfg, closed, ignore_sl=True)
+    return None if ep is None else float(ep["risk"])
 
 
 def planned_rr(st: dict, ep: dict) -> float:

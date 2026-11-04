@@ -76,7 +76,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
             trades.setdefault((int(chosen["c"][i]), int(chosen["d"][i])), []).append(
                 (int(chosen["l"][i]), int(chosen["n"][i]), str(names[i]), int(chosen["t"][i]), detail))
     invalid: dict[tuple, tuple] = {}                           # (inicio de C2, dirección) -> (hora del extremo, precio, motivo, estado)
-    for table, state in (("invalidos", "invalido"), ("sin_setup", "sin_setup")):            # invalidados y sweeps sin setup
+    for table, state in (("sl_grande", "sin_entrada_sl"), ("invalidos", "invalido"), ("sin_setup", "sin_setup")):    # invalidados, sweeps sin setup y entradas con stop demasiado grande
         for group in backtest.groups_of("crt"):
             inv = group.raw.get(table) if group.is_crt else None
             if not inv:
@@ -111,6 +111,7 @@ def crt_marks(backtest, symbol: str, ts, highs, lows, ahead: int, ltf: int = 5, 
                 "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))), "x2": x2,
                 "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
                 "mtf": [], "ltf": None, "entry": None, "htf": htf, "motivo": reason, "start": start, "fvg_all": [], "others": [],
+                **({"result_label": "SL grande"} if state == "sin_entrada_sl" else {}),
                 "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
                 "extreme": {"x": n_ext, "price": price}})
             continue
@@ -206,6 +207,37 @@ def _window(series: dict, first_ts: int) -> dict:
     return {m: d[d["ts"] >= first_ts].reset_index(drop=True) for m, d in series.items()}
 
 
+def _idle_mark(st: dict, lo: int, ts, highs, lows, ahead: int, ltf: int, htf: int, end: int, state: str, motivo: str, **extra) -> dict | None:
+    """La marca de un setup de zona común sin posición (`no_entry` o un setup cuya entrada cancela el límite del stop): C1, C2, C3, el BPR, el CISD y el
+    extremo del sweep. `end`: última vela (de `ts`) hasta la que se dibujan el iFVG, el BPR y el CISD. None si C1 o C2 no están entre las velas."""
+    n = len(ts)
+    sgn, start = st["sign"], int(st["C2"])
+
+    def zone(a: float, b: float) -> tuple[float, float]:
+        return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
+
+    x0 = int(np.searchsorted(ts, start, "left"))
+    x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
+    xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
+    x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
+    if x1 <= x0 or xc1 >= x0 or x0 >= n:
+        return None
+    zb, zt = zone(*st["common"])
+    return {
+        "x0": lo + x0, "x1": lo + x1, "xc1": lo + xc1, "direction": "short" if sgn > 0 else "long", "state": state, "label": "CRT",
+        "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
+        "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
+        "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": None, "htf": htf, "start": start, "others": [], "live": True,
+        "fvg_all": [f"M{z[0]}" for z in st["zones"]], "sweep": st.get("sweep"), "motivo": motivo,
+        "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
+        "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
+        "common": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zb, "top": zt},
+        "cisd": {"x0": lo + st["cisd"][0], "x1": lo + end, "level": sgn * st["cisd"][1], "label": "CISD"},
+        "extreme": {"x": lo + st["ih"], "price": sgn * st["stop"]},
+        "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")) + lo, "x1": lo + end,
+                  "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]], **extra}
+
+
 def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US_INDICES, fvg_series: dict | None = None, hist=None) -> list[dict]:
     """Marcas de los CRT de las últimas velas que dejaron la zona común (FVG de MTF ∩ iFVG de LTF) sin que el precio la tocara: «Setup OK sin
     Entrada». Se dibujan el FVG, el iFVG, la zona común y el CISD, sin posición."""
@@ -223,33 +255,19 @@ def no_entry_marks(df, symbol: str, ahead: int, ltf: int = 5, indices=DEFAULT_US
     for st in engine.find_zone_setups(sub, sub, ltf, cfg, fvg, hist)[0].no_entry:
         if (st["C2"], st["sign"]) in first15:
             continue
-        sgn, start = st["sign"], int(st["C2"])
-
-        def zone(a: float, b: float) -> tuple[float, float]:
-            return min(sgn * a, sgn * b), max(sgn * a, sgn * b)
-
-        x0 = int(np.searchsorted(ts, start, "left"))
-        x1 = int(np.searchsorted(ts, start + htf * 60, "left"))
-        xc1 = int(np.searchsorted(ts, start - htf * 60, "left"))
-        x2 = int(np.searchsorted(ts, start + 2 * htf * 60, "left"))
-        if x1 <= x0 or xc1 >= x0 or x0 >= n:
-            continue
-        end = min(int(st["end"]), n - 1)
-        zb, zt = zone(*st["common"])
-        out.append({
-            "x0": lo + x0, "x1": lo + x1, "xc1": lo + xc1, "direction": "short" if sgn > 0 else "long", "state": "sin_entrada", "label": "CRT",
-            "c1": (float(np.min(lows[xc1:x0])), float(np.max(highs[xc1:x0]))), "c2": (float(np.min(lows[x0:x1])), float(np.max(highs[x0:x1]))),
-            "x2": lo + x2, "c3": (float(np.min(lows[x1:x2])), float(np.max(highs[x1:x2]))) if x2 > x1 else None,
-            "mtf": [f"M{z[0]}" for z in st["zones"]], "ltf": ltf, "entry": None, "htf": htf, "start": start, "others": [], "live": True,
-            "fvg_all": [f"M{z[0]}" for z in st["zones"]], "sweep": st.get("sweep"), "motivo": "Setup OK sin Entrada: el precio siguió sin tocar la zona común",
-            "when": datetime.fromtimestamp(start - ahead, timezone.utc).strftime("%d/%m %H:%M"),
-            "ifvg": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zone(*st["ifvg"])[0], "top": zone(*st["ifvg"])[1]},
-            "common": {"x0": lo + st["kf"] - 2, "x1": lo + end, "bottom": zb, "top": zt},
-            "cisd": {"x0": lo + st["cisd"][0], "x1": lo + end, "level": sgn * st["cisd"][1], "label": "CISD"},
-            "extreme": {"x": lo + st["ih"], "price": sgn * st["stop"]},
-            "fvgs": [{"tf": m, "name": f"M{m}", "x0": int(np.searchsorted(ts, formed - 3 * m * 60, "left")) + lo, "x1": lo + end,
-                      "bottom": zone(b, t)[0], "top": zone(b, t)[1]} for m, b, t, formed in st["zones"]]})
+        mark = _idle_mark(st, lo, ts, highs, lows, ahead, ltf, htf, min(int(st["end"]), n - 1), "sin_entrada",
+                          "Setup OK sin Entrada: el precio siguió sin tocar la zona común")
+        if mark:
+            out.append(mark)
     return out
+
+
+def sl_text(risk: float, cfg, long: bool = False) -> str:
+    """El stop de la entrada y el máximo permitido, para la etiqueta («SL 255 > 125 pts») o, con `long`, para el motivo de la ficha."""
+    unit, name = (1e-4, "pips") if cfg.htf_min == 240 else (1.0, "puntos")
+    risk, limit = risk / unit, engine.max_sl(cfg) / unit
+    return (f"Setup OK sin entrada: el stop ({risk:.0f} {name}) supera el máximo permitido ({limit:.0f} {name})" if long
+            else f"SL grande {risk:.0f} > {limit:.0f}")
 
 
 HOW_STATES = {"objetivo": "objetivo", "stop": "stop", "BE": "be", "sesión": "tiempo"}      # cómo acaba `engine.manage` -> estado del gráfico
@@ -279,6 +297,12 @@ def signal_marks(df, symbol: str, ahead: int, ltf: int = 5, entry: int = 1, rr: 
         L = views[st["sign"]]
         ep = engine.entry_point(L, st, entry, ltf, rule, cfg, closed_bars)
         if ep is None:
+            risk = engine.sl_blocked(L, st, entry, ltf, rule, cfg, closed_bars)
+            if risk is not None:                                         # habría entrada, pero el stop supera el máximo: se marca con el motivo en la etiqueta
+                mark = _idle_mark(st, lo, ts, highs, lows, ahead, ltf, htf, int(st["jc"]), "sin_entrada_sl", sl_text(risk, cfg, long=True),
+                                  result_label=sl_text(risk, cfg))
+                if mark:
+                    out.append(mark)
             continue
         res = engine.manage(L, st, ep, rule)
         if res is None:
