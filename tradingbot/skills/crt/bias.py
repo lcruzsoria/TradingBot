@@ -8,7 +8,8 @@ cuanto una regla se cumple en un TF, ese TF le da su **punto** y no se mira en l
      (largo: del mínimo al borde inferior del cuerpo del swing low).
   3. Order block (OB): la última vela contraria antes de un impulso que deja un FVG (largo: la vela bajista, la alcista siguiente y un FVG alcista entre el
      máximo de la bajista y el mínimo de la vela posterior; sin FVG no hay OB). La zona es el rango completo de la vela.
-«Dentro» = la zona común del CRT (FVG ∩ iFVG) se solapa con la zona HTF. Desactivado (`CRT_BIAS_ENABLED=false`) el sesgo es 0 y el setup es siempre GO; encendido
+«Dentro» = la zona común del CRT (BPR) se solapa con la zona HTF, que tiene que estar a favor (largo: FVG alcista, soporte) y sin mitigar
+(ninguna vela volvió a entrar en ella entre su creación y la C2). Desactivado (`CRT_BIAS_ENABLED=false`) el sesgo es 0 y el setup es siempre GO; encendido
 pero sin `CRT_BIAS_ENFORCE` se calcula y se enseña en la tarjeta y la orden, y no anula ningún trade.
 """
 from __future__ import annotations
@@ -68,10 +69,11 @@ def htf_candles(df: pd.DataFrame, minutes: int, cfg: engine.Cfg) -> pd.DataFrame
     return engine.aggregate(df, minutes, cfg, origin)
 
 
-def zones(df: pd.DataFrame, direction: str, cfg: engine.Cfg, tfs=("1h", "4h", "1d"), swing_width: int = 1, min_wick: float = 0.5) -> list[dict]:
+def zones(df: pd.DataFrame, direction: str, cfg: engine.Cfg, tfs=("1h", "4h", "1d"), swing_width: int = 1, min_wick: float = 0.5, horizon_days: float = 10.0) -> list[dict]:
     """Zonas de reversión de las velas de `df` a favor de `direction` ("long": soporte; "short": resistencia), con su hora de creación (cierre de la
     vela que la completa): {rule, tf, bottom, top, created, candle}. `swing_width`: velas a cada lado de un swing; `min_wick`: fracción mínima del tamaño
-    de la vela que tiene que ocupar la mecha de un rejection block."""
+    de la vela que tiene que ocupar la mecha de un rejection block. Cada zona lleva `dead`: la hora de la primera vela de `df` que la mitiga (el precio entra en ella
+    después de crearse: largo, un mínimo por debajo de su techo; corto, un máximo por encima de su base) en los `horizon_days` siguientes, o None."""
     long = direction == "long"
     out = []
     for name in tfs:
@@ -106,6 +108,12 @@ def zones(df: pd.DataFrame, direction: str, cfg: engine.Cfg, tfs=("1h", "4h", "1
                 out.append({"rule": "ob", "tf": name, "bottom": float(l[j]), "top": float(h[j]), "created": int(ts[j + 2]) + step, "candle": int(ts[j])})
             elif not long and cl[j] > o[j] and cl[j + 1] < o[j + 1] and l[j] > h[j + 2]:
                 out.append({"rule": "ob", "tf": name, "bottom": float(l[j]), "top": float(h[j]), "created": int(ts[j + 2]) + step, "candle": int(ts[j])})
+    dts, dlow, dhigh = (df[k].to_numpy() for k in ("ts", "low", "high"))
+    dts = dts.astype(np.int64)
+    for z in out:                                                                           # una zona mitigada (el precio ya volvió a entrar en ella) ya no vale
+        a, b = np.searchsorted(dts, [z["created"], z["created"] + int(horizon_days * 86400)])
+        hit = np.flatnonzero(dlow[a:b] <= z["top"]) if long else np.flatnonzero(dhigh[a:b] >= z["bottom"])
+        z["dead"] = int(dts[a + hit[0]]) if len(hit) else None
     return out
 
 
@@ -167,7 +175,7 @@ class SetupBias:
 def zone_cache(df: pd.DataFrame, cfg: engine.Cfg, bias_cfg: CrtBiasCfg) -> dict:
     """Las zonas HTF de todo el histórico de `df`, por (dirección, TF), para evaluar muchos setups sin recalcularlas (backtest): una zona solo usa velas
     cerradas hasta su hora de creación, así que filtrarlas por `created` da lo mismo que calcularlas con el histórico anterior a cada setup."""
-    return {(d, tf): zones(df, d, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100) for d in ("long", "short") for tf in bias_cfg.tfs}
+    return {(d, tf): zones(df, d, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100, bias_cfg.lookback_days) for d in ("long", "short") for tf in bias_cfg.tfs}
 
 
 def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[float, float], cfg: engine.Cfg, bias_cfg: CrtBiasCfg,
@@ -186,9 +194,10 @@ def evaluate(df: pd.DataFrame, direction: str, c2_start: int, common: tuple[floa
     for tf in sorted(bias_cfg.tfs, key=lambda t: TF_MINUTES[t], reverse=True):               # del mayor al menor
         if not pending:
             break                                                                              # todas las reglas ya tienen su punto
-        every = cache[(direction, tf)] if cache is not None else zones(history, direction, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100)
+        every = cache[(direction, tf)] if cache is not None else zones(history, direction, cfg, (tf,), bias_cfg.swing_width, bias_cfg.rb_min_wick_pct / 100, bias_cfg.lookback_days)
         ok = [z for z in every
-              if z["rule"] in pending and first <= z["created"] <= c2_start and z["bottom"] <= hi and z["top"] >= lo]
+              if z["rule"] in pending and first <= z["created"] <= c2_start and z["bottom"] <= hi and z["top"] >= lo
+              and (z.get("dead") is None or z["dead"] >= c2_start)]                                  # sin mitigar antes de la C2
         for key in list(pending):
             hits = sorted((z for z in ok if z["rule"] == key), key=lambda z: z["created"])
             if hits:

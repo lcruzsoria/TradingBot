@@ -77,16 +77,27 @@ def test_order_block_es_la_ultima_vela_contraria_antes_del_impulso():
 
 
 def test_cada_zona_cuenta_un_punto_y_la_zona_comun_tiene_que_solaparse():
+    on = bias.CrtBiasCfg(True, True, 10, 1, ("1h",))
+    for bars, rule in ((FLAT + FVG + FLAT, "fvg"), (FLAT + RB + FLAT, "rejection"), (FLAT + OB + FLAT, "ob")):      # cada zona, sin que otra la mitigue
+        solo = bias.evaluate(hourly(bars), "long", c2_at(len(bars) + 1), (101.8, 103.0), CFG, on, AHEAD)             # solapa con la zona
+        assert solo.score == 1 and solo.counts()[rule] == 1 and solo.go and solo.result().bias is Bias.BULLISH
     df = hourly(FLAT + FVG + FLAT + RB + FLAT + OB + FLAT)
     c2 = c2_at(len(df) + 1)
-    on = bias.CrtBiasCfg(True, True, 10, 1, ("1h",))
-    got = bias.evaluate(df, "long", c2, (101.8, 103.0), CFG, on, AHEAD)                           # solapa con el FVG, el rejection block (99-105.2) y el OB
-    assert got.enabled and got.score == len(got.zones) and sorted(got.counts().items()) == [("fvg", 1), ("ob", 1), ("rejection", 1)]
-    assert got.go and got.result().bias is Bias.BULLISH and got.result().score == 3
     lejos = bias.evaluate(df, "long", c2, (130, 131), CFG, on, AHEAD)                             # el CRT no se forma dentro de ninguna
     assert lejos.score == 0 and not lejos.go and lejos.result().bias is Bias.NO_BIAS
     corto = bias.evaluate(df, "short", c2, (101.8, 103.0), CFG, on, AHEAD)                        # son soportes: para un corto no cuentan
     assert corto.counts()["rejection"] == 0 and corto.counts()["ob"] == 0                           # el rejection block y el OB de este caso son soportes
+
+
+def test_una_zona_mitigada_antes_de_la_c2_ya_no_cuenta():
+    on = bias.CrtBiasCfg(True, True, 10, 1, ("1h",))
+    limpio = hourly(FLAT + FVG + FLAT)
+    assert bias.evaluate(limpio, "long", c2_at(len(limpio) + 1), (102, 104), CFG, on, AHEAD).score == 1
+    tocada = hourly(FLAT + FVG + FLAT + [(108, 109, 103.5, 107)] + FLAT)                          # una vela vuelve a entrar en el FVG (mínimo 103.5 < techo 104)
+    assert all(z["dead"] is not None for z in bias.zones(tocada, "long", CFG, ("1h",)) if z["rule"] == "fvg")
+    assert bias.evaluate(tocada, "long", c2_at(len(tocada) + 1), (102, 104), CFG, on, AHEAD).counts()["fvg"] == 0
+    # la mitigación de la propia C2 (su mecha entra en la zona) no la anula
+    assert bias.evaluate(tocada, "long", c2_at(len(FLAT + FVG + FLAT)), (102, 104), CFG, on, AHEAD).counts()["fvg"] == 1
 
 
 def test_las_zonas_de_mas_de_10_dias_no_valen_y_el_limite_se_configura():
@@ -183,7 +194,7 @@ def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monke
     zona = lambda rule, tf, created: {"rule": rule, "tf": tf, "bottom": 101.0, "top": 105.0, "created": created, "candle": created}      # noqa: E731
     c2 = c2_at(300)
 
-    def falsas(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5):
+    def falsas(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5, horizon_days=10.0):
         llamadas.append(tfs[0])
         return {"1d": [zona("fvg", "1d", c2 - 5 * 86400)],
                 "4h": [zona("fvg", "4h", c2 - 3 * 86400), zona("ob", "4h", c2 - 2 * 86400)],
@@ -200,7 +211,7 @@ def test_se_valida_por_regla_de_mayor_a_menor_tf_y_el_tf_mayor_da_el_punto(monke
     assert llamadas == ["1d", "4h"] and sorted((z["rule"], z["tf"]) for z in solo.zones) == [("fvg", "1d"), ("ob", "4h")]
     llamadas.clear()
 
-    def todo_en_1d(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5):
+    def todo_en_1d(df, direction, cfg, tfs=("1h", "4h", "1d"), swing_width=1, min_wick=0.5, horizon_days=10.0):
         llamadas.append(tfs[0])
         return [zona(r, "1d", c2 - 86400) for r in ("fvg", "rejection", "ob")] if tfs[0] == "1d" else []
 
