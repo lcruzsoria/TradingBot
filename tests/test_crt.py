@@ -473,3 +473,19 @@ def test_un_setup_con_entrada_cancelada_por_el_stop_lo_dice(monkeypatch):
     assert engine.sl_blocked(view, st, 1, 5, RULE, cfg) == pytest.approx(0.00088)                 # el riesgo que habría tenido
     from tradingbot.skills.crt.chart import sl_text
     assert sl_text(0.00088, cfg) == "SL grande 9 > 8" and "9 pips" in sl_text(0.00088, cfg, long=True)
+
+
+def test_con_el_retest_hecho_y_sin_cierre_sobre_el_cisd_el_setup_esta_pendiente_solo_de_ese_cierre():
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    cut = df[df["ts"] < pd.Timestamp("2026-11-02 22:25").value // 10**9 + AHEAD].reset_index(drop=True)      # retest a las 22:15, el cierre sobre el CISD es a las 22:30
+    setups = engine.find_zone_setups(cut, cut, 5, cfg)[0]
+    assert [x for x in setups if ny(x["C2"]) == "2026-11-02 21:00"] == []                # aún no hay setup con entrada
+    w = [x for x in setups.waiting if ny(x["C2"]) == "2026-11-02 21:00"]
+    assert len(w) == 1 and w[0]["dirección"] == "long" and w[0]["mtf"] == "M5"
+    assert -w[0]["level"] == pytest.approx(1.11849) and -w[0]["stop"] == pytest.approx(1.1177)      # el CISD y el stop del setup que luego se completa
+    assert ny(w[0]["t_touch"]) == "2026-11-02 22:15"
+    full = engine.find_zone_setups(df, df, 5, cfg)[0]
+    assert [x for x in full.waiting if ny(x["C2"]) == "2026-11-02 21:00"] == []          # con el cierre ya hecho deja de estar pendiente
+    before = df[df["ts"] < pd.Timestamp("2026-11-02 22:10").value // 10**9 + AHEAD].reset_index(drop=True)
+    assert [x for x in engine.find_zone_setups(before, before, 5, cfg)[0].waiting if ny(x["C2"]) == "2026-11-02 21:00"] == []   # sin retest tampoco

@@ -103,6 +103,7 @@ class Setups(list):
         super().__init__(*args)
         self.invalid: list[dict] = []
         self.nosetup: list[dict] = []                    # sweeps cuyo patrón no se completó ni se invalidó (la vela C2 acabó antes)
+        self.waiting: list[dict] = []                    # setups completos (BPR, iFVG invertido y retest) a los que solo les falta que una vela cierre más allá del CISD, con C2 en curso
         self.no_entry: list[dict] = []                   # «Setup OK sin entrada»: la zona común existe pero el precio siguió sin tocarla
         self.contacts: list[tuple] = []                  # (C2, sign, nivel del BPR, hora) del primer contacto con un BPR de cada nivel (0: FVG e iFVG de M15, 1: los dos de M5, 2: FVG de M15 e iFVG de M5)
 
@@ -390,6 +391,14 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                 if hits:
                     setups.contacts.append((s2, sign, lv, int(lts[min(hits)])))
             funnel["con pullback a la zona"] += seen_touch
+            if not trig and not invalidated and b >= len(lts) and lts[-1] + ltf_min * 60 < s2 + cfg.htf_min * 60:   # C2 sigue en curso: ¿solo falta el cierre más allá del CISD?
+                wait = [p for p in pairs if pid(p) in touched and pid(p) not in dead
+                        and not any(lvl(q) < lvl(p) and contact.get(pid(q), b) < b for q in pairs)]                # (mismo criterio de nivel que el cierre válido)
+                if wait:
+                    k, z, common = max(wait, key=lambda p: (-p[1][0], p[0], p[1][3]))
+                    setups.waiting.append({"sign": sign, "dirección": name, "C2": s2, "ltf": ltf_min, "mtf": f"M{z[0]}", "stop": hx, "level": cisd_of(k)[1],
+                                           "z_bottom": common[0], "z_top": common[1], "t_touch": int(lts[touched[(k, z[3], z[0])]]), "c1": (c1l, c1h),
+                                           "sweep": swept_name})
             if trig:
                 funnel["con CISD"] += 1
                 setups.append(trig)
@@ -418,7 +427,7 @@ def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) 
     la inversión, el retest, el CISD, el cierre sobre el CISD y la entrada (a la apertura de la vela siguiente de ese TF). Si el BPR de M15 de una C2 ya tuvo su
     retest, los setups de M5 de esa C2 y lado posteriores a él se descartan. Cada setup lleva `ltf` (TF del iFVG) y sus índices son de las velas de ese TF.
     Salen en orden de la hora de su cierre sobre el CISD."""
-    out, funnel, first15 = [], {}, {}
+    out, funnel, first15 = Setups(), {}, {}
     for i in sorted((t for t in series if t in ZONE_TFS), reverse=True):                    # primero M15: si su BPR ya tuvo el retest, no se sustituye por uno de M5
         fvg = {m: v for m, v in series.items() if m >= i and m in ZONE_TFS}
         setups, f = find_zone_setups(series[i], series[i], i, cfg, fvg, hist)
@@ -430,6 +439,7 @@ def find_multi_setups(series: dict, cfg: Cfg, hist: pd.DataFrame | None = None) 
             st["t_cisd"] = int(series[i]["ts"].iloc[st["jc"]])
             if i == 15 or st["t_cisd"] < first15.get((st["C2"], st["sign"]), st["t_cisd"] + 1):
                 out.append(st)
+        out.waiting += [w for w in setups.waiting if i == 15 or w["t_touch"] < first15.get((w["C2"], w["sign"]), w["t_touch"] + 1)]
         for k, v in f.items():
             funnel[k] = funnel.get(k, 0) + v
     out.sort(key=lambda st: (st["t_cisd"], -st["ltf"]))

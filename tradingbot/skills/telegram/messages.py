@@ -54,6 +54,16 @@ def opened(order, profile: str | None = None) -> str:
             f"Sesgo {_bias_text(order.bias, order.score, order.lateral, order.efficiency)}{_footer(profile)}")
 
 
+def pending(p: dict, profile: str | None = None) -> str:
+    """Aviso de CRT: el BPR, el iFVG invertido y el retest ya están y solo falta una vela del TF menor que cierre con cuerpo más allá del CISD."""
+    short = p["direction"] == "short"
+    zone = p["zone"]
+    return (f"{_strategy('CRT')}⏳ <b>Setup completo {SIDE.get(p['direction'], p['direction'])} {_e(p['symbol'])}</b>\n"
+            f"Solo falta una vela de M{p['ltf']} que cierre {'por debajo' if short else 'por encima'} del CISD {fmt_price(p['level'])}\n"
+            f"BPR {fmt_price(zone[0])}–{fmt_price(zone[1])} (FVG {_e(p['mtf'])} + iFVG M{p['ltf']}) · Stop {fmt_price(p['stop'])}\n"
+            f"C2 {_e(p['c2'])} NY · sweep {_e(p['sweep'])}{_footer(profile)}")
+
+
 def closed(order, result, profile: str | None = None) -> str:
     icon, short = RESULT.get(result.result, ("•", result.result))
     peak = f" · máx. {result.max_r:+.2f} R" if result.max_r is not None else ""

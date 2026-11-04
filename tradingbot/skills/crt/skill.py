@@ -48,13 +48,14 @@ class CrtSkill(Skill):
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
                    "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
-    publishes = ("crt.signal", "bias.updated", "bias.history")
+    publishes = ("crt.signal", "crt.pending", "bias.updated", "bias.history")
     slot = "aux2"
 
     def on_start(self) -> None:
         self.error = "Configuración CRT no válida"
         self._offset: int | None = None
         self._seen: set = set()
+        self._pending_seen: set = set()                  # (símbolo, C2, lado, CISD) de los avisos «setup completo, falta cerrar más allá del CISD» ya dados
         self._extra: dict[tuple, tuple] = {}             # (símbolo, TF) -> (última vela del perfil, velas que se pidieron a MT5)
         self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
         self._hist_key: dict[str, tuple] = {}            # símbolo -> clave del último histograma publicado
@@ -231,6 +232,19 @@ class CrtSkill(Skill):
             series[m] = extra
         return engine_complete(series, cfg)
 
+    def _announce_pending(self, symbol: str, tf: str, waiting: list, ahead: int) -> None:
+        """Avisa (una vez por setup) de que el BPR, el iFVG invertido y el retest ya están y solo falta que una vela del TF menor cierre con cuerpo más allá del CISD."""
+        for w in waiting:
+            sign = w["sign"]
+            key = (symbol, int(w["C2"]), sign, round(float(w["level"]), 6))
+            if key in self._pending_seen:
+                continue
+            self._pending_seen.add(key)
+            c2 = datetime.fromtimestamp(int(w["C2"]) - ahead, timezone.utc)
+            self.publish("crt.pending", {"symbol": symbol, "timeframe": tf, "direction": w["dirección"], "level": sign * float(w["level"]),
+                                         "zone": tuple(sorted((sign * float(w["z_bottom"]), sign * float(w["z_top"])))), "stop": sign * float(w["stop"]),
+                                         "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}"})
+
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15 y 5 min, TF del FVG >= TF del iFVG). Cada
         combinación se mira con las velas del TF de su iFVG (el CISD y la entrada son de ese TF). La última vela puede estar formándose: los setups se buscan solo
@@ -246,6 +260,7 @@ class CrtSkill(Skill):
         ts = {m: d["ts"].to_numpy().astype(np.int64) for m, d in series.items()}
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
+        self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead)
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):
             m = st["ltf"]
