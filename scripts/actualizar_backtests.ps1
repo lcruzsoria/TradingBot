@@ -1,7 +1,7 @@
 # Regenera los backtests de todos los perfiles y reescribe el fichero de la ventana Backtest.
-#   .\scripts\actualizar_backtests.ps1            -> TBR (puprime y metaquotes) + Calendario + CRT-C2, y commit en main
+#   .\scripts\actualizar_backtests.ps1            -> TBR (puprime y metaquotes) + Calendario + CRT, y commit en main
 #   .\scripts\actualizar_backtests.ps1 -SinCommit -> igual, sin el commit
-#   .\scripts\actualizar_backtests.ps1 -Solo crt  -> solo CRT-C2 (también: tbr)
+#   .\scripts\actualizar_backtests.ps1 -Solo crt  -> solo CRT (también: tbr)
 # Lo lanza cada día la tarea programada de las 18:00 NY. Regenera todo desde el histórico de MT5 (los resultados de los días ya
 # cerrados no cambian), así que el fichero queda al día hasta la última vela descargada. Tarda más de una hora; el log va a
 # analisis/actualizar_backtests.log.
@@ -62,8 +62,8 @@ if ($Solo -in "todo", "tbr") {
 }
 
 if ($Solo -in "todo", "crt") {
-    Paso "CRT-C2: descargar velas M5 y M3" { uv run python scripts/exportar_backtest_crt.py --descargar } | Out-Null
-    Paso "CRT-C2: simular y exportar" { uv run python scripts/exportar_backtest_crt.py --simular --cuartos 0 --sin-sesgo } | Out-Null
+    Paso "CRT: descargar velas M5 y M3" { uv run python scripts/exportar_backtest_crt.py --descargar } | Out-Null
+    Paso "CRT: simular y exportar" { uv run python scripts/exportar_backtest_crt.py --simular } | Out-Null
 }
 
 if ($Fallos.Count -gt 0) {
