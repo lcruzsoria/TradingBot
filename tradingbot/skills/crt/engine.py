@@ -329,6 +329,16 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     f_mid = int(np.searchsorted(lts, formed - 2 * m * 60))      # vela de desplazamiento del FVG (la central): ahí puede cerrarse y a la vez invertirse el iFVG
                     if k + 1 < f_mid and lo_[k + 1:f_mid].min() <= hi_[k - 2]:   # el iFVG tiene que seguir activo (sin cerrarse del todo, con mecha o cuerpo) hasta que nace el FVG
                         continue
+                    f_end = int(np.searchsorted(lts, formed - m * 60))            # fin de la vela de desplazamiento del FVG (la central)
+                    wick = False
+                    for q in range(max(f_mid, k + 1), f_end):                   # desde la vela de desplazamiento del FVG hasta que nace: puede cerrar y invertir el iFVG, pero no mitigarlo solo con mecha
+                        if cl_[q] < hi_[k - 2]:
+                            break
+                        if lo_[q] <= hi_[k - 2]:
+                            wick = True
+                            break
+                    if wick:
+                        continue
                     cb, ct = max(float(hi_[k - 2]), zb), min(float(lo_[k]), zt)
                     if cb < ct and cisd_of(k)[1] < cb:                          # BPR (zona común) no vacío y con el CISD más allá de él (largo: un máximo por encima del BPR)
                         pairs.append((int(k), (m, zb, zt, formed), (cb, ct)))
