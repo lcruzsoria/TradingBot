@@ -44,7 +44,7 @@ def test_horarios_y_zonas_por_defecto():
     zones = zones_from_settings(EnvConfig())
     assert [(z.name, z.hours) for z in zones] == [("Asia", "20:00-00:00"), ("London", "02:00-05:00"),
                                                    ("NY Open", "10:00-12:00")]         # solo tres zonas por defecto
-    # Pre-NY (RHT) y NY-PM siguen definidas en tradingbot.env: se recuperan añadiéndolas a TBR_ZONES
+    # RTH y NY-PM siguen definidas en tradingbot.env: se recuperan añadiéndolas a TBR_ZONES
     env = EnvConfig(parse("TBR_ZONES=ASIA, LONDON, PRE_NY, NY_AM, NY_PM\nTBR_PRE_NY_NAME=Pre-NY\nTBR_PRE_NY_HOURS=09:00-10:00\n"
                           "TBR_PRE_NY_COLOR=#9E9E9E\nTBR_NY_PM_NAME=NY-PM\nTBR_NY_PM_HOURS=13:30-16:30\nTBR_NY_PM_COLOR=#A64DFF\n"))
     assert [z.name for z in zones_from_settings(env.section("TBR"))] == ["Asia", "London", "Pre-NY", "NY Open", "NY-PM"]

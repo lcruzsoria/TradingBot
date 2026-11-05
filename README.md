@@ -153,7 +153,7 @@ sigan viendo las velas:
 | London | 02:00 - 05:00 | rojo |
 | NY Open | 10:00 - 12:00 | verde |
 
-Las zonas Pre-NY (RHT, 09:00 - 10:00, gris) y NY-PM (13:30 - 16:30, morado) se han quitado por ahora para simplificar la
+Las zonas RTH (09:00 - 10:00, gris) y NY-PM (13:30 - 16:30, morado) se han quitado por ahora para simplificar la
 estrategia; siguen definidas en `tradingbot.env` y se recuperan añadiendo `PRE_NY` / `NY_PM` a `TBR_ZONES`.
 
 Para cada zona ya terminada dibuja tres niveles con su color: **High** y **Low** (línea continua) y **50 %** (punteada).

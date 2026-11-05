@@ -32,7 +32,7 @@ DEFAULT_ZONES = (        # zonas de trabajo: clave, nombre, horario NY, color
     ("NY_AM", "NY Open", "10:00-12:00", "#00C853"),
 )
 KNOWN_ZONES = DEFAULT_ZONES + (   # definidas pero no activas por defecto (la skill Pattern usa NY_PM como límite de NY Open)
-    ("PRE_NY", "Pre-NY", "09:00-10:00", "#9E9E9E"),
+    ("PRE_NY", "RTH", "09:00-10:00", "#9E9E9E"),
     ("NY_PM", "NY-PM", "13:30-16:30", "#A64DFF"),
 )
 
