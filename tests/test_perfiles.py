@@ -732,14 +732,14 @@ def test_barrido_pdh_entrada_en_el_primer_cierre_de_vuelta_y_objetivo_en_el_otro
     # 20:00 barre el PDH (100) y cierra encima; 20:05 cierra de vuelta en 99: corto, swing 104, stop fijo 129 y objetivo en el Low de Asia
     hits, figs = analizar(_pdh_ctx([(96, 103, 95, 102), (102, 104, 98, 99)]))
     assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 25)]
-    assert hits[0].price == 99 and hits[0].levels == {"stop": 129.0, "target": 80.0}
+    assert hits[0].price == 99 and hits[0].levels == {"stop": 129.0, "target": 80.0, "solo_tiempo": 1.0}      # sin objetivo: el Low de Asia solo es la referencia
     assert figs == [] or figs[0].levels["entrada_ts"] == float(18 * 3600 + 300 * 25)        # sin velas posteriores no hay dibujo de posición
     # la propia vela del barrido cierra por debajo del nivel (mecha): es la entrada
     hits, _ = analizar(_pdh_ctx([(96, 103, 95, 98), (98, 99, 96, 97)]))
     assert [(h.direction, h.x, h.price) for h in hits] == [("short", 24, 98.0)]
     # PDL: barrido por debajo (mínimo 85) y cierre de vuelta en 91: largo, stop fijo 61 y objetivo en el High de Asia
     hits, _ = analizar(_pdh_ctx([(92, 93, 85, 87), (87, 91, 86, 91)]))
-    assert [(h.direction, h.x) for h in hits] == [("long", 25)] and hits[0].levels == {"stop": 61.0, "target": 104.0}
+    assert [(h.direction, h.x) for h in hits] == [("long", 25)] and hits[0].levels == {"stop": 61.0, "target": 104.0, "solo_tiempo": 1.0}
     # swing a más de 30 puntos de la entrada: el stop es el swing + 5
     hits, _ = analizar(_pdh_ctx([(96, 150, 95, 102), (102, 104, 98, 99)], asia=(150.0, 80.0)))
     assert hits[0].levels["stop"] == 155.0
@@ -806,7 +806,7 @@ def test_barrido_pdh_de_londres_mismas_reglas_con_objetivo_en_londres_y_salida_a
     from tradingbot.skills.barrido.londres import Ajustes, KEY, analizar
     hits, _ = analizar(_londres_ctx([(96, 103, 95, 102), (102, 104, 98, 99)]))
     assert [(h.key, h.direction, h.x, h.price) for h in hits] == [(KEY, "short", 97, 99.0)]       # 02:00 barre, 02:05 cierra de vuelta
-    assert hits[0].levels == {"stop": 129.0, "target": 80.0, "cierre": float(86400 + 5 * 3600)}    # objetivo: el Low de Londres; salida forzosa a las 05:00
+    assert hits[0].levels == {"stop": 129.0, "target": 80.0, "solo_tiempo": 1.0, "cierre": float(86400 + 5 * 3600)}    # sin objetivo; salida por tiempo a las 05:00
     assert analizar(_londres_ctx([(96, 103, 95, 102), (102, 105, 99, 103)]))[0] == []              # no vuelve a cerrar por debajo
     tarde = [(95, 97, 94, 96)] * 11 + [(96, 103, 95, 102), (102, 104, 98, 99)]                     # cierra de vuelta a las 03:00 (vela 108): tarde
     assert analizar(_londres_ctx(tarde))[0] == []

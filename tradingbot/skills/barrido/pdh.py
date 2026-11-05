@@ -12,8 +12,9 @@ Reglas (velas de `BARRIDO_PDH_TF`, M5 al inicio):
    vela de 5 min debe cerrar a las 21:00 como tarde. Si no cierra de vuelta dentro de la ventana, no hay setup.
 5. Stop: fijo, a `BARRIDO_PDH_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing (el extremo desde el barrido hasta la
    entrada); si no, el swing más `BARRIDO_PDH_STOP_BUFFER` (5) puntos.
-6. Objetivo: el Low (High) del rango de Asia. Como ese rango no está formado a la hora de la entrada, la señal se da cuando Asia cierra
-   (00:00 NY) con la entrada ya fijada en la vela del barrido; la posición se simula desde esa vela. Sin breakeven.
+6. Sin objetivo: la posición sale por TIEMPO, al precio de mercado cuando cierra el rango de Asia (00:00 NY), o antes en el stop; el riesgo es variable.
+   El Low (High) del rango solo se guarda como referencia (`target`). Como el cierre es lo que cuenta, la señal se da cuando Asia cierra con la entrada
+   ya fijada en la vela del barrido; la posición se simula desde esa vela. Sin breakeven.
 7. Una sola operación por noche: la del primer lado (PDH o PDL) cuya vela de entrada cierra antes.
 
 Solo índices USA (NAS100, SP500, DJ30...), no Forex.
@@ -149,7 +150,7 @@ def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: 
     tf_sec = ctx.tf_minutes * 60
     kind, idx = None, min(limit, len(ctx.ts) - 1)
     if limit >= t:
-        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close)
+        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, solo_tiempo=True)
         end = limit + 1
         done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], None, tf_sec)
         if done is not None:
@@ -206,19 +207,19 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes(), key: str = KEY, title: str =
               f"{'High' if up else 'Low'} de {rango} (nivel mitigado); la primera vela que cierra de nuevo {'por debajo' if up else 'por encima'} es la de "
               f"{hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en {stop:.5g} "
               f"({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) "
-              f"y objetivo en el {'Low' if up else 'High'} de {rango} ({goal:.5g})"
-              + (" o, si no llega, salida al cierre del rango" if ctx.salir_al_cierre else ""))
+              f"y sin objetivo: salida por tiempo, al precio de mercado cuando cierra {rango} (referencia: el {'Low' if up else 'High'} de {rango}, {goal:.5g}). "
+              f"Riesgo variable según el precio de salida")
     figures = []
     if t + 1 < len(ctx.ts):
         fig = _figura_posicion(ctx, direction, t + 1, close, stop, goal, f"{name} {'▼' if up else '▲'} barrido", key)
         figures = [Figure(fig.kind, fig.key, fig.zone, fig.direction, fig.x0_ts, fig.x1_ts, {**fig.levels, "entrada_ts": float(ctx.ts[t])},
                           fig.state, fig.label, fig.day)]
-    levels = {"stop": stop, "target": goal, **({"cierre": float(ctx.salida)} if ctx.salida else {})}       # "cierre": hora (servidor) de la salida forzosa
+    levels = {"stop": stop, "target": goal, "solo_tiempo": 1.0, **({"cierre": float(ctx.salida)} if ctx.salida else {})}     # "cierre": hora (servidor) de la salida por tiempo; "target" solo es la referencia
     return [PatternHit(key, title, direction, int(t), close, detail, levels, ts_hit, DETECTED)], figures
 
 
 def contextos(symbol: str, tf_minutes: int, ts, o, h, l, c, sessions, ahead: int, day_end: int = 0, be_r: float | None = None,
-              zona: str = ZONA, salir_al_cierre: bool = False) -> list[Contexto]:
+              zona: str = ZONA, salir_al_cierre: bool = True) -> list[Contexto]:
     """Un contexto por cada noche con Asia cerrada, de la más antigua a la más reciente: lo que analiza la skill y también el backtest.
 
     `sessions`: las sesiones de la skill TBR (con Asia). Las velas `ts, o, h, l, c` son las ya cerradas. `day_end`: hora de NY en que

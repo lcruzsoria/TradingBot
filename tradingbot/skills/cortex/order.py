@@ -33,6 +33,7 @@ class Order:
     efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia) al dar la orden
     htf_candle: str = ""           # CRT: la vela HTF del sweep (C2) en la que entró, p. ej. «H4 02/11 21:00–01:00 NY»
     be_price: float | None = None  # precio que, al tocarlo, pasa el stop a la entrada (Barrido RTH: el Low/High de NY Open); None: sin este breakeven
+    solo_tiempo: bool = False      # sin objetivo: la posición cierra en el stop o por tiempo, al precio de mercado (Barrido PDH/PDL); `target` solo es una referencia
 
     @property
     def label(self) -> str:
@@ -59,9 +60,9 @@ def build_order(payload: dict, decision, bias_result) -> Order:
     hit, tbr = payload["hit"], payload["tbr"]
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
-                 bias_result.bias.value, float(bias_result.score), decision.reason, "fin del día de trading",
+                 bias_result.bias.value, float(bias_result.score), decision.reason, "cierre del rango" if hit.levels.get("solo_tiempo") else "fin del día de trading",
                  hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "",
-                 be_price=hit.levels.get("be"), **_lateral(bias_result))
+                 be_price=hit.levels.get("be"), solo_tiempo=bool(hit.levels.get("solo_tiempo")), **_lateral(bias_result))
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:

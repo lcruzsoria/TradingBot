@@ -85,9 +85,9 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
             ["Barrido de Asia", "Rotura del rango de Asia entre las 00:00 y la 01:00 con una vela que cierra fuera; entrada en el primer cierre de vuelta dentro "
                                 "antes de la 01:00; objetivo en el otro lado de Asia."],
             ["Barrido PDH/PDL Asia", "PDH/PDL del día de trading 18:00-18:00 NY sin tocar hasta las 20:00; lo barre entre las 20:00 y las 21:00 y la primera vela que cierra de "
-                                     "vuelta (con cierre antes de las 21:00) da la entrada; objetivo en el otro lado de Asia (que se conoce a las 00:00)."],
-            ["Barrido PDH/PDL Londres", "Lo mismo con Londres: nivel sin tocar hasta las 02:00, barrido y entrada entre las 02:00 y las 03:00, objetivo en el otro lado de "
-                                        "Londres y salida al cierre (05:00) si no llega."],
+                                     "vuelta (con cierre antes de las 21:00) da la entrada; sin objetivo: sale por tiempo, al precio de mercado, cuando cierra Asia (00:00); el riesgo es variable."],
+            ["Barrido PDH/PDL Londres", "Lo mismo con Londres: nivel sin tocar hasta las 02:00, barrido y entrada entre las 02:00 y las 03:00; sin objetivo: sale por tiempo "
+                                        "al precio de mercado cuando cierra Londres (05:00)."],
             ["Stop", "Fijo a 30 puntos de la entrada si cubre el swing; si no, el swing más 5 puntos."],
             ["Límites", "Sin costes ni deslizamiento. Cada setup se simula por separado: dos setups abiertos a la vez en el mismo mercado se cuentan los dos (el bot "
                         "solo deja una posición por mercado). Solo índices USA (NAS100, SP500, DJ30)."]]}

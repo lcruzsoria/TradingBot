@@ -48,7 +48,7 @@ def trades_of(symbol: str, df: pd.DataFrame, zones, ajustes: Ajustes, since: dat
                 continue
             close_ts = min(hit.ts + 24 * 3600, cierre_del_dia(hit.ts, AHEAD, DAY_END), int(hit.levels.get("cierre") or 10**12))
             order = SimpleNamespace(direction=hit.direction, price=hit.price, stop=hit.levels["stop"], target=hit.levels["target"],
-                                    entry_ts=hit.ts, close_ts=close_ts)
+                                    entry_ts=hit.ts, close_ts=close_ts, solo_tiempo=bool(hit.levels.get("solo_tiempo")))
             closed = resolve(order, ts, h, l, c, None, TF_MIN * 60)
             out.append({"symbol": symbol, "day": ctx.tbr.day, "direction": hit.direction, "entry_ts": hit.ts, "entry": hit.price,
                         "stop": order.stop, "target": order.target, "be": None,
@@ -111,7 +111,7 @@ def main() -> None:
            f"Velas M5 de PUPrime-Demo: " + ", ".join(f"{s} {a}..{b}" for s, (a, b) in periods.items()) + ".",
            f"Reglas: PDH/PDL del día de trading 18:00-18:00 NY, sin tocar hasta las 02:00; barrido y vela de entrada (cierre de vuelta) entre "
            f"{ajustes.start // 60:02d}:{ajustes.start % 60:02d} y {ajustes.end // 60:02d}:{ajustes.end % 60:02d} NY, stop fijo {ajustes.stop_points:g} puntos (swing + {ajustes.stop_buffer:g} "
-           f"si queda más lejos), objetivo en el lado contrario de Londres (o salida al cierre, 05:00), sin breakeven.",
+           f"si queda más lejos), sin objetivo: salida por tiempo al cierre de Londres (05:00) al precio de mercado, sin breakeven.",
            f"Cuenta simulada: {capital:,.0f} USD, riesgo {risk_pct:g} % por operación (sobre el saldo en que se consolida).", "",
            "| Mercado | Operaciones | Objetivo | SL | BE | Tiempo | Acierto | R medio | R total |", "|---|---|---|---|---|---|---|---|---|"]
     for sym in SYMBOLS:
