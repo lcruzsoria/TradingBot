@@ -358,3 +358,19 @@ def test_el_estado_de_un_setup_es_el_mismo_en_5m_y_en_15m():
     assert ts15[m15["x0"]] == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD               # C2 empieza donde empieza
     waiting = [m for m in marks if m["state"] == "sin_entrada"]
     assert [m["state"] for m in retime(waiting, ts5, ts15)] == ["sin_entrada"] * len(waiting)
+
+
+def test_la_vela_del_retest_que_cierra_sobre_el_cisd_ya_es_la_del_cierre():
+    from crt_scenarios import eurusd
+    from tradingbot.skills.crt import engine
+    df = eurusd()
+    cfg = engine.Cfg(240, 17 * 3600, 17 * 3600, AHEAD)
+    ny_2100 = lambda x: x["C2"] == pd.Timestamp("2026-11-02 21:00").value // 10**9 + AHEAD
+    real = [x for x in engine.find_zone_setups(df, df, 5, cfg)[0] if ny_2100(x)][0]
+    assert real["jc"] > real["jt"]                                                            # con los datos reales el cierre es de una vela posterior al toque
+    bars = df.copy()
+    row = bars.index[bars["ts"] == df["ts"].iloc[real["jt"]]][0]
+    bars.loc[row, "close"] = real["level"] * -1 + 0.0001 if real["sign"] < 0 else real["level"] + 0.0001           # la vela del toque cierra más allá del CISD
+    bars.loc[row, "high"] = max(bars.loc[row, "high"], bars.loc[row, "close"])
+    got = [x for x in engine.find_zone_setups(bars, bars, 5, cfg)[0] if ny_2100(x)]
+    assert got and got[0]["jc"] == got[0]["jt"] == real["jt"]

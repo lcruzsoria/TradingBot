@@ -296,8 +296,8 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             return cisd_cache[k]
 
         def closes_beyond_cisd(p: tuple, j: int, after: int) -> bool:
-            """La vela `j` (del TF del iFVG, el menor de los dos) es posterior a la del retest `after` y cierra con cuerpo más allá del CISD de la pareja `p`."""
-            return j > after and float(cl_[j]) < cisd_of(p[0])[1]
+            """La vela `j` (del TF del iFVG, el menor de los dos) es la del retest `after` o posterior a ella y cierra con cuerpo más allá del CISD de la pareja `p`."""
+            return j >= after and float(cl_[j]) < cisd_of(p[0])[1]
 
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
@@ -363,15 +363,6 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     break
                 if hi_[j] > hx:
                     hx, ih = float(hi_[j]), j
-                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and closes_beyond_cisd(p, j, touched[pid(p)])     # tocada antes y una vela del TF menor cierra bajo el CISD
-                        and not any(lvl(q) < lvl(p) and contact.get(pid(q), j + 1) <= j for q in pairs)]                                       # y ningún BPR de un nivel anterior tuvo ya su retest: ese es el válido
-                if done:
-                    k, z, common = max(done, key=lambda p: (-p[1][0], p[0], p[1][3]))             # a igual hora, la del FVG de menor TF (con el iFVG de M5: antes la de M5 que la mixta)
-                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": cisd_of(k)[1],
-                            "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
-                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
-                            "cisd": cisd_of(k), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
-                    break
                 for k, z, common in pairs:
                     key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
                     if key in dead:
@@ -387,6 +378,15 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                         elif key not in touched:
                             touched[key] = j                                    # pullback a la zona común: tiene que rebotar y cerrar sobre el CISD
                             seen_touch = True
+                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] <= j and closes_beyond_cisd(p, j, touched[pid(p)])     # tocada (en esa misma vela o antes) y una vela del TF menor cierra bajo el CISD
+                        and not any(lvl(q) < lvl(p) and contact.get(pid(q), j + 1) <= j for q in pairs)]                                       # y ningún BPR de un nivel anterior tuvo ya su retest: ese es el válido
+                if done:
+                    k, z, common = max(done, key=lambda p: (-p[1][0], p[0], p[1][3]))             # a igual hora, la del FVG de menor TF (con el iFVG de M5: antes la de M5 que la mixta)
+                    trig = {"sign": sign, "dirección": name, "C2": s2, "jc": j, "ih": ih, "stop": hx, "level": cisd_of(k)[1],
+                            "z_bottom": common[0], "z_top": common[1], "mtf": f"M{z[0]}", "inside": bool(c1l <= H["close"][i] <= c1h),
+                            "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
+                            "cisd": cisd_of(k), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
+                    break
             for lv in {lvl(p) for p in pairs}:
                 hits = [contact[pid(p)] for p in pairs if lvl(p) == lv and pid(p) in contact]
                 if hits:
