@@ -259,12 +259,13 @@ def sweep_levels(s2: int, hv: dict, dv: dict, tv: dict, sv: dict, ahead: int, na
     return out
 
 
-def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None, hist: pd.DataFrame | None = None) -> tuple[list, dict]:
+def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None, hist: pd.DataFrame | None = None,
+                     retest: bool = True) -> tuple[list, dict]:
     """Todos los setups de zona común de las velas dadas, con el índice de la vela que cierra bajo el CISD (`jc`); la entrada va aparte
     (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF (y el FVG normal si no se pasan `fvg_series`) y `ltf` las velas del iFVG, del CISD
     y de la entrada (de `ltf_min` minutos). `fvg_series`: {TF en minutos: velas de ese TF} de los FVG normales (TF >= `ltf_min`); sin ella se agrupan desde `base`
     los múltiplos de `ltf_min`. `hist`: velas de largo recorrido (de un TF corto) de las que salen los niveles que C2 puede barrer (PDH/PDL, swings de
-    H4, H12); sin ellas se usan las de `base`."""
+    H4, H12); sin ellas se usan las de `base`. `retest=False` (experimento): el BPR no necesita retest, vale la vela que cierra más allá del CISD una vez invertido el iFVG."""
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
     src = base if hist is None else hist
     big = {"h": aggregate(src, cfg.htf_min, cfg, cfg.origin), "d": aggregate(src, 1440, cfg, cfg.origin), "t": aggregate(src, 720, cfg, cfg.origin),
@@ -370,7 +371,12 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     if k not in inverted:                                       # el iFVG se invierte: una vela cierra bajo su base
                         if k < j and cl_[j] < hi_[k - 2]:
                             inverted[k] = j
-                    elif inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
+                    if not retest:                                              # sin retest: con el iFVG invertido y los dos FVG formados, la pareja ya vale
+                        if k in inverted and z[3] <= lts[j] and key not in touched:
+                            contact.setdefault(key, j)
+                            touched[key] = j
+                            seen_touch = True
+                    elif k in inverted and inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
                         contact.setdefault(key, j)
                         if cl_[j] > common[1]:                                  # y cierra con cuerpo al otro lado de ella: el retest la invalida
                             dead.add(key)
