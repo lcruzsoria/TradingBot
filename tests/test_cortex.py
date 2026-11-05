@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
+from dataclasses import replace
 from datetime import date
 
 from tradingbot.envconfig import EnvConfig, parse
@@ -295,3 +296,19 @@ def test_un_setup_invalidado_con_fibo_es_no_go_con_etiqueta_i():
     d = decisions[0].payload["decision"]
     assert not d.allowed and d.reason.startswith("I:")
     assert short_reason(d.reason) == "I" and reason_of(d.reason) == "I · invalidado"
+
+
+def test_una_orden_vencida_por_tiempo_no_bloquea_aunque_no_haya_velas_para_verlo():
+    """Los patrones pasados se anuncian de golpe al arrancar: una orden antigua sin velas cargadas no debe bloquear todas las siguientes."""
+    manager, bus, decisions, orders, executed = run_skills()
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    first = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+    event = {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": first}
+    bus.publish("pattern.detected", event, source="pattern")
+    wait(orders)
+    later = PatternHit("q", "Otro patrón", "long", 20, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_000_000 + 25 * 3600)
+    bus.publish("pattern.detected", {**event, "tbr": replace(TBR, day=date(2026, 10, 7)), "hit": later}, source="pattern")   # otro día: otra sesión
+    wait(orders, 2)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
