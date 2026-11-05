@@ -89,11 +89,13 @@ def parse_hours(text: str, key: str = "HOURS") -> tuple[int, int]:
     return h0 * 60 + m0, (h1 * 60 + m1) % 1440
 
 
-def zones_from_settings(settings, keys: list[str] | None = None) -> list[Zone]:
+def zones_from_settings(settings, keys: list[str] | None = None, overrides=None) -> list[Zone]:
     """Zonas del bloque TBR de tradingbot.env (`settings` ya sin el prefijo TBR_).
 
     `keys`: otras zonas a leer (por su clave) en lugar de las de TBR_ZONES; sirve para consultar el horario de una zona que
     no está activa (por ejemplo NY_PM, que marca el límite de NY Open).
+    `overrides`: ajustes de una estrategia (por ejemplo `env.section("CRT_TBR")`) con su propio horario para una zona (`<CLAVE>_HOURS`, p. ej. NY_AM_HOURS):
+    esa estrategia usa ese horario y el resto, el de TBR_<CLAVE>_HOURS.
     """
     defaults = {key: (name, hours, color) for key, name, hours, color in KNOWN_ZONES}
     keys = [k.upper() for k in (keys if keys is not None else settings.get_list("ZONES", [z[0] for z in DEFAULT_ZONES]))]
@@ -101,6 +103,8 @@ def zones_from_settings(settings, keys: list[str] | None = None) -> list[Zone]:
     for key in keys:
         name, hours, color = defaults.get(key, (key.replace("_", " ").title(), None, None))
         hours = settings.get(f"{key}_HOURS", hours)
+        if overrides is not None:
+            hours = overrides.get(f"{key}_HOURS", hours)
         color = settings.get(f"{key}_COLOR", color)
         if hours is None or color is None:
             raise ValueError(f"La zona TBR {key} necesita TBR_{key}_HOURS y TBR_{key}_COLOR en tradingbot.env.")

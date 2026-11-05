@@ -146,3 +146,12 @@ def test_las_opciones_de_la_linea_de_comandos_mandan(monkeypatch):
 def test_las_zonas_tbr_del_proyecto_son_las_del_codigo():
     from tradingbot.skills.tbr.zones import zones_from_settings
     assert zones_from_settings(envconfig.load(environ={}).section("TBR")) == zones_from_settings(EnvConfig())
+
+
+def test_una_estrategia_puede_tener_otro_horario_para_una_tbr_sin_cambiar_el_de_tbr():
+    from tradingbot.skills.tbr.zones import zones_from_settings
+    env = EnvConfig({"TBR_NY_AM_HOURS": "10:00-12:00", "CRT_TBR_NY_AM_HOURS": "08:30-11:30"})
+    base = {z.key: z.hours for z in zones_from_settings(env.section("TBR"))}
+    crt = {z.key: z.hours for z in zones_from_settings(env.section("TBR"), overrides=env.section("CRT_TBR"))}
+    assert base["NY_AM"] == "10:00-12:00" and crt["NY_AM"] == "08:30-11:30"
+    assert {k: v for k, v in crt.items() if k != "NY_AM"} == {k: v for k, v in base.items() if k != "NY_AM"}

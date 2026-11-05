@@ -3,7 +3,7 @@
 Para cada mercado busca los setups con el motor de la skill (`engine.find_zone_setups`: iFVG invertido, pullback a la zona común, cierre con cuerpo sobre el
 CISD, entrada a la apertura de la vela siguiente de ese TF; stop en el extremo del sweep) y los simula con objetivo 1R, 2R (el del bot) y 3R, con BE a +1R.
 Cada TF del iFVG (5 y 15 min) se simula por separado, una operación a la vez por mercado; el TF del FVG normal queda en la columna `t` para filtrar.
-A cada operación le pone la TBR en cuyo horario se da la entrada (Asia 20:00-00:00, London 02:00-05:00, NY Open 10:00-12:00 NY; el resto, «Fuera de TBR»).
+A cada operación le pone la TBR en cuyo horario se da la entrada (las de tradingbot.env, con el horario propio de CRT si hay CRT_TBR_<ZONA>_HOURS: Asia, London y NY Open; el resto, «Fuera de TBR»).
 Coste = spread supuesto (índices 1,5 pb, forex 0,7 pb: los parquet no traen el spread). Guarda las operaciones en analisis/crt_operaciones.pkl y SUSTITUYE los
 grupos del perfil `crt` (Índices y Forex) de tradingbot/skills/stats/backtest.json.gz sin tocar el resto del fichero.
 
@@ -29,7 +29,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tradingbot import envconfig                                                       # noqa: E402
 from tradingbot.skills.crt import engine                                               # noqa: E402
+from tradingbot.skills.tbr.zones import zones_from_settings                            # noqa: E402
 
 AHEAD = 7 * 3600                                                                       # servidor del broker = NY + 7 h
 OUT = ROOT / "tradingbot" / "skills" / "stats" / "backtest.json.gz"
@@ -45,7 +47,9 @@ SINCE = {"indices": "2024-01-01", "forex": "2024-02-01"}                        
 SPREAD_BP = {"indices": 1.5, "forex": 0.7}
 MTF_BIT = {15: 1, 5: 2}                                                                 # columna t: TF del FVG normal
 ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
-TBR_HOURS = (("Asia", 20 * 60, 24 * 60), ("London", 2 * 60, 5 * 60), ("NY Open", 10 * 60, 12 * 60))     # TBR de tradingbot.env
+_ENV = envconfig.load()
+TBR_ZONES = zones_from_settings(_ENV.section("TBR"), overrides=_ENV.section("CRT_TBR"))                  # las TBR de tradingbot.env; CRT puede tener otro horario (CRT_TBR_NY_AM_HOURS...)
+TBR_HOURS = tuple((z.name, z.start, z.minutes) for z in TBR_ZONES)                                      # nombre, inicio (min NY) y duración
 OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}
 EPOCH = pd.Timestamp("1970-01-01")
@@ -60,8 +64,8 @@ def tbr_zone(ts: pd.Series) -> pd.Series:
     """TBR en cuyo horario cae la hora de entrada (NY); si no cae en ninguna, «Fuera de TBR»."""
     minute = ts.dt.hour * 60 + ts.dt.minute
     out = pd.Series("Fuera de TBR", index=ts.index, dtype=object)
-    for name, a, b in TBR_HOURS:
-        out[(minute >= a) & (minute < b)] = name
+    for name, a, length in TBR_HOURS:
+        out[(minute - a) % 1440 < length] = name
     return out
 
 
@@ -267,8 +271,8 @@ def methodology(gkey: str) -> list[list[str]]:
                     "vez por mercado y TF del iFVG. Stop y objetivo en la misma vela: cuenta el stop."],
         ["Invalidados", "Si el precio llega al extremo opuesto de C1 sin completar el patrón, no se opera y se marca en el gráfico. El «setup OK sin entrada» "
                         "(zona común e iFVG invertido pero sin pullback) también se marca."],
-        ["TBR", "Una entrada está «dentro de una TBR» si su hora cae en el horario de Asia (20:00-00:00), London (02:00-05:00) o NY Open "
-                "(10:00-12:00), hora de Nueva York; si no, «Fuera de TBR». Es la hora de la entrada, no del sweep."],
+        ["TBR", "Una entrada está «dentro de una TBR» si su hora cae en el horario de " + ", ".join(f"{z.name} ({z.hours})" for z in TBR_ZONES)
+                + ", hora de Nueva York; si no, «Fuera de TBR». Es la hora de la entrada, no del sweep."],
         ["Hora en punto", "Cada entrada lleva además la hora en punto a la que está pegada si dista 15 min o menos (03:00 vale de 02:45 a 03:15). "
                           "Se puede combinar con la TBR."],
         ["Costes", "Spread supuesto por operación (índices 1,5 pb, forex 0,7 pb del precio de entrada; R neto = R bruto - coste / riesgo): las velas "
