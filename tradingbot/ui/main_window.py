@@ -369,6 +369,12 @@ class MainWindow(QMainWindow):
                                 "objetivo, zona roja hasta el stop, con el R:R.")
         self.pos_btn.setVisible(pattern_skill is not None or self.strategy == "calendario")
         self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
+        self.gaps_profile = app_cfg["app"].get("strategy") in GAP_STRATEGIES     # Barrido_NYAM: TBR y Entradas siempre a la vista, sin Fibo
+        if self.gaps_profile:
+            self.fibo_btn.setChecked(False)
+            self.fibo_btn.setVisible(False)                     # sus entradas no son fibos
+            self.tbr_btn.setChecked(self.manager.skills.get("tbr") is not None)
+            self.pos_btn.setChecked(pattern_skill is not None)
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
         self._decisions: dict = {}                              # (mercado, TBR, día, lado) -> GO / NO GO de Cortex y motivo corto
@@ -414,7 +420,7 @@ class MainWindow(QMainWindow):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.fibo_btn, 0, 3)
-        grid.addWidget(self.pos_btn, 1, 3)
+        grid.addWidget(self.pos_btn, 0 if self.gaps_profile else 1, 3)     # sin Fibo, Entradas sube a su sitio
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)

@@ -517,3 +517,18 @@ def test_los_botones_de_huecos_solo_existen_en_el_perfil_barrido_nyam(tmp_path, 
     assert "ndog" not in plain.level_btns
     own = make_window(tmp_path, monkeypatch, {"strategy": "barrido_nyam"})
     assert {"ndog", "nwog"} <= set(own.level_btns)
+
+
+def test_barrido_nyam_oculta_fibo_y_muestra_tbr_y_entradas(tmp_path, monkeypatch):
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.ui.main_window import MainWindow
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "NAS100", "timeframe": "5m", "watchlist": ["NAS100"], "strategy": "barrido_nyam"}}
+    bus = EventBus()
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "tbr"}, {"type": "pattern"}]), cfg, "t")
+    assert win.fibo_btn.isHidden() and not win.fibo_btn.isChecked()
+    assert win.tbr_btn.isChecked() and win.pos_btn.isChecked()
