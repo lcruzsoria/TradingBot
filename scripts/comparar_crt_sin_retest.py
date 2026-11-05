@@ -18,9 +18,18 @@ A = pd.read_pickle(ROOT / "analisis" / "crt_operaciones.pkl")["operaciones"]
 B = pd.read_pickle(ROOT / "analisis" / "crt_operaciones_sin_retest.pkl")["operaciones"]
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--solo-tbr", action="store_true", help="solo las entradas que caen en el horario de una TBR (Asia, London, NY Open)")
-if ap.parse_args().solo_tbr:
+ap.add_argument("--extremo-hora", type=int, metavar="MIN", help="solo los setups cuyo extremo del sweep (el mínimo en un largo, el máximo en un corto) cae a MIN minutos o menos "
+                "de una hora en punto, o sea de la apertura de una vela H1 (la vela de M5/M15 que lo marca empieza a ±MIN)")
+args = ap.parse_args()
+if args.solo_tbr:
     A, B = (T[T["zona"] != "Fuera de TBR"] for T in (A, B))
     print("Solo entradas dentro de Asia, London y NY Open")
+if args.extremo_hora is not None:
+    def near_open(T: pd.DataFrame) -> pd.DataFrame:
+        minute = ((T["t extremo"].astype("int64") - 7 * 3600) // 60) % 60                 # hora de servidor = NY + 7 h: los minutos coinciden
+        return T[np.minimum(minute, 60 - minute) <= args.extremo_hora]
+    A, B = near_open(A), near_open(B)
+    print(f"Solo setups con el extremo del sweep a ±{args.extremo_hora} min de una hora en punto")
 
 
 def stats(t: pd.DataFrame) -> dict:
