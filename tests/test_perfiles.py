@@ -406,16 +406,19 @@ OUT = (102, 104, 100, 103)      # vela que cierra fuera (por arriba)
 
 def test_barrido_rth_la_rotura_es_un_cierre_fuera_y_la_entrada_la_primera_vela_que_vuelve_dentro():
     from tradingbot.skills.barrido_rth.deteccion import analizar
-    # 09:55 y 10:00 dentro; 10:05 y 10:10 cierran fuera (rotura y swing); 10:15 cierra dentro: corto con stop en el swing (105)
+    # 09:55 y 10:00 dentro; 10:05 y 10:10 cierran fuera (rotura y swing en 105); 10:15 cierra dentro en 98: el stop fijo de 30 puntos (128) cubre el swing
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]))
     assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
-    assert hits[0].price == 98 and hits[0].levels == {"stop": 105.0, "target": 90.0}
-    # rompe por debajo: largo, stop en el mínimo del tramo fuera (86) y objetivo en el High del RTH
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0}
+    # el swing queda a más de 30 puntos de la entrada (140): el stop es el swing + 5
+    hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 140, 99, 101), (101, 102, 97, 98)]))
+    assert hits[0].levels["stop"] == 145.0
+    # rompe por debajo: largo, entrada en 91, el stop fijo queda 30 puntos por debajo (61) y el objetivo es el High del RTH
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 86, 91)]))
-    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 86.0, "target": 100.0}
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 61.0, "target": 100.0}
     # una mecha que supera el nivel y cierra dentro no es una rotura (caso del 3 de noviembre): la entrada es tras la rotura real
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 104, 97, 102), (102, 103, 99, 99)]))
-    assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 104.0
+    assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 129.0
 
 
 def test_barrido_rth_casos_sin_setup():
@@ -449,7 +452,9 @@ def test_barrido_rth_ajustes_configurables_y_validos():
     with pytest.raises(ValueError, match="ENTRY_END"):
         Ajustes.desde(EnvConfig(parse("END=11:00\nENTRY_END=10:00\n")))
     assert Ajustes.desde(EnvConfig(parse("ENTRY_END=13:00\n"))).entry_end == 13 * 60
-    assert Ajustes.desde(None) == Ajustes()
+    assert Ajustes.desde(None) == Ajustes() and Ajustes().stop_points == 30.0 and Ajustes().stop_buffer == 5.0
+    with pytest.raises(ValueError, match="STOP_POINTS"):
+        Ajustes.desde(EnvConfig(parse("STOP_POINTS=0\n")))
 
 
 def test_barrido_nyam_pinta_su_rth_y_su_ciclo_solo_en_su_perfil(tmp_path):
@@ -598,7 +603,7 @@ def test_la_skill_barrido_rth_publica_el_setup_del_3_de_noviembre_al_cerrar_la_v
     time.sleep(0.1)
     manager.stop()
     hit = found[0].payload["hit"]
-    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 105.0, 90.0)
+    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 128.0, 90.0)
     assert found[0].payload["tbr"].zone == "RTH" and found[0].payload["tbr"].day == day
     assert updated[-1].payload["figures"][0].levels["entrada_ts"] == float(df["ts"][16])  # la vela cuyo cierre es la entrada
 
@@ -614,3 +619,18 @@ def test_el_grafico_marca_con_un_punto_la_vela_de_entrada_y_el_tp2(tmp_path, mon
     assert len(dots) == 1 and list(dots[0].data["x"]) == [4.0] and list(dots[0].data["y"]) == [98.0]   # el punto, en la vela de entrada
     win.chart.set_positions([{**pos, "entry_x": None, "target2": None}])
     assert not [i for i in win.chart._pos_items if isinstance(i, pg.ScatterPlotItem)]                  # sin vela de entrada, sin punto
+
+
+def test_barrido_nyam_sin_breakeven_solo_tp1_o_sl_y_configurable():
+    """BARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0 apaga el breakeven de Setup solo en este perfil; los demás siguen con SETUP_BE_TRIGGER_PCT."""
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    env = EnvConfig(parse("SETUP_BE_TRIGGER_PCT=1\nSETUP_RISK_PCT=1\nBARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0\n"))
+
+    def be_r(strategy, text=None):
+        e = env if text is None else EnvConfig(parse(text))
+        skill = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": strategy}}, e), [{"type": "setup"}]).skills["setup"]
+        skill.on_start()
+        return skill.be_r
+    assert be_r("barrido_nyam") is None and be_r("") == 1.0 and be_r("crt") == 1.0
+    assert be_r("barrido_nyam", "SETUP_BE_TRIGGER_PCT=1\nSETUP_RISK_PCT=1\nBARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0.5\n") == 0.5

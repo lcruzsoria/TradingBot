@@ -42,6 +42,9 @@ class SetupSkill(Skill):
             raise ValueError(self.error)
         self.risk_pct = self.settings.get_float("RISK_PCT", DEFAULT_RISK_PCT)
         be_pct = self.settings.get_float("BE_TRIGGER_PCT", DEFAULT_BE_TRIGGER_PCT)
+        strategy = (self.services.app_cfg["app"].get("strategy") or "") if self.services.app_cfg else ""
+        if strategy and self.services.env is not None:                       # <ESTRATEGIA>_SETUP_BE_TRIGGER_PCT: el perfil de estrategia usa el suyo (0: sin breakeven)
+            be_pct = self.services.env.section(f"{strategy}_SETUP").get_float("BE_TRIGGER_PCT", be_pct)
         if self.risk_pct <= 0 or be_pct < 0:
             self.error = (f"SETUP_RISK_PCT={self.risk_pct:g} debe ser mayor que 0 y SETUP_BE_TRIGGER_PCT={be_pct:g}, "
                           "0 (sin breakeven) o más")

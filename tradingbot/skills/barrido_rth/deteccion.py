@@ -8,9 +8,11 @@ Reglas (velas de `BARRIDO_RTH_TF`, M5 al inicio):
 2. Rotura: la primera vela, desde `BARRIDO_RTH_START` (10:00 NY), que CIERRA fuera del rango (una mecha sola no cuenta). Debe abrir antes de
    `BARRIDO_RTH_END` (11:00 NY): una primera rotura posterior no vale. Solo cuenta la primera del día.
 3. Swing: el extremo (máximo en un corto, mínimo en un largo) de todo el tramo fuera del rango, desde la rotura hasta la vela de entrada.
+   Stop: fijo, a `BARRIDO_RTH_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing; si no, el swing más
+   `BARRIDO_RTH_STOP_BUFFER` (5) puntos (por encima en un corto, por debajo en un largo).
 4. Entrada: la primera vela POSTERIOR a la rotura que CIERRA de nuevo dentro del rango, a mercado a su cierre. Debe abrir antes de
    `BARRIDO_RTH_ENTRY_END` (12:00 NY, fin de NY Open). Si antes de volver el precio rompe también el otro lado, no hay setup.
-5. Romper por arriba da un corto y romper por abajo, un largo. Stop en el swing.
+5. Romper por arriba da un corto y romper por abajo, un largo.
 
 Solo índices USA (NAS100, SP500, DJ30...), no Forex. Objetivo 1: el lado contrario del RTH (el Low en un corto, el High en un largo).
 Objetivo 2: el nivel más cercano más allá del 1 entre el Low de Asia/London (el menos exigente) y el 50 % del NDOG/NWOG. El simulador de
@@ -35,6 +37,8 @@ DEFAULT_TF = "5m"
 DEFAULT_START = "10:00"          # hora de NY desde la que cuenta una rotura
 DEFAULT_END = "11:00"            # hora de NY antes de la que debe abrir la vela que rompe el RTH
 DEFAULT_ENTRY_END = "12:00"      # hora de NY antes de la que debe abrir la vela de entrada (fin de NY Open)
+DEFAULT_STOP_POINTS = 30.0       # stop fijo, en puntos del precio, si cubre el swing
+DEFAULT_STOP_BUFFER = 5.0        # si el swing queda más lejos, el stop es el swing más estos puntos
 INDICES_USA = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")
 MAX_HOLD_SECONDS = 24 * 3600     # como tope, una posición dura 24 h (igual que el resto de órdenes)
 
@@ -55,14 +59,22 @@ class Ajustes:
     start: int = minutos(DEFAULT_START, "START")
     end: int = minutos(DEFAULT_END, "END")
     entry_end: int = minutos(DEFAULT_ENTRY_END, "ENTRY_END")
+    stop_points: float = DEFAULT_STOP_POINTS
+    stop_buffer: float = DEFAULT_STOP_BUFFER
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
         get = (lambda key, default: default) if settings is None else settings.get
         tf = str(get("TF", DEFAULT_TF))
         parse_timeframe(tf)                                                   # valida el timeframe
+        try:
+            points, buffer = float(get("STOP_POINTS", DEFAULT_STOP_POINTS)), float(get("STOP_BUFFER", DEFAULT_STOP_BUFFER))
+        except ValueError:
+            raise ValueError("BARRIDO_RTH_STOP_POINTS y BARRIDO_RTH_STOP_BUFFER deben ser números.") from None
+        if points <= 0 or buffer < 0:
+            raise ValueError("BARRIDO_RTH_STOP_POINTS debe ser mayor que 0 y BARRIDO_RTH_STOP_BUFFER no puede ser negativo.")
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"),
-                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"))
+                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer)
         if a.end <= a.start:
             raise ValueError(f"BARRIDO_RTH_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         if a.entry_end < a.end:
@@ -185,11 +197,13 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     if other:                                                                 # barrió también el lado contrario antes de volver
         return [PatternHit(KEY, TITLE, direction, int(t), close, "el precio rompe también el otro lado del RTH antes de volver dentro: "
                            "sin setup hoy", {}, ts_hit, INVALIDATED)], []
-    stop = extreme
+    sign = 1.0 if up else -1.0                                                # corto: el stop va por encima de la entrada; largo: por debajo
+    covers = sign * (extreme - close) <= a.stop_points                        # ¿el stop fijo cubre el swing?
+    stop = close + sign * a.stop_points if covers else extreme + sign * a.stop_buffer
     goal = rth.low if up else rth.high
-    detail = (f"primera rotura del {side} del RTH ({rth.high if up else rth.low:.5g}) en {hora_ny(ctx, sweep)}, con swing en {stop:.5g}; la primera "
-              f"vela que cierra de nuevo dentro del rango es la de {hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en el swing "
-              f"({stop:.5g}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
+    detail = (f"primera rotura del {side} del RTH ({rth.high if up else rth.low:.5g}) en {hora_ny(ctx, sweep)}, con swing en {extreme:.5g}; la primera "
+              f"vela que cierra de nuevo dentro del rango es la de {hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en "
+              f"{stop:.5g} ({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
     levels = {"stop": stop, "target": goal}
     second = _objetivo2(ctx, up, goal, midnight + a.start * 60)
     if second is not None:

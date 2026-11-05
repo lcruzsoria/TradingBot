@@ -59,7 +59,7 @@ class BarridoRthSkill(Skill):
     title = "Barrido RTH"
     description = ("Setup del perfil Barrido_NYAM: tras el RTH (09:00-10:00), la primera rotura de su High o su Low (una vela que cierra fuera) "
                    "entre las 10:00 y las 11:00 y la primera vela M5 posterior que cierra de nuevo dentro del rango (antes de las 12:00) da la "
-                   "entrada. Stop en el swing, objetivo 1 en el lado contrario del RTH y objetivo 2 en lo más cercano entre Asia/London y el "
+                   "entrada. Stop fijo de 30 puntos (o el swing + 5 si queda más lejos), objetivo 1 en el lado contrario del RTH y objetivo 2 en lo más cercano entre Asia/London y el "
                    "50 % del NDOG/NWOG. Cortex lo valida; solo informa, no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
     publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.swept")
@@ -92,6 +92,8 @@ class BarridoRthSkill(Skill):
         self.day_end = _hhmm(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START) if levels else DEFAULT_INDEX_DAY_START, "LEVELS_INDEX_DAY_START")
         setup = env.section("SETUP") if env is not None else None            # el breakeven del dibujo es el mismo que aplica Setup
         risk_pct, be_pct = (setup.get_float("RISK_PCT", 1.0), setup.get_float("BE_TRIGGER_PCT", 1.0)) if setup else (1.0, 1.0)
+        if env is not None:                                                  # BARRIDO_NYAM_SETUP_BE_TRIGGER_PCT: 0 = sin breakeven (solo TP1 o SL)
+            be_pct = env.section("BARRIDO_NYAM_SETUP").get_float("BE_TRIGGER_PCT", be_pct)
         self.be_r = be_pct / risk_pct if risk_pct > 0 and be_pct > 0 else None
 
     # -- mensajes -----------------------------------------------------------------------------------
