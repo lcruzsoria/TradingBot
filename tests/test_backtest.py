@@ -118,8 +118,8 @@ def test_ventana_backtest_con_el_resumen_real():
     QApplication.instance() or QApplication([])
     bt = load()
     assert [g.key for g in bt.groups] == ["puprime:indices", "puprime:forex", "puprime:oro", "puprime:cripto", "metaquotes:indices",
-                                          "metaquotes:forex", "metaquotes:oro", "calendario", "crt:indices", "crt:forex"]
-    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "crt"]
+                                          "metaquotes:forex", "metaquotes:oro", "calendario", "crt:indices", "crt:forex", "barrido_nyam:indices"]
+    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "crt", "barrido_nyam"]
     dlg = BacktestDialog(None, bt)
     assert dlg.group_key == "puprime:indices" and dlg.profile_key == "puprime" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values

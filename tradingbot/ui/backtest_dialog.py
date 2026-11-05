@@ -791,7 +791,7 @@ class BacktestDialog(QDialog):
         static = STATIC_NOTE if self._filtered else ""
         self.improvements.note.setText("siempre con las reglas del bot; stop k veces el original" + static)
         self.funnel.note.setText("de las TBR evaluadas a las entradas" + static)
-        self.data_book.note.setText("velas M15 de MT5 usadas" + static)
+        self.data_book.note.setText(("velas M5 de MT5 usadas" if g.is_barrido else "velas M15 de MT5 usadas") + static)
 
     def _periods_text(self) -> str:
         """Desde cuándo hay datos en cada grupo de mercados, una línea por perfil; el grupo elegido, en negrita."""
@@ -878,9 +878,9 @@ class BacktestDialog(QDialog):
         if g.is_crt:
             hint = f"equilibrio {even:.1f} % con {CRT_TARGETS[self.crt_target]}" if even else "equilibrio según la distancia a C1"
         else:
-            hint = "con R neto positivo" if g.is_calendar else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R"
+            hint = "con R neto positivo" if g.is_calendar or g.is_barrido else f"equilibrio {BREAKEVEN_2R:.1f} % con 2R"
         b["wr"].set_value("-" if wr is None else f"{wr:.1f} %", hint,
-                          None if g.is_calendar or not even else theme.BULL if wr and wr > even + 1 else None)
+                          None if g.is_calendar or g.is_barrido or not even else theme.BULL if wr and wr > even + 1 else None)
         b["mean"].set_value(_r(r.get("mean")), f"t {_num(r.get('t'), 2, sign=True)}", _tone(r.get("mean")))
         b["total"].set_value(f"{r['total']:+.0f} R", "suma de todas", _tone(r.get("total")))
         b["pf"].set_value(_num(r.get("pf")), "ganado / perdido", _pf_tone(r.get("pf")))
@@ -958,7 +958,7 @@ class BacktestDialog(QDialog):
             rows.append((market, group_name, s, gross, str(int(ops.year.min())) if g.is_crt and len(ops) else since.get(market, "")))
         rows.sort(key=lambda x: -(x[2].get("mean") if x[2].get("n") else -9))
         what = (f"M{self.crt_ltf}, entrada {self.crt_entry}, objetivo {CRT_TARGETS[self.crt_target]}, TBR {self.crt_tbr.lower()}, {self.crt_near.lower()}" if g.is_crt
-                else f"{g.all_filters.get(self.filter, self.filter).lower()}, ambos patrones")
+                else f"{g.all_filters.get(self.filter, self.filter).lower()}, {'todos los setups' if g.is_barrido else 'ambos patrones'}")
         self.compare.note.setText(f"{what} · en negrita, {g.name.lower()}" + (" · filtrado" if self._filtered else ""))
         out = []
         for market, group_name, s, gross, first in rows:

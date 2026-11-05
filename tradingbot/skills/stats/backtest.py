@@ -265,6 +265,11 @@ class Group:
     def is_crt(self) -> bool:
         return self.raw.get("tipo") == "crt"
 
+    @property
+    def is_barrido(self) -> bool:
+        """Los setups de barrido del perfil Barrido_NYAM: el primer «patrón» del selector es Todos y los demás, cada setup."""
+        return self.raw.get("tipo") == "barrido"
+
     # -- selección ---------------------------------------------------------------------------
     @staticmethod
     def _in(values: np.ndarray, chosen) -> np.ndarray:
@@ -284,7 +289,7 @@ class Group:
                 "sin sesgo / lateral": s == "sin sesgo",
                 "una posición a la vez (todas)": (flags & OVERLAP_ALL) == 0,
                 "una posición a la vez (GO de Cortex)": (s != "en contra") & ((flags & OVERLAP_GO) == 0)}[filt]
-        if pattern != "Ambos":
+        if pattern not in ("Ambos", self.patterns[0]):                        # el primero del selector (Ambos, o Todos en Barrido) suma todos
             mask &= ops.names("p") == pattern
         return mask
 
@@ -382,15 +387,16 @@ class Group:
         base = self.filter_mask(pattern, filt)
         main = ops.take(base & chosen)
         median = float(np.median(ops["e"][chosen])) if chosen.any() else None
-        sens = [(label, main[col]) for col, label in SENSITIVITY if col in main.cols] + [("2R sin costes (R bruto)", main["r"] + main["k"])]
-        pats = PATTERNS[1:] if pattern == "Ambos" else (pattern,)
+        sens = [(label, main[col]) for col, label in SENSITIVITY if col in main.cols] + [
+            ("Sin costes (R bruto)" if self.is_barrido else "2R sin costes (R bruto)", main["r"] + main["k"])]
+        pats = tuple(self.patterns[1:]) if pattern == self.patterns[0] and self.is_barrido else PATTERNS[1:] if pattern == "Ambos" else (pattern,)
         return View(
             main=main,
             years=self._split(ops, base & h & d & mo, "year"),
             hours=self._split(ops, base & y & d & mo, "hour"),
             months=self._split(ops, base & y & h & d, "month"),
             markets=main.split(main.names("m")),
-            zones=main.split(main.names("z"), ["Asia", "London", "NY Open"]),
+            zones=main.split(main.names("z"), self.raw.get("zonas") or ["Asia", "London", "NY Open"]),
             sides=main.split(main["d"], [0, 1]),
             filters=[(f, ops.take(self.filter_mask(pattern, f) & chosen)) for f in self.all_filters],
             days=self._split(ops, base & y & h & mo, "weekday", list(range(5))),
