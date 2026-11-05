@@ -102,6 +102,25 @@ def test_un_swing_high_mas_alto_antes_del_swing_low_sustituye_al_0():
     assert figs[0].levels["0"] == 113.0 and figs[0].levels["1"] == 105.0
 
 
+def test_un_swing_high_mas_alto_tras_el_swing_low_mueve_el_0_si_no_hubo_reversion_al_0_5():
+    rows = ROWS[:15] + [(112, 112.5, 108, 109)]                  # 14: swing high 113 > 111 (confirmado en 15, sin tocar el 0,5 en 107)
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert hits == [] and figs == []                             # el 1 anterior ya no vale: falta el swing low posterior al nuevo 0
+    rows += [(109, 110, 105, 106), (106, 110, 106, 109)]         # 16: swing low 105, confirmado en 17
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert figs[0].levels["0"] == 113.0 and figs[0].levels["1"] == 105.0
+
+
+def test_el_1_tiene_que_quedar_por_debajo_del_minimo_de_la_vela_del_0():
+    rows = ROWS[:9] + [(104, 108, 103.5, 107), (107, 111, 100, 109),      # 10: swing high 111 con mínimo 100
+                       (109, 110.5, 105, 106), (106, 108, 104, 107), (107, 109, 106, 108)]   # 12: swing low 104, por encima de 100: no vale
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert hits == [] and figs == []
+    rows += [(108, 109, 98, 100), (100, 105, 99, 104)]                    # 14: swing low 98, por debajo de 100: ahora sí
+    hits, figs = analyze(ctx_for(rows), 1)
+    assert figs[0].levels["0"] == 111.0 and figs[0].levels["1"] == 98.0
+
+
 def test_perder_el_1_con_el_tramo_activo_invalida_el_patron():
     rows = ROWS[:15] + [(112, 112.5, 102, 103)]                            # activado en la 14; la 15 pierde el 103 (y toca el 0,5)
     hits, figs = analyze(ctx_for(rows), 1)

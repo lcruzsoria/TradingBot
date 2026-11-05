@@ -3,8 +3,9 @@
 Todo se calcula «en largo» (el origen es un mínimo y el tramo sube); el corto es el espejo con los precios cambiados de signo.
 
 - Nivel 1: el origen del tramo (la mecha pivote en Reversión).
-- Nivel 0: el primer pivote confirmado (el máximo más alto en la vela del medio de `k` velas a cada lado) tras el origen. Queda fijo:
-  un pivote posterior más alto no lo alarga. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
+- Nivel 0: el último pivote confirmado (el máximo más alto en la vela del medio de `k` velas a cada lado) tras el origen. Mientras el
+  precio no revierta al 0,5 del fibo vigente, un pivote posterior más alto sustituye al 0 y el fibo se recalcula; la reversión al 0,5 lo
+  deja fijo. Mientras no hay pivote confirmado, el 0 provisional es el extremo que lleva el precio.
 - Entrada: la primera vela que revierte hasta el 0,5 (su mínimo lo toca) viniendo de arriba (abre por encima del 0,5) y
   después de la vela que confirma el pivote del 0: no se puede entrar en la propia vela que confirma el swing, porque hasta
   que cierra no se sabe que el 0 existe.
@@ -61,7 +62,7 @@ def rr_of(sl: float, tp: float) -> float:
 
 @dataclass(frozen=True)
 class FiboState:
-    zero: float | None        # primer pivote confirmado (None si todavía no hay ninguno)
+    zero: float | None        # último pivote confirmado (None si todavía no hay ninguno)
     zero_idx: int
     running: float            # extremo que lleva el precio desde el origen (el 0 provisional)
     entry: tuple[int, float] | None   # (vela de la entrada, nivel 0,5)
@@ -69,7 +70,7 @@ class FiboState:
 
     @property
     def extreme(self) -> float:
-        """El 0 que se dibuja: el primer pivote; mientras no hay ninguno, el extremo que lleva el precio."""
+        """El 0 que se dibuja: el último pivote; mientras no hay ninguno, el extremo que lleva el precio."""
         return self.running if self.zero is None else self.zero
 
 
@@ -83,8 +84,8 @@ def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: flo
             return FiboState(zero, zero_idx, running, None, t)              # perdió el origen antes de la entrada
         p = t - k                                                           # la vela t confirma el pivote de k velas atrás
         if p >= max(first_pivot, k) and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
-            if zero is None:
-                zero, zero_idx = float(H[p]), p                             # el primer pivote fija el 0
+            if zero is None or H[p] > zero:
+                zero, zero_idx = float(H[p]), p                             # un pivote más alto, sin reversión al 0,5, mueve el 0
         running = max(running, float(H[t]))
         if zero is not None and t > zero_idx + k and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
             return FiboState(zero, zero_idx, running, (t, (zero + origin) / 2), None)

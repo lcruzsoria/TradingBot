@@ -6,8 +6,11 @@ Ejemplo alcista (el bajista es el espejo exacto, con el Low):
    vela de ese tipo tras el cierre de la TBR, dentro de su plazo, la activa. Si antes de esa rotura una vela ya tomó con la mecha
    (y cerró dentro) cualquiera de los dos lados de la TBR, la TBR es de Reversión y la Continuación se bloquea: manda lo primero que pasa.
 2. Swing points tras la rotura (pivotes de `PATTERN_CONTINUACION_SWING_BARS` velas a cada lado, 1 al inicio: el patrón de tres velas,
-   con el extremo en la del medio): el 0 es un swing high y el 1 es el swing low que viene después de él. Mientras no hay swing low, un
-   swing high más alto sustituye al 0.
+   con el extremo en la del medio): el 0 es un swing high y el 1 es el swing low que viene después de él. Un swing
+   high más alto sustituye al 0 mientras el precio no haya revertido al 0,5 (aunque ya hubiera swing low: el 1 pasa a ser el swing
+   low que venga después del nuevo 0).
+   El 1 solo vale si queda por debajo del mínimo de la vela que forma el 0: un swing low que no rompe ese mínimo es un simple
+   retroceso dentro de la vela del máximo y no define el fibo (se sigue buscando uno más abajo).
 3. Fibonacci de ese tramo (del swing high al swing low), con el 0,5 como punto medio. Queda fijo. El 1 es el stop, así que el trade
    solo existe cuando el swing que lo marca ya está formado (confirmado): sin él, no hay entrada.
    Casos: A. Ideal si ese swing del stop está dentro del rango de la TBR; B. Flexible si queda fuera (el primer swing tras la rotura).
@@ -86,19 +89,21 @@ def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndar
     for t in range(brk + 1, end + 1):
         if origin is None and opp is not None and L[t] <= opp:           # tocó el extremo contrario de la TBR sin tener el fibo definido
             return Leg(zero, zero_idx, None, -1, False, None, t)
+        if origin is not None and L[t] < origin:                            # perdió el 1 (el stop) antes de la entrada
+            return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
+        p = t - k
+        if origin is not None and p >= max(brk, k) and p > origin_idx and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max()                 and H[p] > zero:
+            zero, zero_idx, origin, origin_idx = float(H[p]), p, None, -1       # sin reversión al 0,5, un swing high más alto mueve el 0
         if origin is not None:
-            if L[t] < origin:                                               # perdió el 1 (el stop) antes de la entrada
-                return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
             half = (zero + origin) / 2
             if t > origin_idx + k and L[t] <= half and (O is None or O[t] > half):
                 return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None)
             continue
-        p = t - k
         if p >= max(brk, k):
             if origin is None and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max():
                 if zero is None or H[p] > zero:
                     zero, zero_idx = float(H[p]), p                         # un swing high más alto sustituye al 0
-            if zero is not None and p > zero_idx and L[p] < L[p - k:p].min() and L[p] < L[p + 1:p + k + 1].min():
+            if zero is not None and p > zero_idx and L[p] < L[zero_idx] and L[p] < L[p - k:p].min() and L[p] < L[p + 1:p + k + 1].min():
                 if origin is None or L[p] < origin:
                     origin, origin_idx = float(L[p]), p
     return Leg(zero, zero_idx, origin, origin_idx, origin is not None, None, None)
