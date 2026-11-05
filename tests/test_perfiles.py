@@ -371,3 +371,17 @@ def test_la_lista_de_mercados_de_un_perfil_de_estrategia_no_hereda_la_comun(tmp_
     assert settings.load_watchlist(["NAS100", "DJ30"], path, profile="calendario") == ["EURUSD", "XAUUSD"]
     settings.save_watchlist(["DJ30"], path, profile="calendario")
     assert settings.load_watchlist(["NAS100"], path, profile="calendario", common=False) == ["DJ30"]
+
+
+def test_el_perfil_barrido_nyam_usa_la_cuenta_de_puprime_con_10000_y_solo_el_doble_barrido(tmp_path):
+    from tradingbot.config import STRATEGY_PATTERNS, load_profiles, strategy_skills
+    env = tmp_path / ".env"
+    env.write_text("MT5_PUPRIME_LOGIN=7\nMT5_PUPRIME_SERVER=PUPrime-Demo\nMT5_PUPRIME_PASSWORD=x\n"
+                   "MT5_BARRIDO_NYAM_BASE=puprime\nMT5_BARRIDO_NYAM_NAME=Barrido_NYAM\n"
+                   "MT5_BARRIDO_NYAM_STRATEGY=barrido_nyam\nMT5_BARRIDO_NYAM_CAPITAL=10000\n", encoding="utf-8")
+    p = load_profiles(env)[0]["barrido_nyam"]
+    assert (p.login, p.server, p.display, p.strategy, p.capital, p.currency) == (7, "PUPrime-Demo", "Barrido_NYAM",
+                                                                                "barrido_nyam", 10_000.0, "USD")
+    assert STRATEGY_PATTERNS["barrido_nyam"] == ("doble_barrido",)
+    kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "barrido_nyam")
+    assert [s["type"] for s in kept] == ["cortex", "pattern"]

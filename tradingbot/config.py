@@ -79,13 +79,14 @@ class Mt5Profile:
 
 
 STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",),
+                       "barrido_nyam": ("tbr", "calendario"),
                        "crt": ("pattern", "tbr", "calendario", "bias")}   # skills que un perfil de estrategia no usa (solo opera la suya; CRT tiene su propio sesgo)
 
 STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},)}   # skills que solo existen en ese perfil de estrategia
 
 STRATEGY_TIMEFRAMES = {"crt": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
-STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",)}      # patrones que busca un perfil de estrategia (y solo esos)
+STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",), "barrido_nyam": ("doble_barrido",)}      # patrones que busca un perfil de estrategia (y solo esos)
 
 
 def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:
