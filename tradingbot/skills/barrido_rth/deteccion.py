@@ -8,15 +8,15 @@ Reglas (velas de `BARRIDO_RTH_TF`, M5 al inicio):
 1. El RTH tiene que haber terminado: solo se busca desde el cierre de la TBR RTH.
 2. Solo vale el PRIMER barrido del día: la primera vela, desde `BARRIDO_RTH_START` (10:00 NY), que supera el High o el Low del
    RTH. Si esa vela barre los dos lados a la vez, no hay setup.
-3. La entrada es la primera vela que CIERRA de nuevo dentro del rango (por debajo del High barrido, o por encima del Low barrido):
-   la propia vela de barrido si ya cierra dentro, o la primera posterior que lo haga. Debe haber abierto antes de
+3. La entrada es la primera vela POSTERIOR a la de barrido que CIERRA de nuevo dentro del rango (por debajo del High barrido, o por encima
+   del Low barrido): la vela que barre nunca cuenta, aunque cierre dentro. Debe haber abierto antes de
    `BARRIDO_RTH_END` (10:30 NY); si no vuelve a tiempo, o barre también el otro lado antes de volver, no hay setup. Un
    primer barrido posterior a la ventana tampoco cuenta.
 4. Barrer el High da un corto y barrer el Low, un largo. Entrada a mercado al cierre de esa vela.
 
 Solo índices USA (NAS100, SP500, DJ30...), no Forex. Asia y London se pintan en el perfil. Objetivo 1: el lado contrario del RTH (el Low en un corto, el High en un largo);
 Objetivo 2: el nivel más cercano más allá del 1 entre el Low
-de Asia/London (el menos exigente) y el 50 % del NDOG/NWOG. Stop: el extremo del barrido. El simulador de Setup opera con el objetivo 1;
+de Asia/London (el menos exigente) y el 50 % del NDOG/NWOG. Stop: el swing, el extremo de todo el tramo que rompe el RTH hasta la vela de entrada. El simulador de Setup opera con el objetivo 1;
 el 2 se marca en el gráfico.
 """
 from __future__ import annotations
@@ -127,13 +127,13 @@ def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START
         return [PatternHit(KEY, TITLE, "short", int(sweep), float(ctx.close[sweep]), f"la vela de {_when(ctx, sweep)} barre el High y el Low "
                            f"del RTH a la vez: sin setup hoy", {}, int(ctx.ts[sweep]) + ctx.tf_minutes * 60, INVALIDATED)], []
     side, direction = ("High", "short") if up else ("Low", "long")
-    # la entrada: la primera vela (la del barrido o una posterior) que cierra de nuevo dentro del rango, la del barrido incluida
-    closes = ctx.close[sweep:last + 1]
+    # la entrada: la primera vela POSTERIOR a la del barrido que cierra de nuevo dentro del rango (la vela que barre nunca cuenta)
+    closes = ctx.close[sweep + 1:last + 1]
     back = np.flatnonzero(closes < rth.high) if up else np.flatnonzero(closes > rth.low)
     if not back.size:
         return [], []                                                         # aún no ha vuelto (o no volvió antes de las 10:30)
-    t = sweep + int(back[0])
-    extreme = float(np.max(ctx.high[sweep:t + 1]) if up else np.min(ctx.low[sweep:t + 1]))    # extremo del barrido hasta la entrada
+    t = sweep + 1 + int(back[0])
+    extreme = float(np.max(ctx.high[sweep:t + 1]) if up else np.min(ctx.low[sweep:t + 1]))    # el swing: extremo de todo el tramo que rompe el RTH, hasta la entrada
     other = bool(ctx.low[sweep:t + 1].min() < rth.low) if up else bool(ctx.high[sweep:t + 1].max() > rth.high)
     if other:                                                                 # barrió también el lado contrario antes de volver
         return [PatternHit(KEY, TITLE, direction, int(t), float(ctx.close[t]), f"el precio barre también el otro lado del RTH antes de "
@@ -142,7 +142,7 @@ def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START
     stop = extreme
     goal = rth.low if up else rth.high
     detail = (f"primer barrido del {side} del RTH ({rth.high if up else rth.low:.5g}) en {_when(ctx, sweep)}; la primera vela que cierra de nuevo "
-              f"dentro del rango es la de {_when(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en el extremo del barrido "
+              f"dentro del rango es la de {_when(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en el swing "
               f"({stop:.5g}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
     levels = {"stop": stop, "target": goal}
     second = _target2(ctx, up, goal, midnight + start_min * 60)

@@ -404,12 +404,14 @@ def _barrido_ctx(candles, rth=(100.0, 90.0)):
 
 def test_barrido_rth_el_primer_barrido_que_cierra_dentro_da_el_setup():
     from tradingbot.skills.barrido_rth.deteccion import analyze
-    # 09:55 (dentro del RTH, no cuenta), 10:00 sin barrido, 10:05 barre el High y cierra dentro: corto
+    # 09:55 (dentro del RTH, no cuenta), 10:00 sin barrido, 10:05 barre el High (aunque cierre dentro no cuenta) y 10:10 cierra dentro: corto
     hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))
-    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 2)]
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 3)]
     assert hits[0].price == 98 and hits[0].levels == {"stop": 103.0, "target": 90.0}
     hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 93, 91, 92)]))
     assert [(h.direction, h.status) for h in hits] == [("long", "detected")]       # barre el Low: largo
+    # la vela que barre cierra dentro pero no hay otra posterior: aún sin señal (caso del 5 de noviembre)
+    assert analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98)]))[0] == []
 
 
 def test_barrido_rth_si_la_vela_de_barrido_cierra_fuera_entra_la_primera_que_vuelve_a_cerrar_dentro():
@@ -489,7 +491,7 @@ def test_barrido_rth_objetivo_2_es_lo_que_este_antes_mas_alla_del_objetivo_1():
     from dataclasses import replace
     from tradingbot.skills.pattern.patterns import PeerTbr
     from tradingbot.skills.barrido_rth.deteccion import analyze
-    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98), (98, 99, 97, 98)])
     day = date(1970, 1, 1)
     asia = PeerTbr("ASIA", "Asia", day, 88.0, 70.0, -4 * 3600, 0)
     london = PeerTbr("LONDON", "London", day, 86.0, 60.0, 2 * 3600, 5 * 3600)
