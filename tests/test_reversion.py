@@ -141,3 +141,58 @@ def test_stop_y_objetivo_en_los_niveles_configurados():
     for bad in ({"STOP_LEVEL": "0.4"}, {"TARGET_LEVEL": "0.6"}, {"STOP_LEVEL": "x"}):
         with pytest.raises(ValueError):
             level_settings(lambda k, d, b=bad: b.get(k, d))
+
+
+# -- confirmaciones opcionales (CISD en M15; BPR + retest + cierre bajo el CISD en velas menores) ---------------------------------------------
+import numpy as np
+
+from tradingbot.skills.pattern import confirm as confirmation
+
+
+def test_cisd_confirma_con_el_cierre_bajo_el_minimo_de_la_secuencia_alcista():
+    ctx = ctx_for(ROWS, first_bar=3)
+    # la secuencia alcista que incluye la mecha pivote (velas 1-4) tiene su mínimo en 99: cierra bajo él la vela 7 (cierre 97)
+    assert confirmation.cisd_confirmation(ctx.high, ctx.low, ctx.open, ctx.close, 4, 0, 9) == 7
+    hits, _ = analyze(ctx, 1, confirm="cisd")
+    assert (hits[0].status, hits[0].x) == (DETECTED, 9)
+
+
+def test_sin_cierre_bajo_el_cisd_no_hay_entrada():
+    rows = list(ROWS)
+    rows[1] = (100, 102, 90, 101)                                     # la secuencia llega hasta 90: ninguna vela cierra por debajo
+    hits, _ = analyze(ctx_for(rows, first_bar=3), 1, confirm="cisd")
+    assert not [h for h in hits if h.status == DETECTED]
+
+
+def test_el_cisd_es_el_espejo_en_largo():
+    ctx = ctx_for(mirror(ROWS), first_bar=3)
+    hits, _ = analyze(ctx, 1, confirm="cisd")
+    assert (hits[0].status, hits[0].direction, hits[0].x) == (DETECTED, "long", 9)
+
+
+BPR = np.array([(10, 11, 9.5, 10.8), (10.8, 12, 10.5, 11.9), (12, 14, 11.8, 13.9),      # secuencia alcista con el iFVG (11 - 11,8)
+                (13.9, 14.1, 12, 13.2), (13.2, 13.3, 10, 10.2),                          # la 4 lo invierte (cierra bajo 11)
+                (10.2, 10.8, 9.8, 10),                                                   # nace el FVG bajista (10,8 - 12): BPR 11 - 11,8
+                (10, 11.5, 10, 11.2),                                                    # retest del BPR sin cerrar sobre él
+                (11, 11.1, 9, 9.2)])                                                     # cierra bajo el CISD (9,5)
+
+
+def bpr(rows):
+    o, h, l, c = rows.T
+    return confirmation.bpr_confirmation(h, l, o, c, 2, 0, len(rows) - 1)
+
+
+def test_bpr_retest_y_cierre_bajo_el_cisd():
+    assert bpr(BPR) == 7
+
+
+def test_el_retest_que_cierra_al_otro_lado_del_bpr_lo_invalida():
+    rows = BPR.copy()
+    rows[6] = (10, 12.5, 10, 12)                                      # cierra por encima de la zona común
+    assert bpr(rows) is None
+
+
+def test_sin_retest_no_hay_confirmacion_bpr():
+    rows = BPR.copy()
+    rows[6] = (10, 10.5, 9.9, 10.1)                                   # no sube hasta el BPR
+    assert bpr(rows) is None

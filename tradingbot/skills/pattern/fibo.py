@@ -75,9 +75,10 @@ class FiboState:
 
 
 def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: float, k: int, first_pivot: int,
-             running: float, O: np.ndarray | None = None) -> FiboState:
+             running: float, O: np.ndarray | None = None, not_before: int = -1) -> FiboState:
     """Recorre las velas `last_done + 1 .. end`. `first_pivot`: primera vela que puede ser el pivote del 0; `running`: extremo ya visto.
-    `O`: aperturas (con el mismo signo que H y L): si se dan, la vela de la entrada debe abrir por encima del 0,5."""
+    `O`: aperturas (con el mismo signo que H y L): si se dan, la vela de la entrada debe abrir por encima del 0,5.
+    `not_before`: la entrada tiene que ser posterior a esa vela (la de una confirmación previa)."""
     zero, zero_idx = None, -1
     for t in range(last_done + 1, end + 1):
         if L[t] < origin:
@@ -87,6 +88,6 @@ def run_fibo(H: np.ndarray, L: np.ndarray, last_done: int, end: int, origin: flo
             if zero is None or H[p] > zero:
                 zero, zero_idx = float(H[p]), p                             # un pivote más alto, sin reversión al 0,5, mueve el 0
         running = max(running, float(H[t]))
-        if zero is not None and t > zero_idx + k and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
+        if zero is not None and t > zero_idx + k and t > not_before and L[t] <= (zero + origin) / 2 and (O is None or O[t] > (zero + origin) / 2):
             return FiboState(zero, zero_idx, running, (t, (zero + origin) / 2), None)
     return FiboState(zero, zero_idx, running, None, None)

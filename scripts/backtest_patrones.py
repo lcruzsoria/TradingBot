@@ -53,6 +53,9 @@ UNTIL = dict(OLD_UNTIL) if os.environ.get("BT_PLAZOS") == "anterior" else dict(N
 # BT_ALCANCE: "global" (por defecto, una sola posición abierta en toda la cuenta, como CORTEX_POSITION_SCOPE) o "mercado".
 GLOBAL_SCOPE = os.environ.get("BT_ALCANCE", "global") != "mercado"
 EXTEND = ()
+CONFIRM = "none"                              # confirmación de Reversión: none, cisd (M15) o bpr (velas de LTF_TF); la fija main()
+LTF_TF = "5m"
+ONLY_REVERSION = False
 BE_R = None                                   # breakeven en R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT); lo fija main()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
@@ -139,6 +142,13 @@ def run_symbol(source, sym: str, order, zones):
     spread = spread_prices(source, sym, df)
     df = df.iloc[:-1]                                    # la última vela sigue formándose
     spread = spread[:len(df)]
+    ltf = None
+    if CONFIRM == "bpr":
+        source.connect()
+        ld = source.load_candles(sym, LTF_TF).reset_index(drop=True).iloc[:-1]
+        ltf = {"ts": ld["ts"].to_numpy().astype(np.int64), "tf_min": int(LTF_TF[:-1]),
+               **{k: ld[k].to_numpy().astype(float) for k in ("open", "high", "low", "close")}}
+        print(f"    velas {LTF_TF}: {len(ld)} (desde {pd.Timestamp(int(ld['ts'].iloc[0]) - AHEAD, unit='s'):%Y-%m-%d})", flush=True)
     ts = df["ts"].to_numpy().astype(np.int64)
     o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
     n = len(ts)
@@ -167,7 +177,9 @@ def run_symbol(source, sym: str, order, zones):
             continue
         ctx = PatternContext(sym, "15m", TF_MIN, ts, o, h, l, c, tbr, first, end, True, window.next_zone, window.next_hours, AHEAD, start, window.limit_verb)
         for name, mod in PATTERNS.items():
-            hits, _figs = mod.analyze(ctx, 1)
+            if ONLY_REVERSION and mod is not reversion:
+                continue
+            hits, _figs = mod.analyze(ctx, 1, **({"confirm": CONFIRM, "ltf": ltf} if mod is reversion else {}))
             hit = hits[0] if hits else None
             status = "ignorada (otro patrón)" if hit is None else hit.status
             detail = "" if hit is None else hit.detail
@@ -428,8 +440,15 @@ def main() -> None:
     ap.add_argument("--perfil", default=None, help="perfil de MT5 (puprime, metaquotes...); por defecto el del .env")
     ap.add_argument("--be-r", type=float, default=None,
                     help="breakeven en R (por defecto SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT del bot; 0 = sin breakeven)")
+    ap.add_argument("--confirmacion", choices=("none", "cisd", "bpr5", "bpr3"), default="none",
+                    help="confirmación de Reversión antes de la entrada: CISD en M15, o BPR + retest + cierre bajo el CISD en velas de 5m o 3m")
+    ap.add_argument("--solo-reversion", action="store_true")
     args = ap.parse_args()
-    global BE_R
+    global BE_R, CONFIRM, LTF_TF, ONLY_REVERSION
+    CONFIRM = "bpr" if args.confirmacion.startswith("bpr") else args.confirmacion
+    LTF_TF = "3m" if args.confirmacion == "bpr3" else "5m"
+    ONLY_REVERSION = args.solo_reversion
+    print("confirmación:", args.confirmacion)
     setup = EnvConfig().section("SETUP")
     be_pct, risk_pct = setup.get_float("BE_TRIGGER_PCT", 1.0), setup.get_float("RISK_PCT", 1.0)
     BE_R = args.be_r if args.be_r is not None else (be_pct / risk_pct if be_pct > 0 and risk_pct > 0 else None)

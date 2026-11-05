@@ -22,6 +22,7 @@ import numpy as np
 
 from ...timeframes import parse_timeframe
 from .continuacion import _when
+from . import confirm as confirmation
 from .fibo import at_level, fibo_levels, level_name, level_settings, rr_of, run_fibo
 from .trade import position_figure
 from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
@@ -55,7 +56,10 @@ class Reversion(Pattern):
         return analyze(ctx, self.swing_bars, self.sl, self.tp)[1]
 
 
-def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5) -> tuple[list[PatternHit], list[Figure]]:
+def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, confirm: str = "none",
+            ltf: dict | None = None) -> tuple[list[PatternHit], list[Figure]]:
+    """`confirm`: "none" (entrada en el 0,5 sin más), "cisd" (antes de la entrada, una vela de M15 cierra bajo el CISD) o "bpr" (antes de la
+    entrada, BPR + retest + cierre bajo el CISD en las velas `ltf` = {"ts", "open", "high", "low", "close", "tf_min"} de M5 o M3)."""
     tbr = ctx.tbr
     start, end = ctx.first_bar, ctx.last_bar
     o, h, l, c, ts = ctx.open, ctx.high, ctx.low, ctx.close, ctx.ts
@@ -105,8 +109,31 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5) -> t
         return [], []
     origin_price = float(L[origin])
     # 3) fibonacci de la mecha pivote al pivote siguiente y 4) reversión al 0,5
+    cidx = None
+    not_before = -1
+    if confirm != "none":
+        not_before = end + 1                                  # sin confirmación no hay entrada
+        W = (h, l, o, c) if up else (-l, -h, -o, -c)          # espacio del corto
+        if confirm == "cisd":
+            cidx = confirmation.cisd_confirmation(*W, origin, max(ctx.start_bar, 0), end)
+            if cidx is not None:
+                not_before = cidx
+        elif confirm == "bpr" and ltf is not None:
+            lts, lsec = ltf["ts"], ltf["tf_min"] * 60
+            a, b = int(np.searchsorted(lts, ts[origin], "left")), int(np.searchsorted(lts, ts[origin] + tf_sec, "left"))
+            lend = int(np.searchsorted(lts, ts[min(end, len(ts) - 1)] + tf_sec, "left")) - 1
+            if b > a and lend >= a:
+                LW = ((ltf["open"], ltf["high"], ltf["low"], ltf["close"]) if up else (-ltf["open"], -ltf["low"], -ltf["high"], -ltf["close"]))
+                Lo, Lh, Ll, Lc = LW
+                anchor = a + int(np.argmax(Lh[a:b]))
+                floor = int(np.searchsorted(lts, ts[max(ctx.start_bar, 0)], "left"))
+                li = confirmation.bpr_confirmation(Lh, Ll, Lo, Lc, anchor, floor, lend)
+                if li is not None:
+                    cidx = li
+                    done_at = int(lts[li]) + lsec           # la confirmación cierra ahí: la entrada, en una vela de M15 que abra después
+                    not_before = int(np.searchsorted(ts, done_at, "left")) - 1
     state = run_fibo(H, L, confirmed, end, origin_price, k, origin + 1, float(H[origin:confirmed + 1].max()),
-                     -o if up else o)
+                     -o if up else o, not_before)
     zero_idx, entry = state.zero_idx, state.entry
     extreme = state.extreme
     half = (extreme + origin_price) / 2
@@ -144,7 +171,8 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5) -> t
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * stop, sign * target, label)
         return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
     if ctx.window_closed:                                     # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»
-        found, _ = expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero sin retroceso al 0,5")
+        why = "sin retroceso al 0,5" if confirm == "none" or cidx is not None else f"sin confirmación ({confirm.upper()})"
+        found, _ = expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero {why}")
         x = found[0].x
         return [hit(EXPIRED, direction, x, sign * half, found[0].detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})], \
