@@ -802,10 +802,19 @@ class ChartView(pg.PlotWidget):
                 frame.setZValue(-4)
                 pi.addItem(frame, ignoreBounds=True)
                 self._pos_items.append(frame)
-            line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.MUTED, width=1.2))
+            ex = pos.get("entry_x")                                  # vela cuyo cierre es la entrada (Barrido_NYAM): se marca con un punto
+            line = pg.PlotCurveItem(x=np.array([x0 if ex is None else min(float(ex), x0), x1]), y=np.array([entry, entry]),
+                                    pen=pg.mkPen(theme.MUTED, width=1.2))
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
+            if ex is not None:
+                side = "#26A69A" if pos["direction"] == "long" else "#EF5350"
+                dot = pg.ScatterPlotItem(x=[float(ex)], y=[entry], symbol="o", size=9, pen=pg.mkPen("#FFFFFF", width=1.5),
+                                         brush=pg.mkBrush(side))
+                dot.setZValue(6)
+                pi.addItem(dot, ignoreBounds=True)
+                self._pos_items.append(dot)
             if pos.get("target2") is not None:                      # segundo objetivo (Barrido_NYAM): línea discontinua con su etiqueta
                 t2 = float(pos["target2"])
                 tp2 = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([t2, t2]),

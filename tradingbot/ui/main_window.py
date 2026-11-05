@@ -1273,6 +1273,7 @@ class MainWindow(QMainWindow):
             decision, reason = self._entry_decision(x0, f.direction)
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
                               "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"], "target2": f.levels.get("objetivo2"),
+                              "entry_x": (int(np.searchsorted(ts, int(f.levels["entrada_ts"]), "left")) if f.levels.get("entrada_ts") else None),
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
                               "reason": reason, "session": (f.zone, f.day)})
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran

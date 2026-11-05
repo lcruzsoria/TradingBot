@@ -402,46 +402,55 @@ def _barrido_ctx(candles, rth=(100.0, 90.0)):
     return PatternContext("NAS100", "5m", 5, ts, o, h, l, c, tbr, 0, len(ts) - 1, False, ahead=0, peers=peers)
 
 
-def test_barrido_rth_el_primer_barrido_que_cierra_dentro_da_el_setup():
-    from tradingbot.skills.barrido_rth.deteccion import analyze
-    # 09:55 (dentro del RTH, no cuenta), 10:00 sin barrido, 10:05 barre el High (aunque cierre dentro no cuenta) y 10:10 cierra dentro: corto
-    hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))
-    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 3)]
-    assert hits[0].price == 98 and hits[0].levels == {"stop": 103.0, "target": 90.0}
-    hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 93, 91, 92)]))
-    assert [(h.direction, h.status) for h in hits] == [("long", "detected")]       # barre el Low: largo
-    # la vela que barre cierra dentro pero no hay otra posterior: aún sin señal (caso del 5 de noviembre)
-    assert analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98)]))[0] == []
+IN = (95, 98, 93, 95)           # vela dentro del RTH (90-100)
+OUT = (102, 104, 100, 103)      # vela que cierra fuera (por arriba)
 
 
-def test_barrido_rth_si_la_vela_de_barrido_cierra_fuera_entra_la_primera_que_vuelve_a_cerrar_dentro():
+def test_barrido_rth_la_rotura_es_un_cierre_fuera_y_la_entrada_la_primera_vela_que_vuelve_dentro():
     from tradingbot.skills.barrido_rth.deteccion import analyze
+    # 09:55 y 10:00 dentro; 10:05 y 10:10 cierran fuera (rotura y swing); 10:15 cierra dentro: corto con stop en el swing (105)
     hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]))
-    assert [(h.status, h.x) for h in hits] == [("detected", 4)] and hits[0].price == 98
-    assert hits[0].levels == {"stop": 105.0, "target": 90.0}                       # stop en el extremo del barrido hasta la entrada
-    # aún no ha vuelto a cerrar dentro: sin señal (de momento)
-    assert analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101)]))[0] == []
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 105.0, "target": 90.0}
+    # rompe por debajo: largo, stop en el mínimo del tramo fuera (86) y objetivo en el High del RTH
+    hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 86, 91)]))
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 86.0, "target": 100.0}
+    # una mecha que supera el nivel y cierra dentro no es una rotura (caso del 3 de noviembre): la entrada es tras la rotura real
+    hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 104, 97, 102), (102, 103, 99, 99)]))
+    assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 104.0
 
 
 def test_barrido_rth_casos_sin_setup():
     from tradingbot.skills.barrido_rth.deteccion import analyze
-    ambos = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (95, 103, 87, 95)]))[0]
-    assert [h.status for h in ambos] == ["invalidated"]
+    solo_mechas = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0]
+    assert solo_mechas == []                                                       # nunca cierra fuera: no hay rotura
+    no_vuelve = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 92, 85, 86), (86, 88, 84, 85)]))[0]
+    assert no_vuelve == []                                                         # rompe y nunca vuelve a cerrar dentro (caso del 5 de noviembre)
     otro_lado = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
     assert [h.status for h in otro_lado] == ["invalidated"]                        # barre también el Low antes de volver
-    tarde = [(95, 99, 94, 96)] + [(95, 98, 93, 95)] * 6 + [(95, 103, 94, 96), (96, 97, 95, 96)]
-    assert analyze(_barrido_ctx(tarde), 600, 630)[0] == []                          # con la ventana hasta las 10:30, el primer barrido (10:30) queda fuera
-    no_vuelve = [(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102)] + [(102, 104, 100, 103)] * 6 + [(103, 104, 95, 96)]
-    assert analyze(_barrido_ctx(no_vuelve), 600, 630)[0] == []                      # vuelve a cerrar dentro a las 10:30: tarde
 
 
-def test_barrido_rth_ventana_configurable_y_valida():
+def test_barrido_rth_ventanas_de_rotura_y_de_entrada():
+    from tradingbot.skills.barrido_rth.deteccion import analyze
+    # 09:55 = vela 0; 10:00 = 1; 10:55 = 12; 11:00 = 13; 11:15 = 16; 12:00 = 25
+    break_1055 = [(95, 99, 94, 96)] + [IN] * 11 + [OUT] * 4 + [(101, 102, 97, 98)]    # rotura a las 10:55, vuelve a las 11:15
+    hits, _ = analyze(_barrido_ctx(break_1055))
+    assert [(h.direction, h.x) for h in hits] == [("short", 16)]                      # la vuelta puede llegar después de las 11:00
+    break_1100 = [(95, 99, 94, 96)] + [IN] * 12 + [OUT] + [(101, 102, 97, 98)]        # rotura a las 11:00: fuera de la ventana
+    assert analyze(_barrido_ctx(break_1100))[0] == []
+    assert [h.status for h in analyze(_barrido_ctx(break_1100), 600, 720)[0]] == ["detected"]     # con la ventana hasta las 12:00 sí vale
+    late_back = [(95, 99, 94, 96)] + [IN] * 11 + [OUT] * 14 + [(101, 102, 97, 98)]    # vuelve a las 12:05: tarde
+    assert analyze(_barrido_ctx(late_back))[0] == []
+
+
+def test_barrido_rth_ventanas_configurables_y_validas():
     from tradingbot.envconfig import EnvConfig, parse
-    from tradingbot.skills.barrido_rth.deteccion import BarridoRth, analyze
-    late = [(95, 99, 94, 96)] + [(95, 98, 93, 95)] * 6 + [(95, 103, 94, 96), (96, 97, 95, 96)]
-    assert [h.status for h in analyze(_barrido_ctx(late), 10 * 60, 11 * 60)[0]] == ["detected"]
+    from tradingbot.skills.barrido_rth.deteccion import BarridoRth
     with pytest.raises(ValueError, match="BARRIDO_RTH_END"):
         BarridoRth(EnvConfig(parse("START=10:30\nEND=10:00\n")))
+    with pytest.raises(ValueError, match="ENTRY_END"):
+        BarridoRth(EnvConfig(parse("END=11:00\nENTRY_END=10:00\n")))
+    assert BarridoRth(EnvConfig(parse("ENTRY_END=13:00\n"))).entry_end == 13 * 60
 
 
 def test_barrido_nyam_pinta_su_rth_y_su_ciclo_solo_en_su_perfil(tmp_path):
@@ -483,7 +492,7 @@ def test_ndog_y_nwog_salen_del_cierre_de_las_17_y_de_la_pausa_del_fin_de_semana(
 def test_barrido_rth_solo_busca_en_indices_usa():
     from dataclasses import replace
     from tradingbot.skills.barrido_rth.deteccion import analyze
-    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)])
     assert analyze(replace(ctx, symbol="NAS100.s"))[0] and not analyze(replace(ctx, symbol="EURUSD"))[0]
 
 
@@ -491,7 +500,7 @@ def test_barrido_rth_objetivo_2_es_lo_que_este_antes_mas_alla_del_objetivo_1():
     from dataclasses import replace
     from tradingbot.skills.pattern.patterns import PeerTbr
     from tradingbot.skills.barrido_rth.deteccion import analyze
-    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98), (98, 99, 97, 98)])
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98)])
     day = date(1970, 1, 1)
     asia = PeerTbr("ASIA", "Asia", day, 88.0, 70.0, -4 * 3600, 0)
     london = PeerTbr("LONDON", "London", day, 86.0, 60.0, 2 * 3600, 5 * 3600)
@@ -572,5 +581,18 @@ def test_la_skill_barrido_rth_arranca_en_el_hexagono_grande_4_con_los_ajustes_de
     skill.on_start()
     assert skill.slot == 4 and skill.error == "" and skill.types == ["barrido_rth"]
     pattern = skill.patterns["barrido_rth"]
-    assert (pattern.tf, pattern.start, pattern.end) == (pattern.tf, 600, 660)            # BARRIDO_RTH_START=10:00, _END=11:00
+    assert (pattern.start, pattern.end, pattern.entry_end) == (600, 660, 720)            # BARRIDO_RTH_START=10:00, _END=11:00, _ENTRY_END=12:00
     assert [z.key for z in skill.order] == ["PRE_NY", "NY_AM", "NY_PM"]
+
+
+def test_el_grafico_marca_con_un_punto_la_vela_de_entrada_y_el_tp2(tmp_path, monkeypatch):
+    import pyqtgraph as pg
+    win = make_window(tmp_path, monkeypatch)
+    pos = {"x0": 5, "x1": 20, "entry": 98.0, "stop": 105.0, "target": 90.0, "target2": 80.0, "entry_x": 4, "direction": "short",
+           "state": "abierta", "label": "RTH ▼ barrido", "decision": "GO", "reason": "", "session": ("NY Open", "2026-11-03")}
+    win.chart.show_positions(True)
+    win.chart.set_positions([pos])
+    dots = [i for i in win.chart._pos_items if isinstance(i, pg.ScatterPlotItem)]
+    assert len(dots) == 1 and list(dots[0].data["x"]) == [4.0] and list(dots[0].data["y"]) == [98.0]   # el punto, en la vela de entrada
+    win.chart.set_positions([{**pos, "entry_x": None, "target2": None}])
+    assert not [i for i in win.chart._pos_items if isinstance(i, pg.ScatterPlotItem)]                  # sin vela de entrada, sin punto
