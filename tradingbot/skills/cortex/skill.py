@@ -52,7 +52,8 @@ class CortexSkill(Skill):
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self.strategy = str(app.get("strategy") or "")
-        self.pattern_use_bias = not (self.strategy == "tbrvwap" and not self.settings.get_bool("TBRVWAP_USE_BIAS", False))
+        self.pattern_use_bias = not (self.strategy == "barrido_nyam"       # Barrido_NYAM: el sesgo se muestra pero nunca desactiva una entrada
+                                     or (self.strategy == "tbrvwap" and not self.settings.get_bool("TBRVWAP_USE_BIAS", False)))
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
         self._used: set = set()                         # sesiones (mercado, TBR, día) que ya dieron un trade: no pueden dar otro
@@ -263,8 +264,9 @@ class CortexSkill(Skill):
                 decision = Decision(False, self._busy_reason(busy))
             elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
                 decision = Decision(False, self._session_reason(p))
-            elif not self.pattern_use_bias:              # estrategia TBR con VWAP: no depende del sesgo (CORTEX_TBRVWAP_USE_BIAS=false)
-                decision = Decision(True, f"estrategia TBR con VWAP: no depende del sesgo (CORTEX_TBRVWAP_USE_BIAS=false); {result.summary}")
+            elif not self.pattern_use_bias:              # estrategia que no depende del sesgo (TBR con VWAP: CORTEX_TBRVWAP_USE_BIAS=false; Barrido_NYAM: siempre)
+                own = "Barrido_NYAM" if self.strategy == "barrido_nyam" else "TBR con VWAP"
+                decision = Decision(True, f"estrategia {own}: no depende del sesgo; {result.summary}")
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
             self.publish("cortex.decision", {"symbol": p["symbol"], "timeframe": p["timeframe"], "tbr": p["tbr"],

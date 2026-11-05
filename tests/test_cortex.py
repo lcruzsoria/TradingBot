@@ -35,7 +35,7 @@ def test_sin_sesgo_o_en_lateral_no_se_opera_salvo_que_se_permita():
     assert not validate("long", None).allowed and "aún no está calculado" in validate("long", None).reason
 
 
-def run_skills(env_text="", with_setup=True):
+def run_skills(env_text="", with_setup=True, app=None):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus, decisions, orders, executed = EventBus(), [], [], []
@@ -43,7 +43,7 @@ def run_skills(env_text="", with_setup=True):
     bus.subscribe("t", "setup.order", orders.append)
     bus.subscribe("t", "setup.executed", executed.append)
     skills = [{"type": "cortex"}] + ([{"type": "setup"}] if with_setup else [])
-    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), skills)
+    manager = SkillManager(bus, Services(None, None, {"app": app or {}}, EnvConfig(parse(env_text))), skills)
     manager.start()
     return manager, bus, decisions, orders, executed
 
@@ -312,3 +312,14 @@ def test_una_orden_vencida_por_tiempo_no_bloquea_aunque_no_haya_velas_para_verlo
     wait(orders, 2)
     manager.stop()
     assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
+
+
+def test_en_barrido_nyam_el_sesgo_no_desactiva_entradas():
+    """Barrido_NYAM no usa el sesgo para decidir: un corto con sesgo alcista, o sin sesgo, es GO (el sesgo solo se muestra)."""
+    manager, bus, decisions, orders, executed = run_skills(with_setup=False, app={"strategy": "barrido_nyam"})
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", pattern_event(direction="short"), source="pattern")
+    wait(orders)
+    manager.stop()
+    assert decisions[0].payload["decision"].allowed and "no depende del sesgo" in decisions[0].payload["decision"].reason
+    assert len(orders) == 1
