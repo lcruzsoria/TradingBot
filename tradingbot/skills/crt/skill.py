@@ -22,6 +22,14 @@ ENTRY_NAMES = {1: "vela siguiente al CISD", 4: "cierre del CISD"}
 DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
 
 
+def htf_candle(symbol: str, c2: int, ahead: int, htf_min: int | None = None) -> str:
+    """La vela HTF de C2 (inicio de C2 en hora de servidor) con su día y su horario en NY: «H4 02/11 21:00–01:00 NY»."""
+    htf_min = htf_min or (engine.INDICES if is_us_index(symbol, DEFAULT_US_INDICES) else engine.FOREX).htf_min
+    a = datetime.fromtimestamp(int(c2) - ahead, timezone.utc)
+    b = datetime.fromtimestamp(int(c2) - ahead + htf_min * 60, timezone.utc)
+    return f"H{htf_min // 60} {a:%d/%m %H:%M}–{b:%H:%M} NY"
+
+
 def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule: engine.Rule, entry_model: int, points) -> dict:
     """El `crt.signal` de un setup con su entrada (`engine.find_zone_setups` + `engine.entry_point`). La usa la skill y el script que rehace el forwardtest."""
     sgn, entry, risk = st["sign"], ep["entry"], ep["risk"]
@@ -31,7 +39,7 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
             "stop": sgn * st["stop"], "target": sgn * (entry - rule.rr * risk), "day": ny.date(),
             "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
             "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
-            "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY,
+            "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY, "htf_candle": htf_candle(symbol, st["C2"], ahead),
             "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
             "reason": f"CRT: sweep {st['dirección']} en C2 ({st.get('sweep', 'vela C1')}); el iFVG de M{st.get('ltf', tf)} y el FVG de {st['mtf']} (de sentido contrario) forman un BPR; con el iFVG invertido el "
                       f"precio vuelve a él y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
@@ -245,7 +253,7 @@ class CrtSkill(Skill):
             self.publish("crt.pending", {"symbol": symbol, "timeframe": tf, "direction": w["dirección"], "level": sign * float(w["level"]),
                                          "zone": tuple(sorted((sign * float(w["z_bottom"]), sign * float(w["z_top"])))), "stop": sign * float(w["stop"]),
                                          "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}",
-                                         "htf": f"H{htf_min // 60}"})
+                                         "htf": htf_candle(symbol, w["C2"], ahead, htf_min)})
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15 y 5 min, TF del FVG >= TF del iFVG). Cada
@@ -273,7 +281,8 @@ class CrtSkill(Skill):
                 continue
             self._blocked_seen.add(key)
             self.publish("crt.blocked", {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "stop": st["sign"] * st["stop"],
-                                         "entry_ts": int(ts[m][st["jc"]]) + m * 60, "text": sl_text(risk, cfg, long=True), "strategy": STRATEGY})
+                                         "entry_ts": int(ts[m][st["jc"]]) + m * 60, "text": sl_text(risk, cfg, long=True), "strategy": STRATEGY,
+                                         "htf": htf_candle(symbol, st["C2"], ahead, cfg.htf_min)})
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
         self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead, cfg.htf_min)
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)

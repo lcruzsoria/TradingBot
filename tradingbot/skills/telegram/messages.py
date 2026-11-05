@@ -29,7 +29,7 @@ def crt_htf(symbol) -> str:
 def _strategy(title, order=None) -> str:
     """Primera línea de cada aviso: qué estrategia lo origina (varias comparten la cuenta del perfil). En CRT, además, la vela HTF que se usa."""
     if order is not None and getattr(order, "pattern_key", "") == "crt":
-        title = f"CRT · vela {crt_htf(order.symbol)}"
+        title = f"CRT · vela {getattr(order, 'htf_candle', '') or crt_htf(order.symbol)}"
     return f"<b>Estrategia:</b> {_e(title)}\n"
 
 

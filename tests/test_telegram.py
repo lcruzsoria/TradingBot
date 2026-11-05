@@ -495,3 +495,13 @@ def test_aviso_de_un_setup_crt_sin_entrada_por_el_stop_maximo():
     text = messages.blocked({"symbol": "NAS100.s", "timeframe": "5m", "direction": "short", "stop": 28857.05,
                              "text": "Setup OK sin entrada: el stop (334 puntos) supera el máximo permitido (125 puntos)"}, "crt")
     assert "NO GO" in text and "Corto NAS100.s" in text and "334 puntos" in text and "Stop" in text
+
+
+def test_la_apertura_de_crt_dice_la_vela_htf_en_la_que_entro():
+    from datetime import date
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.telegram import messages
+    o = Order("EURUSD", "5m", "short", "CRT (vela siguiente al CISD)", "crt", "", date(2026, 11, 4), 1.1, 1.1, 1.1, 1.1, 1.12, 1.09, "Bearish", -2.0, "x",
+              htf_candle="H4 04/11 05:00–09:00 NY")
+    assert messages.opened(o, "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4 04/11 05:00–09:00 NY"
+    assert messages.opened(Order(**{**o.__dict__, "htf_candle": ""}), "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4"
