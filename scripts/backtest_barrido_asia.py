@@ -1,6 +1,6 @@
 """Backtest del setup «Barrido de Asia» (perfil Barrido_ASIA) en NAS100.s, SP500.s y DJ30.s con las velas de M5 de analisis/5m/puprime.
 
-Usa exactamente el código del bot: `contextos` + `analizar` (skills/barrido_asia/deteccion.py) para detectar el setup y `resolve`
+Usa exactamente el código del bot: `contextos` + `analizar` (skills/barrido/asia.py) para detectar el setup y `resolve`
 (skills/setup/positions.py) para cerrar la posición simulada (stop, objetivo en el otro lado de Asia, o fin del día de trading).
 La cuenta simulada es la del perfil: capital inicial y riesgo por operación de tradingbot.env (MT5_BARRIDO_ASIA_CAPITAL, SETUP_RISK_PCT);
 cada operación suma su R por el riesgo sobre el saldo con el que se consolida (misma regla que `VirtualAccount`).
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tradingbot.envconfig import load  # noqa: E402
-from tradingbot.skills.barrido_asia.deteccion import Ajustes, analizar, cierre_del_dia, contextos  # noqa: E402
+from tradingbot.skills.barrido.asia import Ajustes, analizar, cierre_del_dia, contextos  # noqa: E402
 from tradingbot.skills.setup.account import Schedule  # noqa: E402
 from tradingbot.skills.setup.positions import resolve  # noqa: E402
 from tradingbot.skills.tbr.zones import compute, zones_from_settings  # noqa: E402

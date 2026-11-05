@@ -266,7 +266,7 @@ class CortexSkill(Skill):
             elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
                 decision = Decision(False, self._session_reason(p))
             elif not self.pattern_use_bias:              # estrategia que no depende del sesgo (TBR con VWAP: CORTEX_TBRVWAP_USE_BIAS=false; Barrido_NYAM: siempre)
-                own = {"barrido_nyam": "Barrido_NYAM", "asia_sweep": "Barrido_ASIA"}.get(self.strategy, "TBR con VWAP")
+                own = {"barrido_nyam": "Barrido_NYAM"}.get(self.strategy, "TBR con VWAP")
                 decision = Decision(True, f"estrategia {own}: no depende del sesgo; {result.summary}")
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)

@@ -117,6 +117,11 @@ class Contexto:
     day_end: int = 0             # fin del día de trading del mercado (minutos desde medianoche de NY): ahí cierran los trades
     be_r: float | None = None    # R a favor para pasar el stop a la entrada (como Setup)
 
+    @property
+    def cierre_rango(self) -> int:
+        """Cierre del rango que se rompe (hora del servidor): la skill lo usa para saber si el día es reciente."""
+        return self.rth.close_ts
+
 
 def es_indice_usa(symbol: str) -> bool:
     name = symbol.strip().lower()

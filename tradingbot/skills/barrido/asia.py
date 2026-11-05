@@ -11,7 +11,7 @@ Reglas (velas de `BARRIDO_ASIA_TF`, M5 al inicio):
    Stop: fijo, a `BARRIDO_ASIA_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing; si no, el swing más
    `BARRIDO_ASIA_STOP_BUFFER` (5) puntos (por encima en un corto, por debajo en un largo).
 4. Entrada: la primera vela POSTERIOR a la rotura que CIERRA de nuevo dentro del rango de Asia, a mercado a su cierre. Debe abrir antes de
-   `BARRIDO_ASIA_ENTRY_END` (02:00 NY, cuando empieza London). Si antes de volver el precio rompe también el otro lado, no hay setup.
+   `BARRIDO_ASIA_ENTRY_END` (01:00 NY): la vela de entrada de 5 min tiene que cerrar dentro de Asia a la 01:00 como tarde. Si antes de volver el precio rompe también el otro lado, no hay setup.
 5. Romper por arriba da un corto y romper por abajo, un largo. Objetivo: el lado contrario del rango de Asia (el Low en un corto, el High
    en un largo). Sin breakeven: la posición cierra en el objetivo, en el stop o a final del día de trading.
 
@@ -35,7 +35,7 @@ ZONA = "ASIA"                    # la TBR cuyo rango se rompe
 DEFAULT_TF = "5m"
 DEFAULT_START = "00:00"          # hora de NY desde la que cuenta una rotura (cierre de Asia)
 DEFAULT_END = "01:00"            # hora de NY antes de la que debe abrir la vela que rompe el rango
-DEFAULT_ENTRY_END = "02:00"      # hora de NY antes de la que debe abrir la vela de entrada (empieza London)
+DEFAULT_ENTRY_END = "01:00"      # hora de NY antes de la que debe abrir la vela de entrada: su cierre es a la 01:00 como tarde
 DEFAULT_STOP_POINTS = 30.0       # stop fijo, en puntos del precio, si cubre el swing
 DEFAULT_STOP_BUFFER = 5.0        # si el swing queda más lejos, el stop es el swing más estos puntos
 INDICES_USA = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")
@@ -106,6 +106,11 @@ class Contexto:
     asia: Zona
     last_bar: int = 0            # última vela cerrada
     day_end: int = 0             # fin del día de trading del mercado (minutos desde medianoche de NY): ahí cierran los trades
+
+    @property
+    def cierre_rango(self) -> int:
+        """Cierre del rango que se rompe (hora del servidor): la skill lo usa para saber si la noche es reciente."""
+        return self.asia.close_ts
 
 
 def es_indice_usa(symbol: str) -> bool:
@@ -196,10 +201,10 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     return [PatternHit(KEY, TITLE, direction, int(t), close, detail, {"stop": stop, "target": goal}, ts_hit, DETECTED)], figures
 
 
-def contextos(symbol: str, tf_minutes: int, ts, o, h, l, c, sessions, ahead: int, day_end: int = 0) -> list[Contexto]:
+def contextos(symbol: str, tf_minutes: int, ts, o, h, l, c, sessions, ahead: int, day_end: int = 0, be_r: float | None = None) -> list[Contexto]:
     """Un contexto por cada noche con Asia cerrada, de la más antigua a la más reciente: lo que analiza la skill y también el backtest.
 
-    `sessions`: las sesiones de la skill TBR (con Asia). Las velas `ts, o, h, l, c` son las ya cerradas."""
+    `sessions`: las sesiones de la skill TBR (con Asia). Las velas `ts, o, h, l, c` son las ya cerradas. `be_r` no se usa (sin breakeven)."""
     out = []
     for s in sorted((s for s in sessions if s.zone.key == ZONA and s.complete and s.high > s.low), key=lambda s: s.day):
         day0 = (s.day.toordinal() - date(1970, 1, 1).toordinal()) * 86400

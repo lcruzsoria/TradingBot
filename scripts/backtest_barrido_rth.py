@@ -1,6 +1,6 @@
 """Backtest del setup «Barrido RTH» (perfil Barrido_NYAM) en NAS100.s, SP500.s y DJ30.s con las velas de M5 de analisis/5m/puprime.
 
-Usa exactamente el código del bot: `contextos` + `analizar` (skills/barrido_rth/deteccion.py) para detectar el setup y `resolve`
+Usa exactamente el código del bot: `contextos` + `analizar` (skills/barrido/rth.py) para detectar el setup y `resolve`
 (skills/setup/positions.py) para cerrar la posición simulada (stop, TP1, breakeven al tomar el Low de NY Open, o fin del día de trading).
 La cuenta simulada es la del perfil: capital inicial y riesgo por operación de tradingbot.env (MT5_BARRIDO_NYAM_CAPITAL, SETUP_RISK_PCT);
 cada operación suma su R por el riesgo sobre el saldo con el que se consolida (misma regla que `VirtualAccount`).
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tradingbot.envconfig import load  # noqa: E402
-from tradingbot.skills.barrido_rth.deteccion import Ajustes, analizar, cierre_del_dia, contextos  # noqa: E402
+from tradingbot.skills.barrido.rth import Ajustes, analizar, cierre_del_dia, contextos  # noqa: E402
 from tradingbot.skills.setup.account import Schedule  # noqa: E402
 from tradingbot.skills.setup.positions import resolve  # noqa: E402
 from tradingbot.skills.tbr.zones import compute, zones_from_settings  # noqa: E402
