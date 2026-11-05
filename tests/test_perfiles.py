@@ -385,7 +385,7 @@ def test_el_perfil_barrido_nyam_usa_la_cuenta_de_puprime_con_10000_y_solo_el_dob
                                                                                 "barrido_nyam", 10_000.0, "USD")
     assert STRATEGY_PATTERNS["barrido_nyam"] == ("barrido_rht",)
     kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "barrido_nyam")
-    assert [s["type"] for s in kept] == ["cortex", "pattern"]
+    assert [s["type"] for s in kept] == ["cortex", "pattern", "tbr"]            # sin Calendario, con TBR (sus zonas y el patrón la usan)
 
 
 # -- perfil Barrido_NYAM: barrido del RHT --------------------------------------------------------------------------
