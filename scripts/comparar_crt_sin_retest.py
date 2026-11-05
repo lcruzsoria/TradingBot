@@ -60,8 +60,7 @@ print(pd.DataFrame(rows).to_string(index=False))
 
 print("\nPeriodo:", A["entrada (NY)"].astype(str).min()[:10], "->", A["entrada (NY)"].astype(str).max()[:10])
 
-print("
-=== 2R, por TBR (M15 y M5) ===")
+print("\n=== 2R, por TBR (M15 y M5) ===")
 rows = []
 for zona in ("Asia", "London", "NY Open", "Fuera de TBR"):
     for ltf in (15, 5):
