@@ -1153,9 +1153,9 @@ class ChartView(pg.PlotWidget):
             left, right = float(cisd["x0"]), float(cisd["x1"]) + 1
             add(pg.PlotCurveItem(x=np.array([left, right]), y=np.array([cisd["level"], cisd["level"]]),
                                  pen=pg.mkPen(yellow, width=1.6, style=Qt.PenStyle.DashLine)), -1)
-            label = pg.TextItem(anchor=(1, 0.5))
+            label = pg.TextItem(anchor=(1, 0))
             label.setHtml(f'<span style="font-size:7pt; color:{yellow}">CISD {fmt_price(cisd["level"])}</span>')
-            label.setPos(left, cisd["level"])
+            label.setPos(right, cisd["level"])
             add(label, 7)
         touch = crt.get("touch")
         if touch:                                               # la vela que toca la zona común
