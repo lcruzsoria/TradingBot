@@ -14,7 +14,7 @@ Reglas (velas de `PATTERN_BARRIDO_RHT_TF`, M5 al inicio):
    primer barrido posterior a la ventana tampoco cuenta.
 4. Barrer el High da un corto y barrer el Low, un largo. Entrada a mercado al cierre de esa vela.
 
-Asia y London se pintan en el perfil pero no intervienen. Objetivo 1: el lado contrario del RHT (el Low en un corto, el High en un largo);
+Solo índices USA (NAS100, SP500, DJ30...), no Forex. Asia y London se pintan en el perfil pero no intervienen. Objetivo 1: el lado contrario del RHT (el Low en un corto, el High en un largo);
 el objetivo 2 está por definir. PROVISIONAL (aún sin definir): el stop, en el extremo del barrido.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from datetime import date
 import numpy as np
 
 from ...timeframes import parse_timeframe
+from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from .continuacion import _when
 from .patterns import DETECTED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 from .trade import position_figure
@@ -81,8 +82,8 @@ def _rht(ctx: PatternContext):
 
 def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START"),
             end_min: int = _minutes(DEFAULT_END, "END")) -> tuple[list[PatternHit], list[Figure]]:
-    if ctx.tbr.key != NY_KEY or not ctx.peers or len(ctx.ts) == 0:
-        return [], []
+    if ctx.tbr.key != NY_KEY or not ctx.peers or len(ctx.ts) == 0 or not is_us_index(ctx.symbol, DEFAULT_US_INDICES):
+        return [], []                                                         # de momento solo índices USA, no Forex
     rht = _rht(ctx)
     if rht is None:
         return [], []

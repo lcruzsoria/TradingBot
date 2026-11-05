@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import time
 from datetime import date, datetime
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -454,3 +455,31 @@ def test_barrido_nyam_pinta_su_rht_y_su_ciclo_solo_en_su_perfil(tmp_path):
         return [z.key for z in skill.zones]
     assert zones("barrido_nyam") == ["ASIA", "LONDON", "PRE_NY", "NY_AM"]
     assert zones("") == zones("crt") == ["ASIA", "LONDON", "NY_AM"]
+
+
+def test_ndog_y_nwog_salen_del_cierre_de_las_17_y_de_la_pausa_del_fin_de_semana():
+    from tradingbot.skills.pattern.gaps import opening_gaps
+    H, D = 3600, 86400
+    # días 1970-01-05 (lunes) a 01-09 (viernes) y 01-12 (lunes); servidor = NY. Velas de 15 min.
+    def day(d, a, b, price):
+        return [(d * D + a * H + k * 900, price + k * 0.01) for k in range(int((b - a) * 4))]
+    rows = []
+    for d, p in ((4, 100.0), (5, 101.0), (6, 102.0), (7, 103.0), (8, 104.0)):         # lunes a viernes 1970: 4 = lunes 05-01... (índices de día)
+        rows += day(d, 0, 17, p)                       # hasta las 17:00 NY (la última vela empieza a las 16:45)
+        if d != 8:
+            rows += day(d, 17, 24, p + 5)              # reabre a las 17:00 con un hueco de +5 sobre la última vela
+    rows += day(11, 18, 24, 120.0)                     # domingo sobre las 18:00: hueco semanal
+    ts = np.array([r[0] for r in rows])
+    close = np.array([r[1] for r in rows])
+    open_ = close.copy()
+    gaps = opening_gaps(ts, open_, close, int(ts[-1]) + 900, 0)
+    assert gaps["NWOG"].kind == "NWOG" and gaps["NWOG"].open == 120.0 and gaps["NWOG"].close_ts == 8 * D + 16 * H + 45 * 60
+    assert gaps["NDOG"].kind == "NDOG" and gaps["NDOG"].open_ts == 7 * D + 17 * H and gaps["NDOG"].high > gaps["NDOG"].low
+    assert opening_gaps(ts, open_, close, 4 * D, 0) == {"NDOG": None, "NWOG": None}   # sin velas anteriores
+
+
+def test_barrido_rht_solo_busca_en_indices_usa():
+    from dataclasses import replace
+    from tradingbot.skills.pattern.barrido_rht import analyze
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
+    assert analyze(replace(ctx, symbol="NAS100.s"))[0] and not analyze(replace(ctx, symbol="EURUSD"))[0]
