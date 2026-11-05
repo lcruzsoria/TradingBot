@@ -32,6 +32,7 @@ class Order:
     lateral: bool = False          # el filtro de lateralidad dejó el sesgo en No Bias (la puntuación es la de las reglas)
     efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia) al dar la orden
     htf_candle: str = ""           # CRT: la vela HTF del sweep (C2) en la que entró, p. ej. «H4 02/11 21:00–01:00 NY»
+    be_price: float | None = None  # precio que, al tocarlo, pasa el stop a la entrada (Barrido RTH: el Low/High de NY Open); None: sin este breakeven
 
     @property
     def label(self) -> str:
@@ -60,7 +61,7 @@ def build_order(payload: dict, decision, bias_result) -> Order:
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
                  bias_result.bias.value, float(bias_result.score), decision.reason, "fin del día de trading",
                  hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "",
-                 **_lateral(bias_result))
+                 be_price=hit.levels.get("be"), **_lateral(bias_result))
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:

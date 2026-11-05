@@ -409,13 +409,13 @@ def test_barrido_rth_la_rotura_es_un_cierre_fuera_y_la_entrada_la_primera_vela_q
     # 09:55 y 10:00 dentro; 10:05 y 10:10 cierran fuera (rotura y swing en 105); 10:15 cierra dentro en 98: el stop fijo de 30 puntos (128) cubre el swing
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]))
     assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
-    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0}
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0, "be": 95.0}   # be: el Low de NY Open (desde las 10:00) hasta la entrada
     # el swing queda a más de 30 puntos de la entrada (140): el stop es el swing + 5
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 140, 99, 101), (101, 102, 97, 98)]))
     assert hits[0].levels["stop"] == 145.0
     # rompe por debajo: largo, entrada en 91, el stop fijo queda 30 puntos por debajo (61) y el objetivo es el High del RTH
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 86, 91)]))
-    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 61.0, "target": 100.0}
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 61.0, "target": 100.0, "be": 98.0}
     # una mecha que supera el nivel y cierra dentro no es una rotura (caso del 3 de noviembre): la entrada es tras la rotura real
     hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 104, 97, 102), (102, 103, 99, 99)]))
     assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 129.0
@@ -634,3 +634,25 @@ def test_barrido_nyam_sin_breakeven_solo_tp1_o_sl_y_configurable():
         return skill.be_r
     assert be_r("barrido_nyam") is None and be_r("") == 1.0 and be_r("crt") == 1.0
     assert be_r("barrido_nyam", "SETUP_BE_TRIGGER_PCT=1\nSETUP_RISK_PCT=1\nBARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0.5\n") == 0.5
+
+
+def test_barrido_rth_breakeven_al_tomar_el_low_de_ny_open_y_configurable():
+    from tradingbot.skills.barrido_rth.deteccion import Ajustes, analizar
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.setup.positions import resolve
+    velas = [(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]
+    ctx = _barrido_ctx(velas + [(98, 99, 94, 95), (95, 100, 94.5, 99), (99, 129, 98, 128)])    # toca 95 (breakeven), vuelve a 98 y sube al stop
+    hit = analizar(ctx)[0][0]
+    assert hit.levels["be"] == 95.0
+    assert "be" not in analizar(ctx, Ajustes(be=False))[0][0].levels                  # BARRIDO_RTH_BE=false: sin este breakeven
+    order = Order("NAS100", "5m", "short", "p", "barrido_rth", "RTH", date(1970, 1, 1), 100, 90, 95, 98.0, 128.0, 90.0, "No Bias", 0.0, "r",
+                  entry_ts=int(ctx.ts[5]), close_ts=int(ctx.ts[-1]) + 3600, be_price=95.0)
+    closed = resolve(order, ctx.ts, ctx.high, ctx.low, ctx.close)
+    assert closed.result == "breakeven" and closed.r == 0 and closed.be_ts == int(ctx.ts[5])   # al tocar el Low pasó a la entrada y volvió a ella
+    sin_be = resolve(replace_order(order), ctx.ts, ctx.high, ctx.low, ctx.close)
+    assert sin_be.result == "stop" and sin_be.r < 0                                   # sin breakeven por precio, la misma vela acaba en stop
+
+
+def replace_order(order):
+    from dataclasses import replace
+    return replace(order, be_price=None)

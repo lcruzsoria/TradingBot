@@ -48,6 +48,7 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
         return None
     sign = 1.0 if long else -1.0
     be_ts = None
+    be_price = getattr(order, "be_price", None)       # breakeven por precio (Barrido RTH): al tocarlo el stop pasa a la entrada, además del de +be_r R
 
     def done(result: str, price: float, i: int) -> Closed:
         move = sign * (price - entry)
@@ -76,8 +77,9 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
             return done("breakeven" if be_ts is not None else "stop", current, i)
         if hit_target:
             return done("objetivo", target, i)
-        if be_r is not None and be_ts is None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r:
-            be_ts = int(ts[i])          # el precio tocó +be_r R: el stop pasa a la entrada desde la vela siguiente
+        if be_ts is None and ((be_r is not None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r)
+                              or (be_price is not None and (high[i] >= be_price if long else low[i] <= be_price))):
+            be_ts = int(ts[i])          # el precio tocó +be_r R (o el precio de breakeven de la orden): el stop pasa a la entrada desde la vela siguiente
         last = i
     if last is not None and now is not None and bar and now - (ts[last] + bar) > MARKET_CLOSED_SECONDS:
         return done("tiempo", float(close[last]), last)            # el mercado está cerrado ahora: se cierra con su última vela

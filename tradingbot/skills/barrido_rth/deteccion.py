@@ -10,6 +10,8 @@ Reglas (velas de `BARRIDO_RTH_TF`, M5 al inicio):
 3. Swing: el extremo (máximo en un corto, mínimo en un largo) de todo el tramo fuera del rango, desde la rotura hasta la vela de entrada.
    Stop: fijo, a `BARRIDO_RTH_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing; si no, el swing más
    `BARRIDO_RTH_STOP_BUFFER` (5) puntos (por encima en un corto, por debajo en un largo).
+   Breakeven (`BARRIDO_RTH_BE`): cuando el precio toca el Low del TBR NY Open (10:00 en adelante) que había hasta la entrada (el High en un
+   largo), el stop pasa a la entrada. Sin él, la posición cierra solo en el objetivo 1 o en el stop.
 4. Entrada: la primera vela POSTERIOR a la rotura que CIERRA de nuevo dentro del rango, a mercado a su cierre. Debe abrir antes de
    `BARRIDO_RTH_ENTRY_END` (12:00 NY, fin de NY Open). Si antes de volver el precio rompe también el otro lado, no hay setup.
 5. Romper por arriba da un corto y romper por abajo, un largo.
@@ -61,6 +63,7 @@ class Ajustes:
     entry_end: int = minutos(DEFAULT_ENTRY_END, "ENTRY_END")
     stop_points: float = DEFAULT_STOP_POINTS
     stop_buffer: float = DEFAULT_STOP_BUFFER
+    be: bool = True              # breakeven al tomar el Low (High) del TBR NY Open
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
@@ -73,8 +76,9 @@ class Ajustes:
             raise ValueError("BARRIDO_RTH_STOP_POINTS y BARRIDO_RTH_STOP_BUFFER deben ser números.") from None
         if points <= 0 or buffer < 0:
             raise ValueError("BARRIDO_RTH_STOP_POINTS debe ser mayor que 0 y BARRIDO_RTH_STOP_BUFFER no puede ser negativo.")
+        be = str(get("BE", "true")).strip().lower() in ("1", "true", "yes", "si", "sí", "on")
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"),
-                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer)
+                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer, be)
         if a.end <= a.start:
             raise ValueError(f"BARRIDO_RTH_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         if a.entry_end < a.end:
@@ -130,7 +134,8 @@ def cierre_del_dia(ts: int, ahead: int, end_minutes: int) -> int:
     return end + ahead
 
 
-def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: float, target: float, label: str) -> Figure:
+def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: float, target: float, label: str,
+                     be_price: float | None = None) -> Figure:
     """Posición para el gráfico: de la vela de la entrada a la del cierre (o a la última vela si sigue abierta)."""
     close = int(ctx.ts[t]) + MAX_HOLD_SECONDS
     if ctx.day_end:
@@ -139,7 +144,7 @@ def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: 
     tf_sec = ctx.tf_minutes * 60
     kind, idx = None, min(limit, len(ctx.ts) - 1)
     if limit >= t:
-        order = SimpleNamespace(direction=direction, pattern_key=KEY, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close)
+        order = SimpleNamespace(direction=direction, pattern_key=KEY, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, be_price=be_price)
         end = limit + 1
         done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], ctx.be_r, tf_sec)
         if done is not None:
@@ -205,13 +210,16 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
               f"vela que cierra de nuevo dentro del rango es la de {hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en "
               f"{stop:.5g} ({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
     levels = {"stop": stop, "target": goal}
+    if a.be:                                                                  # breakeven al tomar el Low (High) del TBR NY Open que había hasta la entrada
+        ny_open = int(np.searchsorted(ctx.ts, midnight + a.start * 60, "left"))
+        levels["be"] = float(np.min(ctx.low[ny_open:t + 1]) if up else np.max(ctx.high[ny_open:t + 1]))
     second = _objetivo2(ctx, up, goal, midnight + a.start * 60)
     if second is not None:
         levels["target2"] = second[0]
         detail += f"; objetivo 2 en {second[1]} ({second[0]:.5g})"
     figures = []
     if t + 1 < len(ctx.ts):
-        fig = _figura_posicion(ctx, direction, t + 1, close, stop, goal, f"RTH {'▼' if up else '▲'} barrido")
+        fig = _figura_posicion(ctx, direction, t + 1, close, stop, goal, f"RTH {'▼' if up else '▲'} barrido", levels.get("be"))
         extra = {"entrada_ts": float(ctx.ts[t])}                              # la vela cuyo cierre es la entrada: el gráfico la marca ahí
         if second is not None:
             extra["objetivo2"] = second[0]
