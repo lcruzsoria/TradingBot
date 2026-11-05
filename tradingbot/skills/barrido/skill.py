@@ -2,12 +2,14 @@
 
 - `rth`:  el barrido del RTH (09:00-10:00 NY) en NY Open, con su breakeven y su segundo objetivo (`rth.py`).
 - `asia`: el barrido de Asia (20:00-00:00 NY) entre las 00:00 y las 01:00 (`asia.py`).
+- `pdh`:  el barrido del PDH/PDL entre las 20:00 y las 21:00, con objetivo en el otro lado de Asia (`pdh.py`).
+- `londres`: lo mismo con el rango de Londres: barrido entre las 02:00 y las 03:00, objetivo en el otro lado de Londres y salida al cierre (05:00) (`londres.py`).
 
-Cada setup tiene su propio módulo de reglas y su propio bloque de ajustes (BARRIDO_RTH_*, BARRIDO_ASIA_*); esta skill solo los orquesta:
+Cada setup tiene su propio módulo de reglas y su propio bloque de ajustes (BARRIDO_RTH_*, BARRIDO_ASIA_*, BARRIDO_PDH_*, BARRIDO_LONDRES_*); esta skill solo los orquesta:
 con las TBR de la skill TBR y las velas del gráfico evalúa cada día (o noche) con el rango ya cerrado y publica lo mismo que publica Pattern
 (`pattern.updated`, `pattern.detected`, `pattern.discarded`, `pattern.swept`) para que Cortex, Setup, Stats y la ventana la traten igual.
 Los tipos de esos mensajes viven en `skills/_comun/contratos.py`. Es independiente de la skill Pattern. La señal llega en cuanto cierra la
-vela de entrada. `BARRIDO_SETUPS` (rth, asia) elige qué setups busca.
+vela de entrada. `BARRIDO_SETUPS` (rth, asia, pdh, londres) elige qué setups busca.
 """
 from __future__ import annotations
 
@@ -18,10 +20,10 @@ from ...core import Event, Skill, background_of, register_skill
 from ...timeframes import display_label, minutes
 from .._comun.contratos import DETECTED
 from ..feed.datasource import aggregate_candles
-from . import asia, rth
+from . import asia, londres, pdh, rth
 from .rth import cierre_del_dia
 
-SETUPS = {"rth": rth, "asia": asia}          # clave del setup -> su módulo (KEY, Ajustes, contextos, analizar)
+SETUPS = {"rth": rth, "asia": asia, "pdh": pdh, "londres": londres}          # clave del setup -> su módulo (KEY, Ajustes, contextos, analizar)
 DEFAULT_HISTORY_DAYS = 30        # días pasados de los que se dibujan las entradas
 RECENT_SECONDS = 24 * 3600       # un rango cerrado en el último día siempre se evalúa y se avisa
 DEFAULT_INDEX_DAY_START = "18:00"
@@ -61,7 +63,8 @@ class BarridoSkill(Skill):
     description = ("Setups de barrido del perfil Barrido_NYAM. RTH: tras el rango 09:00-10:00, la primera rotura (vela que cierra fuera) entre las "
                    "10:00 y las 11:00 y la primera vela M5 posterior que cierra dentro (antes de las 12:00) da la entrada; stop fijo de 30 puntos "
                    "(o el swing + 5), objetivo 1 en el lado contrario del RTH y breakeven al tomar el Low/High de NY Open. Asia: lo mismo con el "
-                   "rango de Asia entre las 00:00 y la 01:00 (la vela de entrada cierra dentro de Asia a la 01:00 como tarde) y objetivo en el lado contrario de Asia. Cortex los "
+                   "rango de Asia entre las 00:00 y la 01:00 (la vela de entrada cierra dentro de Asia a la 01:00 como tarde) y objetivo en el lado contrario de Asia. PDH/PDL: "
+                   "nivel del día anterior sin tocar que se barre entre las 20:00 y las 21:00; entrada en el primer cierre de vuelta dentro y objetivo en el otro lado de Asia. Londres: lo mismo entre las 02:00 y las 03:00 con salida al cierre de Londres (05:00). Cortex los "
                    "valida; solo informa, no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
     publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.swept")
@@ -83,7 +86,7 @@ class BarridoSkill(Skill):
         self.set_caption("esperando TBR")
 
     def _load_settings(self) -> None:
-        # tradingbot.env, bloque BARRIDO: BARRIDO_SETUPS, BARRIDO_HISTORY_DAYS y, por setup, BARRIDO_RTH_* y BARRIDO_ASIA_*
+        # tradingbot.env, bloque BARRIDO: BARRIDO_SETUPS, BARRIDO_HISTORY_DAYS y, por setup, BARRIDO_RTH_*, BARRIDO_ASIA_*, BARRIDO_PDH_* y BARRIDO_LONDRES_*
         names = [n.lower() for n in self.settings.get_list("SETUPS", list(SETUPS))]
         unknown = [n for n in names if n not in SETUPS]
         if unknown or not names:
@@ -213,5 +216,5 @@ class BarridoSkill(Skill):
                 continue
             self._seen.add(key)
             payload = {"symbol": symbol, "timeframe": tf, "tbr": tbr, "hit": hit,
-                       "session_close": cierre_del_dia(hit.ts, ahead, self.day_end) if hit.ts else None, **mark}
+                       "session_close": int(hit.levels["cierre"]) if hit.levels.get("cierre") else (cierre_del_dia(hit.ts, ahead, self.day_end) if hit.ts else None), **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
