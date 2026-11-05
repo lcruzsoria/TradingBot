@@ -1149,12 +1149,12 @@ class ChartView(pg.PlotWidget):
             label.setPos(right, (common["bottom"] + common["top"]) / 2)
             add(label, 7)
         if cisd and cisd.get("label") == "CISD":                 # el CISD: el extremo de la vela que creó el iFVG; el cierre con cuerpo más allá da la entrada
-            pink = "#EC407A"
+            yellow = "#FFD600"
             left, right = float(cisd["x0"]), float(cisd["x1"]) + 1
             add(pg.PlotCurveItem(x=np.array([left, right]), y=np.array([cisd["level"], cisd["level"]]),
-                                 pen=pg.mkPen(pink, width=1.6, style=Qt.PenStyle.DashLine)), -1)
+                                 pen=pg.mkPen(yellow, width=1.6, style=Qt.PenStyle.DashLine)), -1)
             label = pg.TextItem(anchor=(1, 0.5))
-            label.setHtml(f'<span style="font-size:7pt; color:{pink}">CISD {fmt_price(cisd["level"])}</span>')
+            label.setHtml(f'<span style="font-size:7pt; color:{yellow}">CISD {fmt_price(cisd["level"])}</span>')
             label.setPos(left, cisd["level"])
             add(label, 7)
         touch = crt.get("touch")
