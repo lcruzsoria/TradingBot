@@ -532,3 +532,14 @@ def test_barrido_nyam_oculta_fibo_y_muestra_tbr_y_entradas(tmp_path, monkeypatch
     win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "tbr"}, {"type": "pattern"}]), cfg, "t")
     assert win.fibo_btn.isHidden() and not win.fibo_btn.isChecked()
     assert win.tbr_btn.isChecked() and win.pos_btn.isChecked()
+
+
+def test_barrido_nyam_asia_y_london_solo_con_maximos_y_minimos():
+    from tradingbot.skills.tbr.zones import zones_from_settings
+    env = EnvConfig(parse("TBR_ZONES=ASIA, LONDON, NY_AM\nBARRIDO_NYAM_TBR_ZONES=ASIA, LONDON, PRE_NY, NY_AM\n"
+                          "BARRIDO_NYAM_TBR_ASIA_BOX=false\nBARRIDO_NYAM_TBR_ASIA_MID=false\nBARRIDO_NYAM_TBR_LONDON_BOX=false\n"))
+    own = env.section("BARRIDO_NYAM_TBR")
+    zones = {z.key: z for z in zones_from_settings(env.section("TBR"), own.get_list("ZONES"), own)}
+    assert (zones["ASIA"].box, zones["ASIA"].mid) == (False, False) and (zones["LONDON"].box, zones["LONDON"].mid) == (False, True)
+    assert zones["PRE_NY"].box and zones["NY_AM"].box                                   # el RHT y NY Open, pintados
+    assert all(z.box and z.mid for z in zones_from_settings(env.section("TBR")))        # el resto de perfiles no cambia

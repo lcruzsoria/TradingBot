@@ -47,6 +47,8 @@ class Zone:
     start: int           # minutos desde medianoche (hora de NY)
     end: int
     color: str           # #RRGGBB
+    box: bool = True     # dibuja la caja de la zona (False: solo sus niveles High y Low)
+    mid: bool = True     # dibuja el 50 % de la zona
 
     @property
     def minutes(self) -> int:
@@ -94,7 +96,8 @@ def zones_from_settings(settings, keys: list[str] | None = None, overrides=None)
 
     `keys`: otras zonas a leer (por su clave) en lugar de las de TBR_ZONES; sirve para consultar el horario de una zona que
     no está activa (por ejemplo NY_PM, que marca el límite de NY Open).
-    `overrides`: ajustes de una estrategia (por ejemplo `env.section("CRT_TBR")`) con su propio horario para una zona (`<CLAVE>_HOURS`, p. ej. NY_AM_HOURS):
+    `overrides`: ajustes de una estrategia (además de `<CLAVE>_HOURS`, `<CLAVE>_BOX=false` quita la caja de la zona y `<CLAVE>_MID=false` su 50 %)
+     (por ejemplo `env.section("CRT_TBR")`) con su propio horario para una zona (`<CLAVE>_HOURS`, p. ej. NY_AM_HOURS):
     esa estrategia usa ese horario y el resto, el de TBR_<CLAVE>_HOURS.
     """
     defaults = {key: (name, hours, color) for key, name, hours, color in KNOWN_ZONES}
@@ -111,7 +114,9 @@ def zones_from_settings(settings, keys: list[str] | None = None, overrides=None)
         if not COLOR.match(color):
             raise ValueError(f"TBR_{key}_COLOR={color!r}: usa un color #RRGGBB.")
         start, end = parse_hours(hours, f"{key}_HOURS")
-        zones.append(Zone(key, settings.get(f"{key}_NAME", name), start, end, color.upper()))
+        own = overrides if overrides is not None else settings
+        zones.append(Zone(key, settings.get(f"{key}_NAME", name), start, end, color.upper(),
+                          own.get_bool(f"{key}_BOX", True), own.get_bool(f"{key}_MID", True)))
     return zones
 
 

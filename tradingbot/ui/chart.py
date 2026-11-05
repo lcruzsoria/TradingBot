@@ -677,13 +677,16 @@ class ChartView(pg.PlotWidget):
             fill = QColor(s.zone.color)
             fill.setAlphaF(self._tbr_opacity)
             # caja de la zona: de su inicio a su final y de su Low a su High
-            box = QGraphicsRectItem(QRectF(s.x0, s.low, s.x1 - s.x0, max(s.high - s.low, 1e-9)))
-            box.setBrush(fill)
-            box.setPen(QPen(Qt.PenStyle.NoPen))
-            box.setZValue(-10)                          # detrás de las velas
-            pi.addItem(box, ignoreBounds=True)
-            self._tbr_items.append(box)
+            if s.zone.box:
+                box = QGraphicsRectItem(QRectF(s.x0, s.low, s.x1 - s.x0, max(s.high - s.low, 1e-9)))
+                box.setBrush(fill)
+                box.setPen(QPen(Qt.PenStyle.NoPen))
+                box.setZValue(-10)                      # detrás de las velas
+                pi.addItem(box, ignoreBounds=True)
+                self._tbr_items.append(box)
             for level in s.levels:
+                if level.kind == "mid" and not s.zone.mid:
+                    continue
                 xs, ys = lines.setdefault((s.zone.color, level.kind), ([], []))
                 xs += [level.x0, level.x1]
                 ys += [level.price, level.price]
