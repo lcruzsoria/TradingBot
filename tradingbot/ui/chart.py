@@ -19,10 +19,13 @@ from .fmt import DIAS, fecha_hora
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
-LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
-LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
+LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL", "ndog": "NDOG", "ndog50": "NDOG 50%",
+                "nwog": "NWOG", "nwog50": "NWOG 50%"}
+LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl", "ndog": "ndog", "ndog50": "ndog",
+               "nwog": "nwog", "nwog50": "nwog"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
-               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine}
+               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine, "ndog": Qt.PenStyle.DotLine, "ndog50": Qt.PenStyle.DashLine,
+               "nwog": Qt.PenStyle.DotLine, "nwog50": Qt.PenStyle.DashLine}
 
 
 def _alpha(color: str, alpha: int) -> QColor:
@@ -799,6 +802,16 @@ class ChartView(pg.PlotWidget):
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
+            if pos.get("target2") is not None:                      # segundo objetivo (Barrido_NYAM): línea discontinua con su etiqueta
+                t2 = float(pos["target2"])
+                tp2 = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([t2, t2]),
+                                       pen=pg.mkPen("#26A69A", width=1.2, style=Qt.PenStyle.DashLine))
+                tp2.setZValue(-5)
+                pi.addItem(tp2, ignoreBounds=True)
+                tag = pg.TextItem("TP2", color="#26A69A", anchor=(0, 0.5))
+                tag.setPos(x1, t2)
+                pi.addItem(tag, ignoreBounds=True)
+                self._pos_items += [tp2, tag]
             pill = PositionPill(pos)
             pill.setPos(x0, stop)
             pi.addItem(pill, ignoreBounds=True)

@@ -14,17 +14,21 @@ Reglas (velas de `PATTERN_BARRIDO_RHT_TF`, M5 al inicio):
    primer barrido posterior a la ventana tampoco cuenta.
 4. Barrer el High da un corto y barrer el Low, un largo. Entrada a mercado al cierre de esa vela.
 
-Solo índices USA (NAS100, SP500, DJ30...), no Forex. Asia y London se pintan en el perfil pero no intervienen. Objetivo 1: el lado contrario del RHT (el Low en un corto, el High en un largo);
-el objetivo 2 está por definir. PROVISIONAL (aún sin definir): el stop, en el extremo del barrido.
+Solo índices USA (NAS100, SP500, DJ30...), no Forex. Asia y London se pintan en el perfil. Objetivo 1: el lado contrario del RHT (el Low en un corto, el High en un largo);
+Objetivo 2: el nivel más cercano más allá del 1 entre el Low
+de Asia/London (el menos exigente) y el 50 % del NDOG/NWOG. Stop: el extremo del barrido. El simulador de Setup opera con el objetivo 1;
+el 2 se marca en el gráfico.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import numpy as np
 
 from ...timeframes import parse_timeframe
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
+from ..levels.gaps import opening_gaps
 from .continuacion import _when
 from .patterns import DETECTED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 from .trade import position_figure
@@ -80,6 +84,23 @@ def _rht(ctx: PatternContext):
     return max(options, key=lambda p: p.close_ts) if options else None
 
 
+def _target2(ctx: PatternContext, up: bool, first_target: float, session_ts: int) -> tuple[float, str] | None:
+    """Objetivo 2: el nivel más cercano, más allá del objetivo 1, entre los Low de Asia y London (los High en un largo) y el 50 % del
+    NDOG y del NWOG. Es «lo que esté antes» y, entre Asia y London, el menos exigente. Devuelve (precio, nombre) o None."""
+    found = []
+    for key in ("ASIA", "LONDON"):                                            # las últimas cerradas antes de NY Open
+        tbr = max((p for p in ctx.peers if p.key == key and p.close_ts <= session_ts), key=lambda p: p.close_ts, default=None)
+        if tbr is not None:
+            found.append((tbr.low if up else tbr.high, f"{'Low' if up else 'High'} de {tbr.zone}"))
+    for kind, gap in opening_gaps(ctx.ts, ctx.open, ctx.close, session_ts, ctx.ahead).items():
+        if gap is not None:
+            found.append((gap.mid, f"50 % del {kind}"))
+    beyond = [f for f in found if (f[0] < first_target if up else f[0] > first_target)]
+    if not beyond:
+        return None
+    return max(beyond) if up else min(beyond)                                 # corto: el más alto de los que están por debajo; largo: el más bajo
+
+
 def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START"),
             end_min: int = _minutes(DEFAULT_END, "END")) -> tuple[list[PatternHit], list[Figure]]:
     if ctx.tbr.key != NY_KEY or not ctx.peers or len(ctx.ts) == 0 or not is_us_index(ctx.symbol, DEFAULT_US_INDICES):
@@ -122,9 +143,14 @@ def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START
     goal = rht.low if up else rht.high
     detail = (f"primer barrido del {side} del RHT ({rht.high if up else rht.low:.5g}) en {_when(ctx, sweep)}; la primera vela que cierra de nuevo "
               f"dentro del rango es la de {_when(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en el extremo del barrido "
-              f"({stop:.5g}) y objetivo 1 en el {'Low' if up else 'High'} del RHT ({goal:.5g}); stop provisional")
+              f"({stop:.5g}) y objetivo 1 en el {'Low' if up else 'High'} del RHT ({goal:.5g})")
+    levels = {"stop": stop, "target": goal}
+    second = _target2(ctx, up, goal, midnight + start_min * 60)
+    if second is not None:
+        levels["target2"] = second[0]
+        detail += f"; objetivo 2 en {second[1]} ({second[0]:.5g})"
     figures = []
     if t + 1 < len(ctx.ts):                                                   # la posición vive desde la vela siguiente
-        figures = [position_figure(ctx, KEY, ctx.tbr.zone, direction, t + 1, close, stop, goal, f"RHT {'▼' if up else '▲'} barrido")]
-    return [PatternHit(KEY, TITLE, direction, int(t), close, detail, {"stop": stop, "target": goal},
-                       int(ctx.ts[t]) + ctx.tf_minutes * 60, DETECTED)], figures
+        fig = position_figure(ctx, KEY, ctx.tbr.zone, direction, t + 1, close, stop, goal, f"RHT {'▼' if up else '▲'} barrido")
+        figures = [replace(fig, levels={**fig.levels, "objetivo2": second[0]}) if second is not None else fig]
+    return [PatternHit(KEY, TITLE, direction, int(t), close, detail, levels, int(ctx.ts[t]) + ctx.tf_minutes * 60, DETECTED)], figures

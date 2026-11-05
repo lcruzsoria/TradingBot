@@ -19,6 +19,7 @@ from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
+from ..skills.levels.skill import GAP_STRATEGIES
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
 from . import theme
 from .icons import gear_icon
@@ -309,7 +310,11 @@ class MainWindow(QMainWindow):
         for group, text, tip, key in (
                 ("tdo", "TDO", "Apertura del mercado: precio de apertura de la primera vela del día", "SHOW_TDO"),
                 ("midnight", "Midnight", "Precio de apertura a las 00:00 de Nueva York", "SHOW_MIDNIGHT"),
-                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL")):
+                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL"),
+                ("ndog", "NDOG", "Hueco de apertura diario (cierre de las 17:00 frente a la reapertura) con su 50 %", "SHOW_NDOG"),
+                ("nwog", "NWOG", "Hueco de apertura semanal (cierre del viernes frente a la apertura del domingo) con su 50 %", "SHOW_NWOG")):
+            if group in ("ndog", "nwog") and app_cfg["app"].get("strategy") not in GAP_STRATEGIES:
+                continue                                    # los huecos solo se ven en el perfil que los usa
             btn = QPushButton(text)
             btn.setProperty("chip", "true")
             btn.setCheckable(True)
@@ -407,6 +412,9 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
+        for i, group in enumerate(("ndog", "nwog")):         # solo en el perfil con huecos
+            if group in self.level_btns:
+                grid.addWidget(self.level_btns[group], 2, i + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.fibo_btn, 0, 3)
         grid.addWidget(self.pos_btn, 1, 3)
@@ -1254,7 +1262,7 @@ class MainWindow(QMainWindow):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
             decision, reason = self._entry_decision(x0, f.direction)
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
-                              "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
+                              "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"], "target2": f.levels.get("objetivo2"),
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
                               "reason": reason, "session": (f.zone, f.day)})
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran

@@ -458,7 +458,7 @@ def test_barrido_nyam_pinta_su_rht_y_su_ciclo_solo_en_su_perfil(tmp_path):
 
 
 def test_ndog_y_nwog_salen_del_cierre_de_las_17_y_de_la_pausa_del_fin_de_semana():
-    from tradingbot.skills.pattern.gaps import opening_gaps
+    from tradingbot.skills.levels.gaps import opening_gaps
     H, D = 3600, 86400
     # días 1970-01-05 (lunes) a 01-09 (viernes) y 01-12 (lunes); servidor = NY. Velas de 15 min.
     def day(d, a, b, price):
@@ -483,3 +483,37 @@ def test_barrido_rht_solo_busca_en_indices_usa():
     from tradingbot.skills.pattern.barrido_rht import analyze
     ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
     assert analyze(replace(ctx, symbol="NAS100.s"))[0] and not analyze(replace(ctx, symbol="EURUSD"))[0]
+
+
+def test_barrido_rht_objetivo_2_es_lo_que_este_antes_mas_alla_del_objetivo_1():
+    from dataclasses import replace
+    from tradingbot.skills.pattern.patterns import PeerTbr
+    from tradingbot.skills.pattern.barrido_rht import analyze
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
+    day = date(1970, 1, 1)
+    asia = PeerTbr("ASIA", "Asia", day, 88.0, 70.0, -4 * 3600, 0)
+    london = PeerTbr("LONDON", "London", day, 86.0, 60.0, 2 * 3600, 5 * 3600)
+    hits, figs = analyze(replace(ctx, peers=ctx.peers + (asia, london)))
+    assert hits[0].levels["target"] == 90.0 and hits[0].levels["target2"] == 70.0        # Low de Asia (70) más cercano que el de London (60)
+    assert "Low de Asia" in hits[0].detail and figs[0].levels["objetivo2"] == 70.0
+    only_high = replace(ctx, peers=ctx.peers + (replace(asia, low=95.0), london))        # el de Asia (95) está antes que el RHT: no vale
+    assert analyze(only_high)[0][0].levels["target2"] == 60.0
+    assert "target2" not in analyze(ctx)[0][0].levels                                    # sin Asia ni London ni huecos: sin objetivo 2
+
+
+def test_las_lineas_de_ndog_nwog_llevan_los_bordes_y_el_50_por_ciento():
+    from tradingbot.skills.levels.daylevels import Line
+    from tradingbot.skills.levels.gaps import gap_lines
+    H, D = 3600, 86400
+    ts = np.array([7 * D + 16 * H + 45 * 60, 7 * D + 17 * H, 7 * D + 17 * H + 900])
+    open_, close = np.array([100.0, 104.0, 104.5]), np.array([102.0, 104.5, 105.0])
+    lines = gap_lines(ts, open_, close, 0, Line)
+    assert sorted((l.kind, l.price) for l in lines) == [("ndog", 102.0), ("ndog", 104.0), ("ndog50", 103.0)]
+
+
+def test_los_botones_de_huecos_solo_existen_en_el_perfil_barrido_nyam(tmp_path, monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    plain = make_window(tmp_path, monkeypatch)
+    assert "ndog" not in plain.level_btns
+    own = make_window(tmp_path, monkeypatch, {"strategy": "barrido_nyam"})
+    assert {"ndog", "nwog"} <= set(own.level_btns)
