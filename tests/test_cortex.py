@@ -298,9 +298,9 @@ def test_un_setup_invalidado_con_fibo_es_no_go_con_etiqueta_i():
     assert short_reason(d.reason) == "I" and reason_of(d.reason) == "I · invalidado"
 
 
-def test_una_orden_vencida_por_tiempo_no_bloquea_aunque_no_haya_velas_para_verlo():
+def test_en_barrido_nyam_una_orden_vencida_por_tiempo_no_bloquea_aunque_no_haya_velas_para_verlo():
     """Los patrones pasados se anuncian de golpe al arrancar: una orden antigua sin velas cargadas no debe bloquear todas las siguientes."""
-    manager, bus, decisions, orders, executed = run_skills()
+    manager, bus, decisions, orders, executed = run_skills(app={"strategy": "barrido_nyam"})
     bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
     bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
     first = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
@@ -323,3 +323,19 @@ def test_en_barrido_nyam_el_sesgo_no_desactiva_entradas():
     manager.stop()
     assert decisions[0].payload["decision"].allowed and "no depende del sesgo" in decisions[0].payload["decision"].reason
     assert len(orders) == 1
+
+
+def test_en_otros_perfiles_la_orden_sin_velas_sigue_bloqueando_como_antes():
+    """El cambio de la orden vencida es solo de Barrido_NYAM: el resto de perfiles se comporta como siempre."""
+    manager, bus, decisions, orders, executed = run_skills()
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    first = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+    event = {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": first}
+    bus.publish("pattern.detected", event, source="pattern")
+    wait(orders)
+    later = PatternHit("q", "Otro patrón", "long", 20, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_000_000 + 25 * 3600)
+    bus.publish("pattern.detected", {**event, "tbr": replace(TBR, day=date(2026, 10, 7)), "hit": later}, source="pattern")
+    time.sleep(0.4)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, False]

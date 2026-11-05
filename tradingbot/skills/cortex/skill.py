@@ -169,14 +169,14 @@ class CortexSkill(Skill):
     def _busy(self, symbol: str, entry_ts: int | None = None):
         """La orden abierta que impide abrir otra en `symbol` (en toda la cuenta o solo en ese mercado), o None.
 
-        Una orden que con las velas actuales ya cerró antes de `entry_ts` (la hora de la nueva entrada) no bloquea (ni la que ya había vencido por tiempo, aunque sus velas no estén cargadas): así los patrones
+        Una orden que con las velas actuales ya cerró antes de `entry_ts` (la hora de la nueva entrada) no bloquea (en Barrido_NYAM, tampoco la que ya había vencido por tiempo aunque sus velas no estén cargadas): así los patrones
         pasados que se anuncian de golpe al arrancar el bot se juzgan en su orden, como habría pasado en directo.
         """
         for order in list(self._open.values()):
             if self.scope == "mercado" and order.symbol != symbol:
                 continue
-            if entry_ts and order.close_ts and entry_ts >= order.close_ts:
-                continue                                  # ya había vencido por tiempo (fin del día de trading o 24 h), aunque no haya velas para verlo
+            if self.strategy == "barrido_nyam" and entry_ts and order.close_ts and entry_ts >= order.close_ts:
+                continue                                  # solo Barrido_NYAM: ya había vencido por tiempo (fin del día de trading o 24 h), aunque no haya velas para verlo
             df = self._candles.get(order.symbol)
             if df is not None and entry_ts:
                 closed = resolve(order, df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy())
