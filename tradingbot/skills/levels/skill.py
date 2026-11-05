@@ -9,7 +9,7 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
 import numpy as np
 
-from .gaps import gap_lines
+from .._comun.gaps import gap_lines
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
                         DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_SMA_SHOW, DEFAULT_US_INDICES,
                         SMA_SHOWS, SMA_STYLES, Line, compute, days, is_us_index, market_close, new_trading_day, parse_time, vwap)
