@@ -3,9 +3,11 @@
 
 Uso (desde la raíz del proyecto):
     uv run --with pyarrow python scripts/comparar_crt_sin_retest.py
+    uv run --with pyarrow python scripts/comparar_crt_sin_retest.py --solo-tbr     # solo entradas dentro de Asia, London y NY Open
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +16,11 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 A = pd.read_pickle(ROOT / "analisis" / "crt_operaciones.pkl")["operaciones"]
 B = pd.read_pickle(ROOT / "analisis" / "crt_operaciones_sin_retest.pkl")["operaciones"]
+ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+ap.add_argument("--solo-tbr", action="store_true", help="solo las entradas que caen en el horario de una TBR (Asia, London, NY Open)")
+if ap.parse_args().solo_tbr:
+    A, B = (T[T["zona"] != "Fuera de TBR"] for T in (A, B))
+    print("Solo entradas dentro de Asia, London y NY Open")
 
 
 def stats(t: pd.DataFrame) -> dict:
@@ -52,3 +59,13 @@ for mk in sorted(A["mercado"].unique()):
 print(pd.DataFrame(rows).to_string(index=False))
 
 print("\nPeriodo:", A["entrada (NY)"].astype(str).min()[:10], "->", A["entrada (NY)"].astype(str).max()[:10])
+
+print("
+=== 2R, por TBR (M15 y M5) ===")
+rows = []
+for zona in ("Asia", "London", "NY Open", "Fuera de TBR"):
+    for ltf in (15, 5):
+        for label, T in (("vigente", A), ("sin retest", B)):
+            t = T[(T["objetivo_cod"] == 2) & (T["ltf"] == ltf) & (T["zona"] == zona)]
+            rows.append({"TBR": zona, "ltf": f"M{ltf}", "regla": label, **{k: v for k, v in stats(t).items() if k in ("n", "acierto", "R_medio", "R_total", "PF")}})
+print(pd.DataFrame(rows).to_string(index=False))
