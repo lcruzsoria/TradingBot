@@ -19,13 +19,12 @@ from .fmt import DIAS, fecha_hora
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
-LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL", "ndog": "NDOG", "ndog50": "NDOG 50%",
-                "nwog": "NWOG", "nwog50": "NWOG 50%"}
-LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl", "ndog": "ndog", "ndog50": "ndog",
-               "nwog": "nwog", "nwog50": "nwog"}   # botón que muestra cada nivel
+LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL", "ndog": "NDOG", "nwog": "NWOG"}   # los huecos llevan el texto una vez (en el borde alto); el otro borde y el 50 % no
+LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl", "ndog": "ndog", "ndoglo": "ndog", "ndog50": "ndog",
+               "nwog": "nwog", "nwoglo": "nwog", "nwog50": "nwog"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
-               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine, "ndog": Qt.PenStyle.DotLine, "ndog50": Qt.PenStyle.DashLine,
-               "nwog": Qt.PenStyle.DotLine, "nwog50": Qt.PenStyle.DashLine}
+               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine, "ndog": Qt.PenStyle.DotLine, "ndoglo": Qt.PenStyle.DotLine, "ndog50": Qt.PenStyle.DashLine,
+               "nwog": Qt.PenStyle.DotLine, "nwoglo": Qt.PenStyle.DotLine, "nwog50": Qt.PenStyle.DashLine}
 
 
 def _alpha(color: str, alpha: int) -> QColor:
@@ -729,6 +728,8 @@ class ChartView(pg.PlotWidget):
             xs += [line.x0, line.x1]
             ys += [line.price, line.price]
             color = self._day_colors.get(LEVEL_GROUP[line.kind], theme.MUTED)
+            if line.kind not in LEVEL_LABELS:
+                continue
             label = pg.TextItem(LEVEL_LABELS[line.kind], color=color, anchor=(0, 0.5))
             label.setPos(line.x1, line.price)
             pi.addItem(label, ignoreBounds=True)

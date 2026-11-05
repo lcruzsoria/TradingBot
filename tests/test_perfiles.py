@@ -508,7 +508,7 @@ def test_las_lineas_de_ndog_nwog_llevan_los_bordes_y_el_50_por_ciento():
     ts = np.array([7 * D + 16 * H + 45 * 60, 7 * D + 17 * H, 7 * D + 17 * H + 900])
     open_, close = np.array([100.0, 104.0, 104.5]), np.array([102.0, 104.5, 105.0])
     lines = gap_lines(ts, open_, close, 0, Line)
-    assert sorted((l.kind, l.price) for l in lines) == [("ndog", 102.0), ("ndog", 104.0), ("ndog50", 103.0)]
+    assert sorted((l.kind, l.price) for l in lines) == [("ndog", 104.0), ("ndog50", 103.0), ("ndoglo", 102.0)]
 
 
 def test_los_botones_de_huecos_solo_existen_en_el_perfil_barrido_nyam(tmp_path, monkeypatch):
