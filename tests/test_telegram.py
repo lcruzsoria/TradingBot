@@ -486,8 +486,8 @@ def test_el_aviso_de_setup_pendiente_dice_que_falta_y_hacia_donde_debe_cerrar():
     p = {"symbol": "EURUSD", "timeframe": "5m", "direction": "short", "level": 1.12442, "zone": (1.12507, 1.12524), "stop": 1.12651, "ltf": 15,
          "mtf": "M15", "sweep": "vela C1", "c2": "04/11 05:00"}
     text = messages.pending(p, "crt")
-    assert text.split("\n") == ["<b>Estrategia:</b> CRT", "⏳ <b>Setup completo Corto EURUSD</b>", "Solo falta una vela de M15 que cierre por debajo del CISD 1.12442",
-                                "BPR 1.12507–1.12524 (FVG M15 + iFVG M15) · Stop 1.12651", "C2 04/11 05:00 NY · sweep vela C1", "<i>perfil crt</i>"]
+    assert text.split("\n") == ["<b>Estrategia:</b> CRT · vela H4", "⏳ <b>Setup completo Corto EURUSD</b>", "Solo falta una vela de M15 que cierre por debajo del CISD 1.12442",
+                                "BPR 1.12507–1.12524 (FVG M15 + iFVG M15) · Stop 1.12651", "Sweep: vela C1", "<i>perfil crt</i>"]
     assert "por encima" in messages.pending({**p, "direction": "long"})
 
 def test_aviso_de_un_setup_crt_sin_entrada_por_el_stop_maximo():

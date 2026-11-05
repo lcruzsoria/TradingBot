@@ -5,6 +5,8 @@ import html
 from datetime import date
 
 from ..bias.rules import fmt_price
+from ..crt import engine
+from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 
 SIDE = {"long": "Largo", "short": "Corto"}
 RESULT = {"objetivo": ("✅", "TP"), "stop": ("❌", "SL"), "breakeven": ("⚪", "BE"), "tiempo": ("⏱", "T")}
@@ -18,8 +20,16 @@ def _day(value) -> str:
     return value.strftime("%d/%m") if isinstance(value, date) else _e(value or "")
 
 
-def _strategy(title) -> str:
-    """Primera línea de cada aviso: qué estrategia lo origina (varias comparten la cuenta del perfil)."""
+def crt_htf(symbol) -> str:
+    """La vela HTF en la que CRT busca el sweep de ese mercado (H3 en índices, H4 en el resto)."""
+    base = engine.INDICES if is_us_index(str(symbol), DEFAULT_US_INDICES) else engine.FOREX
+    return f"H{base.htf_min // 60}"
+
+
+def _strategy(title, order=None) -> str:
+    """Primera línea de cada aviso: qué estrategia lo origina (varias comparten la cuenta del perfil). En CRT, además, la vela HTF que se usa."""
+    if order is not None and getattr(order, "pattern_key", "") == "crt":
+        title = f"CRT · vela {crt_htf(order.symbol)}"
     return f"<b>Estrategia:</b> {_e(title)}\n"
 
 
@@ -49,7 +59,7 @@ def _footer(profile: str | None) -> str:
 
 
 def opened(order, profile: str | None = None) -> str:
-    return (f"{_strategy(order.pattern)}🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> "
+    return (f"{_strategy(order.pattern, order)}🟡 <b>Abre {SIDE.get(order.direction, order.direction)} {_e(order.symbol)}</b> "
             f"{_e(order.timeframe)}\n{_where(order)}{_levels(order)}\n"
             f"Sesgo {_bias_text(order.bias, order.score, order.lateral, order.efficiency)}{_footer(profile)}")
 
@@ -58,20 +68,20 @@ def pending(p: dict, profile: str | None = None) -> str:
     """Aviso de CRT: el BPR, el iFVG invertido y el retest ya están y solo falta una vela del TF menor que cierre con cuerpo más allá del CISD."""
     short = p["direction"] == "short"
     zone = p["zone"]
-    return (f"{_strategy('CRT')}⏳ <b>Setup completo {SIDE.get(p['direction'], p['direction'])} {_e(p['symbol'])}</b>\n"
+    return (f"{_strategy('CRT · vela ' + (p.get('htf') or crt_htf(p['symbol'])))}⏳ <b>Setup completo {SIDE.get(p['direction'], p['direction'])} {_e(p['symbol'])}</b>\n"
             f"Solo falta una vela de M{p['ltf']} que cierre {'por debajo' if short else 'por encima'} del CISD {fmt_price(p['level'])}\n"
             f"BPR {fmt_price(zone[0])}–{fmt_price(zone[1])} (FVG {_e(p['mtf'])} + iFVG M{p['ltf']}) · Stop {fmt_price(p['stop'])}\n"
-            f"C2 {_e(p['c2'])} NY · sweep {_e(p['sweep'])}{_footer(profile)}")
+            f"Sweep: {_e(p['sweep'])}{_footer(profile)}")
 
 def blocked(payload: dict, profile: str | None = None) -> str:
-    return (f"<b>Estrategia:</b> CRT\n🟠 <b>NO GO · sin entrada · {SIDE.get(payload['direction'], payload['direction'])} {_e(payload['symbol'])}</b> "
+    return (f"<b>Estrategia:</b> CRT · vela {_e(payload.get('htf') or crt_htf(payload['symbol']))}\n🟠 <b>NO GO · sin entrada · {SIDE.get(payload['direction'], payload['direction'])} {_e(payload['symbol'])}</b> "
             f"{_e(payload['timeframe'])}\n{_e(payload['text'])}\nStop {fmt_price(payload['stop'])}{_footer(profile)}")
 
 
 def closed(order, result, profile: str | None = None) -> str:
     icon, short = RESULT.get(result.result, ("•", result.result))
     peak = f" · máx. {result.max_r:+.2f} R" if result.max_r is not None else ""
-    return (f"{_strategy(order.pattern)}{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} "
+    return (f"{_strategy(order.pattern, order)}{icon} <b>{short} {result.r:+.2f} R · {SIDE.get(order.direction, order.direction)} "
             f"{_e(order.symbol)}</b> {_e(order.timeframe)}\n{_where(order)}"
             f"Entrada {fmt_price(order.price)} → salida {fmt_price(result.exit_price)}{peak}{_footer(profile)}")
 

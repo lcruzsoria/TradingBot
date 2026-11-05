@@ -233,7 +233,7 @@ class CrtSkill(Skill):
             series[m] = extra
         return engine_complete(series, cfg)
 
-    def _announce_pending(self, symbol: str, tf: str, waiting: list, ahead: int) -> None:
+    def _announce_pending(self, symbol: str, tf: str, waiting: list, ahead: int, htf_min: int) -> None:
         """Avisa (una vez por setup) de que el BPR, el iFVG invertido y el retest ya están y solo falta que una vela del TF menor cierre con cuerpo más allá del CISD."""
         for w in waiting:
             sign = w["sign"]
@@ -244,7 +244,8 @@ class CrtSkill(Skill):
             c2 = datetime.fromtimestamp(int(w["C2"]) - ahead, timezone.utc)
             self.publish("crt.pending", {"symbol": symbol, "timeframe": tf, "direction": w["dirección"], "level": sign * float(w["level"]),
                                          "zone": tuple(sorted((sign * float(w["z_bottom"]), sign * float(w["z_top"])))), "stop": sign * float(w["stop"]),
-                                         "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}"})
+                                         "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}",
+                                         "htf": f"H{htf_min // 60}"})
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15 y 5 min, TF del FVG >= TF del iFVG). Cada
@@ -274,7 +275,7 @@ class CrtSkill(Skill):
             self.publish("crt.blocked", {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "stop": st["sign"] * st["stop"],
                                          "entry_ts": int(ts[m][st["jc"]]) + m * 60, "text": sl_text(risk, cfg, long=True), "strategy": STRATEGY})
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
-        self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead)
+        self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead, cfg.htf_min)
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):
             m = st["ltf"]
