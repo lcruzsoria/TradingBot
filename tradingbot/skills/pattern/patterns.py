@@ -268,4 +268,4 @@ def window_for(tbr: ActiveTbr, order, ahead: int, extend=(), until=None) -> TbrW
                      session_end, last_hours, start_ts)
 
 
-from . import barrido_rht, continuacion, doble_barrido, reversion, tbr_vwap  # noqa: E402,F401  (registran los patrones definidos)
+from . import continuacion, doble_barrido, reversion, tbr_vwap  # noqa: E402,F401  (registran los patrones definidos)

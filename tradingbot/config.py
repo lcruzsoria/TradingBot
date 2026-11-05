@@ -79,10 +79,11 @@ class Mt5Profile:
 
 
 STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",),
-                       "barrido_nyam": ("calendario",),      # necesita TBR: pinta sus zonas y las lee el patrón
+                       "barrido_nyam": ("calendario", "pattern"),   # tiene su propia skill (barrido_rht); mantiene TBR y Bias
                        "crt": ("pattern", "tbr", "calendario", "bias")}   # skills que un perfil de estrategia no usa (solo opera la suya; CRT tiene su propio sesgo)
 
-STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},)}   # skills que solo existen en ese perfil de estrategia
+STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},),
+                      "barrido_nyam": ({"type": "barrido_rht", "slot": 4},)}      # en el hexágono grande que ocupa Pattern en los demás perfiles   # skills que solo existen en ese perfil de estrategia
 
 STRATEGY_TIMEFRAMES = {"crt": "5m", "barrido_nyam": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 

@@ -1,16 +1,16 @@
 """Patrón «Barrido del RHT»: NY Open barre un lado del rango RHT (Pre-NY, 09:00-10:00) y cierra de vuelta dentro de él.
 
 Es la estrategia del perfil `barrido_nyam` (MT5_<PERFIL>_STRATEGY=barrido_nyam). Es una HIPÓTESIS SIN VALIDAR: `default_on = False`
-(solo la busca el perfil, o PATTERN_TYPES=barrido_rht) y solo simula, como todo el bot con SETUP_SEND_ORDERS=false.
+(solo la busca la skill barrido_rht del perfil) y solo simula, como todo el bot con SETUP_SEND_ORDERS=false.
 
-Reglas (velas de `PATTERN_BARRIDO_RHT_TF`, M5 al inicio):
+Reglas (velas de `BARRIDO_RHT_TF`, M5 al inicio):
 
 1. El RHT tiene que haber terminado: solo se busca desde el cierre de la TBR Pre-NY.
-2. Solo vale el PRIMER barrido del día: la primera vela, desde `PATTERN_BARRIDO_RHT_START` (10:00 NY), que supera el High o el Low del
+2. Solo vale el PRIMER barrido del día: la primera vela, desde `BARRIDO_RHT_START` (10:00 NY), que supera el High o el Low del
    RHT. Si esa vela barre los dos lados a la vez, no hay setup.
 3. La entrada es la primera vela que CIERRA de nuevo dentro del rango (por debajo del High barrido, o por encima del Low barrido):
    la propia vela de barrido si ya cierra dentro, o la primera posterior que lo haga. Debe haber abierto antes de
-   `PATTERN_BARRIDO_RHT_END` (10:30 NY); si no vuelve a tiempo, o barre también el otro lado antes de volver, no hay setup. Un
+   `BARRIDO_RHT_END` (10:30 NY); si no vuelve a tiempo, o barre también el otro lado antes de volver, no hay setup. Un
    primer barrido posterior a la ventana tampoco cuenta.
 4. Barrer el High da un corto y barrer el Low, un largo. Entrada a mercado al cierre de esa vela.
 
@@ -29,9 +29,9 @@ import numpy as np
 from ...timeframes import parse_timeframe
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..levels.gaps import opening_gaps
-from .continuacion import _when
-from .patterns import DETECTED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
-from .trade import position_figure
+from ..pattern.continuacion import _when
+from ..pattern.patterns import DETECTED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
+from ..pattern.trade import position_figure
 
 KEY = "barrido_rht"
 TITLE = "Barrido del RHT"
@@ -47,7 +47,7 @@ def _minutes(text: str, name: str) -> int:
         h, m = (int(x) for x in str(text).strip().split(":"))
         assert 0 <= h < 24 and 0 <= m < 60
     except (ValueError, AssertionError):
-        raise ValueError(f"PATTERN_BARRIDO_RHT_{name}={text!r}: usa el formato HH:MM.") from None
+        raise ValueError(f"BARRIDO_RHT_{name}={text!r}: usa el formato HH:MM.") from None
     return h * 60 + m
 
 
@@ -59,11 +59,11 @@ class BarridoRht(Pattern):
     def __init__(self, settings=None) -> None:
         super().__init__(settings)
         get = (lambda key, default: default) if settings is None else settings.get
-        self.tf = parse_timeframe(str(get("BARRIDO_RHT_TF", DEFAULT_TF)))
-        self.start = _minutes(get("BARRIDO_RHT_START", DEFAULT_START), "START")
-        self.end = _minutes(get("BARRIDO_RHT_END", DEFAULT_END), "END")
+        self.tf = parse_timeframe(str(get("TF", DEFAULT_TF)))                 # bloque BARRIDO_RHT de tradingbot.env (sin prefijo)
+        self.start = _minutes(get("START", DEFAULT_START), "START")
+        self.end = _minutes(get("END", DEFAULT_END), "END")
         if self.end <= self.start:
-            raise ValueError(f"PATTERN_BARRIDO_RHT_END={self.end // 60:02d}:{self.end % 60:02d} debe ser posterior a START.")
+            raise ValueError(f"BARRIDO_RHT_END={self.end // 60:02d}:{self.end % 60:02d} debe ser posterior a START.")
 
     def timeframe(self) -> str:
         return self.tf

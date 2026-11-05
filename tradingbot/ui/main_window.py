@@ -344,7 +344,7 @@ class MainWindow(QMainWindow):
         self._sma_cfg = (30, "#00ACC1", "normal", show if show in SMA_SHOWS else DEFAULT_SMA_SHOW,
                          DEFAULT_COLORS["VWAP"], "normal")        # (periodos, color, trazo, qué mostrar, color y trazo del VWAP)
         # Fibonacci de los patrones (0, 0,5 y 1 del tramo): lo dibuja la skill Pattern
-        pattern_skill = self.manager.skills.get("pattern")
+        pattern_skill = self.manager.skills.get("pattern") or self.manager.skills.get("barrido_rht")
         self.fibo_btn = QPushButton("Fibo")
         self.fibo_btn.setProperty("chip", "true")
         self.fibo_btn.setCheckable(True)

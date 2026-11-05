@@ -385,7 +385,7 @@ def test_el_perfil_barrido_nyam_usa_la_cuenta_de_puprime_con_10000_y_solo_el_dob
                                                                                 "barrido_nyam", 10_000.0, "USD")
     assert STRATEGY_PATTERNS["barrido_nyam"] == ("barrido_rht",)
     kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "barrido_nyam")
-    assert [s["type"] for s in kept] == ["cortex", "pattern", "tbr"]            # sin Calendario, con TBR (sus zonas y el patrón la usan)
+    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido_rht", 4)]   # skill propia en un hexágono grande, sin Pattern ni Calendario
 
 
 # -- perfil Barrido_NYAM: barrido del RHT --------------------------------------------------------------------------
@@ -403,7 +403,7 @@ def _barrido_ctx(candles, rht=(100.0, 90.0)):
 
 
 def test_barrido_rht_el_primer_barrido_que_cierra_dentro_da_el_setup():
-    from tradingbot.skills.pattern.barrido_rht import analyze
+    from tradingbot.skills.barrido_rht.deteccion import analyze
     # 09:55 (dentro del RHT, no cuenta), 10:00 sin barrido, 10:05 barre el High y cierra dentro: corto
     hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))
     assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 2)]
@@ -413,7 +413,7 @@ def test_barrido_rht_el_primer_barrido_que_cierra_dentro_da_el_setup():
 
 
 def test_barrido_rht_si_la_vela_de_barrido_cierra_fuera_entra_la_primera_que_vuelve_a_cerrar_dentro():
-    from tradingbot.skills.pattern.barrido_rht import analyze
+    from tradingbot.skills.barrido_rht.deteccion import analyze
     hits, _ = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]))
     assert [(h.status, h.x) for h in hits] == [("detected", 4)] and hits[0].price == 98
     assert hits[0].levels == {"stop": 105.0, "target": 90.0}                       # stop en el extremo del barrido hasta la entrada
@@ -422,7 +422,7 @@ def test_barrido_rht_si_la_vela_de_barrido_cierra_fuera_entra_la_primera_que_vue
 
 
 def test_barrido_rht_casos_sin_setup():
-    from tradingbot.skills.pattern.barrido_rht import analyze
+    from tradingbot.skills.barrido_rht.deteccion import analyze
     ambos = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (95, 103, 87, 95)]))[0]
     assert [h.status for h in ambos] == ["invalidated"]
     otro_lado = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
@@ -435,11 +435,11 @@ def test_barrido_rht_casos_sin_setup():
 
 def test_barrido_rht_ventana_configurable_y_valida():
     from tradingbot.envconfig import EnvConfig, parse
-    from tradingbot.skills.pattern.barrido_rht import BarridoRht, analyze
+    from tradingbot.skills.barrido_rht.deteccion import BarridoRht, analyze
     late = [(95, 99, 94, 96)] + [(95, 98, 93, 95)] * 6 + [(95, 103, 94, 96), (96, 97, 95, 96)]
     assert [h.status for h in analyze(_barrido_ctx(late), 10 * 60, 11 * 60)[0]] == ["detected"]
     with pytest.raises(ValueError, match="BARRIDO_RHT_END"):
-        BarridoRht(EnvConfig(parse("BARRIDO_RHT_START=10:30\nBARRIDO_RHT_END=10:00\n")))
+        BarridoRht(EnvConfig(parse("START=10:30\nEND=10:00\n")))
 
 
 def test_barrido_nyam_pinta_su_rht_y_su_ciclo_solo_en_su_perfil(tmp_path):
@@ -480,7 +480,7 @@ def test_ndog_y_nwog_salen_del_cierre_de_las_17_y_de_la_pausa_del_fin_de_semana(
 
 def test_barrido_rht_solo_busca_en_indices_usa():
     from dataclasses import replace
-    from tradingbot.skills.pattern.barrido_rht import analyze
+    from tradingbot.skills.barrido_rht.deteccion import analyze
     ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
     assert analyze(replace(ctx, symbol="NAS100.s"))[0] and not analyze(replace(ctx, symbol="EURUSD"))[0]
 
@@ -488,7 +488,7 @@ def test_barrido_rht_solo_busca_en_indices_usa():
 def test_barrido_rht_objetivo_2_es_lo_que_este_antes_mas_alla_del_objetivo_1():
     from dataclasses import replace
     from tradingbot.skills.pattern.patterns import PeerTbr
-    from tradingbot.skills.pattern.barrido_rht import analyze
+    from tradingbot.skills.barrido_rht.deteccion import analyze
     ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)])
     day = date(1970, 1, 1)
     asia = PeerTbr("ASIA", "Asia", day, 88.0, 70.0, -4 * 3600, 0)
@@ -543,3 +543,32 @@ def test_barrido_nyam_asia_y_london_solo_con_maximos_y_minimos():
     assert (zones["ASIA"].box, zones["ASIA"].mid) == (False, False) and (zones["LONDON"].box, zones["LONDON"].mid) == (False, True)
     assert zones["PRE_NY"].box and zones["NY_AM"].box                                   # el RHT y NY Open, pintados
     assert all(z.box and z.mid for z in zones_from_settings(env.section("TBR")))        # el resto de perfiles no cambia
+
+
+def test_barrido_nyam_el_plazo_de_ny_open_tiene_fin_para_dibujar_los_dias_pasados():
+    """Sin una zona detrás de NY Open, su plazo no tenía fin y la skill Pattern descartaba las entradas de los días anteriores."""
+    from tradingbot.skills.pattern.patterns import ActiveTbr, window_for
+    from tradingbot.skills.tbr.zones import zones_from_settings
+    from pathlib import Path
+    from tradingbot.envconfig import load
+    env = load(Path(__file__).resolve().parent.parent / "tradingbot.env")
+    own_pattern, own_tbr = env.section("BARRIDO_NYAM_PATTERN"), env.section("BARRIDO_NYAM_TBR")
+    order = zones_from_settings(env.section("TBR"), own_pattern.get_list("ZONE_ORDER"), own_tbr)
+    ny = ActiveTbr("NY_AM", "NY Open", date(2026, 11, 3), 120.0, 80.0, 0, 0)
+    assert window_for(ny, order, 0, (), {}).end_ts is not None
+
+
+def test_la_skill_barrido_rht_arranca_en_el_hexagono_grande_4_con_los_ajustes_del_perfil():
+    from pathlib import Path
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import load
+    import tradingbot.skills  # noqa: F401
+    env = load(Path(__file__).resolve().parent.parent / "tradingbot.env")
+    cfg = {"app": {"strategy": "barrido_nyam"}}
+    manager = SkillManager(EventBus(), Services(None, None, cfg, env), [{"type": "tbr"}, {"type": "barrido_rht", "slot": 4}])
+    skill = manager.skills["barrido_rht"]
+    skill.on_start()
+    assert skill.slot == 4 and skill.error == "" and skill.types == ["barrido_rht"]
+    pattern = skill.patterns["barrido_rht"]
+    assert (pattern.tf, pattern.start, pattern.end) == (pattern.tf, 600, 630)            # BARRIDO_RHT_START=10:00, _END=10:30
+    assert [z.key for z in skill.order] == ["PRE_NY", "NY_AM", "NY_PM"]
