@@ -10,7 +10,7 @@ Reglas (velas de `BARRIDO_RTH_TF`, M5 al inicio):
    RTH. Si esa vela barre los dos lados a la vez, no hay setup.
 3. La entrada es la primera vela POSTERIOR a la de barrido que CIERRA de nuevo dentro del rango (por debajo del High barrido, o por encima
    del Low barrido): la vela que barre nunca cuenta, aunque cierre dentro. Debe haber abierto antes de
-   `BARRIDO_RTH_END` (10:30 NY); si no vuelve a tiempo, o barre también el otro lado antes de volver, no hay setup. Un
+   `BARRIDO_RTH_END` (11:00 NY); si no vuelve a tiempo, o barre también el otro lado antes de volver, no hay setup. Un
    primer barrido posterior a la ventana tampoco cuenta.
 4. Barrer el High da un corto y barrer el Low, un largo. Entrada a mercado al cierre de esa vela.
 
@@ -37,7 +37,7 @@ KEY = "barrido_rth"
 TITLE = "Barrido del RTH"
 DEFAULT_TF = "5m"
 DEFAULT_START = "10:00"          # hora de NY desde la que cuenta un barrido
-DEFAULT_END = "10:30"            # hora de NY antes de la que debe abrir la vela de barrido
+DEFAULT_END = "11:00"            # hora de NY antes de la que debe abrir la vela de barrido
 NY_KEY = "NY_AM"                 # TBR en cuya hora se busca
 RTH_KEY = "PRE_NY"               # el rango que se barre
 
@@ -52,7 +52,7 @@ def _minutes(text: str, name: str) -> int:
 
 
 @register_pattern(KEY)
-class BarridoRht(Pattern):
+class BarridoRth(Pattern):
     title = TITLE
     default_on = False                     # hipótesis por validar: solo el perfil barrido_nyam (o PATTERN_TYPES=barrido_rth) la busca
 
@@ -131,7 +131,7 @@ def analyze(ctx: PatternContext, start_min: int = _minutes(DEFAULT_START, "START
     closes = ctx.close[sweep + 1:last + 1]
     back = np.flatnonzero(closes < rth.high) if up else np.flatnonzero(closes > rth.low)
     if not back.size:
-        return [], []                                                         # aún no ha vuelto (o no volvió antes de las 10:30)
+        return [], []                                                         # aún no ha vuelto (o no volvió antes de las 11:00)
     t = sweep + 1 + int(back[0])
     extreme = float(np.max(ctx.high[sweep:t + 1]) if up else np.min(ctx.low[sweep:t + 1]))    # el swing: extremo de todo el tramo que rompe el RTH, hasta la entrada
     other = bool(ctx.low[sweep:t + 1].min() < rth.low) if up else bool(ctx.high[sweep:t + 1].max() > rth.high)

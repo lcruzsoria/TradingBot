@@ -430,18 +430,18 @@ def test_barrido_rth_casos_sin_setup():
     otro_lado = analyze(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
     assert [h.status for h in otro_lado] == ["invalidated"]                        # barre también el Low antes de volver
     tarde = [(95, 99, 94, 96)] + [(95, 98, 93, 95)] * 6 + [(95, 103, 94, 96), (96, 97, 95, 96)]
-    assert analyze(_barrido_ctx(tarde))[0] == []                                   # el primer barrido (10:30) está fuera de la ventana
+    assert analyze(_barrido_ctx(tarde), 600, 630)[0] == []                          # con la ventana hasta las 10:30, el primer barrido (10:30) queda fuera
     no_vuelve = [(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102)] + [(102, 104, 100, 103)] * 6 + [(103, 104, 95, 96)]
-    assert analyze(_barrido_ctx(no_vuelve))[0] == []                               # vuelve a cerrar dentro a las 10:30: tarde
+    assert analyze(_barrido_ctx(no_vuelve), 600, 630)[0] == []                      # vuelve a cerrar dentro a las 10:30: tarde
 
 
 def test_barrido_rth_ventana_configurable_y_valida():
     from tradingbot.envconfig import EnvConfig, parse
-    from tradingbot.skills.barrido_rth.deteccion import BarridoRht, analyze
+    from tradingbot.skills.barrido_rth.deteccion import BarridoRth, analyze
     late = [(95, 99, 94, 96)] + [(95, 98, 93, 95)] * 6 + [(95, 103, 94, 96), (96, 97, 95, 96)]
     assert [h.status for h in analyze(_barrido_ctx(late), 10 * 60, 11 * 60)[0]] == ["detected"]
     with pytest.raises(ValueError, match="BARRIDO_RTH_END"):
-        BarridoRht(EnvConfig(parse("START=10:30\nEND=10:00\n")))
+        BarridoRth(EnvConfig(parse("START=10:30\nEND=10:00\n")))
 
 
 def test_barrido_nyam_pinta_su_rth_y_su_ciclo_solo_en_su_perfil(tmp_path):
@@ -572,5 +572,5 @@ def test_la_skill_barrido_rth_arranca_en_el_hexagono_grande_4_con_los_ajustes_de
     skill.on_start()
     assert skill.slot == 4 and skill.error == "" and skill.types == ["barrido_rth"]
     pattern = skill.patterns["barrido_rth"]
-    assert (pattern.tf, pattern.start, pattern.end) == (pattern.tf, 600, 630)            # BARRIDO_RTH_START=10:00, _END=10:30
+    assert (pattern.tf, pattern.start, pattern.end) == (pattern.tf, 600, 660)            # BARRIDO_RTH_START=10:00, _END=11:00
     assert [z.key for z in skill.order] == ["PRE_NY", "NY_AM", "NY_PM"]
