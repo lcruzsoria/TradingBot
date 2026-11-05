@@ -120,6 +120,9 @@ def main(argv=None) -> int:
             cfg["app"]["strategy"] = profile.strategy
             cfg["app"]["capital"], cfg["app"]["currency"] = profile.capital, profile.currency
         strategy = cfg["app"].get("strategy") or ""
+        own_start = env.get(f"{strategy}_STATS_FORWARD_START") if strategy else None
+        if own_start:                                             # <ESTRATEGIA>_STATS_FORWARD_START: el forwardtest de ese perfil empieza en su fecha
+            env.values["STATS_FORWARD_START"] = own_start
         if strategy:                                              # perfil de estrategia: solo sus skills y sus mercados
             cfg["skills"] = strategy_skills(cfg["skills"], strategy)
             own = env.section(strategy).get_list("SYMBOLS", []) or cfg["app"]["watchlist"]
