@@ -84,9 +84,9 @@ STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario
 
 STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},)}   # skills que solo existen en ese perfil de estrategia
 
-STRATEGY_TIMEFRAMES = {"crt": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
+STRATEGY_TIMEFRAMES = {"crt": "5m", "barrido_nyam": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
-STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",), "barrido_nyam": ("doble_barrido",)}      # patrones que busca un perfil de estrategia (y solo esos)
+STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",), "barrido_nyam": ("barrido_rht",)}      # patrones que busca un perfil de estrategia (y solo esos)
 
 
 def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:

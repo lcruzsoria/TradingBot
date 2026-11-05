@@ -66,7 +66,10 @@ class PatternSkill(Skill):
         if self.history_days < 1:
             raise ValueError(f"PATTERN_HISTORY_DAYS={self.history_days} debe ser 1 o más.")
         self.since = forward_start(self.services.env)       # STATS_FORWARD_START: desde ahí se avisa de todas las TBR
-        order = [z.upper() for z in self.settings.get_list("ZONE_ORDER", list(DEFAULT_ZONE_ORDER))]
+        strategy = (self.services.app_cfg["app"].get("strategy") or "") if self.services.app_cfg else ""
+        own_env = self.services.env.section(f"{strategy}_PATTERN") if strategy and self.services.env is not None else EnvConfig()
+        own_tbr = self.services.env.section(f"{strategy}_TBR") if strategy and self.services.env is not None else None
+        order = [z.upper() for z in (own_env.get_list("ZONE_ORDER", []) or self.settings.get_list("ZONE_ORDER", list(DEFAULT_ZONE_ORDER)))]
         self.extend = [z.upper() for z in self.settings.get_list("EXTEND", list(DEFAULT_EXTEND))]
         unknown_zone = [z for z in self.extend if z not in order]
         if self.settings.get("EXTEND") is None:
@@ -76,7 +79,7 @@ class PatternSkill(Skill):
             raise ValueError(f"PATTERN_EXTEND={', '.join(self.extend)}: {', '.join(unknown_zone)} no está en PATTERN_ZONE_ORDER.")
         self.until = self._load_until(order)
         env = self.services.env if self.services.env is not None else EnvConfig()
-        self.order = zones_from_settings(env.section("TBR"), order) if order else []        # ciclo de TBR: define el plazo
+        self.order = zones_from_settings(env.section("TBR"), order, own_tbr) if order else []        # ciclo de TBR: define el plazo
         levels = env.section("LEVELS")                  # el día de trading acaba cuando empieza el siguiente: ahí cierran los trades
         self.day_end = parse_time(levels.get("DAY_START", DEFAULT_DAY_START), "LEVELS_DAY_START")
         self.index_day_end = parse_time(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START), "LEVELS_INDEX_DAY_START")
