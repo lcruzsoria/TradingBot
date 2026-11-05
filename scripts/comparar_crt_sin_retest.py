@@ -20,7 +20,18 @@ ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--solo-tbr", action="store_true", help="solo las entradas que caen en el horario de una TBR (Asia, London, NY Open)")
 ap.add_argument("--extremo-hora", type=int, metavar="MIN", help="solo los setups cuyo extremo del sweep (el mínimo en un largo, el máximo en un corto) cae a MIN minutos o menos "
                 "de una hora en punto, o sea de la apertura de una vela H1 (la vela de M5/M15 que lo marca empieza a ±MIN)")
+ap.add_argument("--ny-open", metavar="HH:MM-HH:MM", help="otro horario (NY) para la TBR NY Open en lugar del de tradingbot.env (10:00-12:00); la zona de cada operación se recalcula "
+                "con la hora de su entrada, sin volver a simular")
 args = ap.parse_args()
+if args.ny_open:
+    (h0, m0), (h1, m1) = (tuple(int(x) for x in part.split(":")) for part in args.ny_open.split("-"))
+
+    def rezone(T: pd.DataFrame) -> pd.DataFrame:
+        minute = pd.to_datetime(T["entrada (NY)"]).dt.hour * 60 + pd.to_datetime(T["entrada (NY)"]).dt.minute
+        zona = T["zona"].where(T["zona"] != "NY Open", "Fuera de TBR")
+        return T.assign(zona=zona.where(~((minute >= h0 * 60 + m0) & (minute < h1 * 60 + m1)), "NY Open"))
+    A, B = rezone(A), rezone(B)
+    print(f"TBR NY Open de {args.ny_open} (NY)")
 if args.solo_tbr:
     A, B = (T[T["zona"] != "Fuera de TBR"] for T in (A, B))
     print("Solo entradas dentro de Asia, London y NY Open")
