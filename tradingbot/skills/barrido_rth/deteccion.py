@@ -43,6 +43,8 @@ DEFAULT_STOP_POINTS = 30.0       # stop fijo, en puntos del precio, si cubre el 
 DEFAULT_STOP_BUFFER = 5.0        # si el swing queda más lejos, el stop es el swing más estos puntos
 INDICES_USA = ("NAS100", "SP500", "DJ30", "US30", "US100", "US500", "USTEC", "US2000", "SPX500", "NDX100")
 MAX_HOLD_SECONDS = 24 * 3600     # como tope, una posición dura 24 h (igual que el resto de órdenes)
+ZONAS = ("PRE_NY", "ASIA", "LONDON")    # las TBR que usa: el RTH (el rango que se rompe) y Asia y London (el objetivo 2)
+MAX_GAP = 36 * 3600              # una Asia o London más antigua que esto no es la del día
 
 
 def minutos(text: str, name: str) -> int:
@@ -225,3 +227,26 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
             extra["objetivo2"] = second[0]
         figures = [replace(fig, levels={**fig.levels, **extra})]
     return [PatternHit(KEY, TITLE, direction, int(t), close, detail, levels, ts_hit, DETECTED)], figures
+
+
+def contextos(symbol: str, tf_minutes: int, ts, o, h, l, c, sessions, ahead: int, day_end: int = 0, be_r: float | None = None) -> list[Contexto]:
+    """Un contexto por cada día con el RTH cerrado, del más antiguo al más reciente: lo que analiza la skill y también el backtest.
+
+    `sessions`: las sesiones de la skill TBR (con al menos RTH, Asia y London). Las velas `ts, o, h, l, c` son las ya cerradas."""
+    zonas = {}                                      # (zona, día) -> (sesión de la skill TBR, Zona con su cierre en hora del servidor)
+    for s in sessions:
+        if s.complete and s.high > s.low and s.zone.key in ZONAS:
+            day0 = (s.day.toordinal() - date(1970, 1, 1).toordinal()) * 86400
+            close_ts = day0 + s.zone.start * 60 + s.zone.minutes * 60 + ahead
+            zonas[(s.zone.key, s.day)] = (s, Zona(s.zone.key, s.zone.name, s.day, s.high, s.low, close_ts))
+    out = []
+    for day in sorted(d for key, d in zonas if key == "PRE_NY"):
+        session, rth = zonas[("PRE_NY", day)]
+        tbr = ActiveTbr("PRE_NY", session.zone.name, day, session.high, session.low, session.x0, session.x1)
+        previas = []
+        for key in ("ASIA", "LONDON"):              # las últimas cerradas antes de que empezara NY Open
+            options = [z for (k, _d), (_s, z) in zonas.items() if k == key and z.close_ts <= rth.close_ts and rth.close_ts - z.close_ts <= MAX_GAP]
+            if options:
+                previas.append(max(options, key=lambda z: z.close_ts))
+        out.append(Contexto(symbol, tf_minutes, ts, o, h, l, c, ahead, tbr, rth, tuple(previas), len(ts) - 1, day_end, be_r))
+    return out

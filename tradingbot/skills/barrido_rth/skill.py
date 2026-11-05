@@ -10,19 +10,15 @@ from __future__ import annotations
 
 from datetime import date
 
-import numpy as np
-
 from ...clock import server_minus_ny
 from ...core import Event, Skill, background_of, register_skill
 from ...timeframes import display_label, minutes
-from .._comun.contratos import DETECTED, ActiveTbr
+from .._comun.contratos import DETECTED
 from ..feed.datasource import aggregate_candles
-from .deteccion import KEY, Ajustes, Contexto, Zona, analizar, cierre_del_dia
+from .deteccion import KEY, Ajustes, analizar, cierre_del_dia, contextos
 
 DEFAULT_HISTORY_DAYS = 30        # días pasados de los que se dibujan las entradas
 RECENT_SECONDS = 24 * 3600       # un RTH cerrado en el último día siempre se evalúa y se avisa
-MAX_GAP = 36 * 3600              # una Asia o London más antigua que esto no es la del día
-ZONAS = ("PRE_NY", "ASIA", "LONDON")
 DEFAULT_INDEX_DAY_START = "18:00"
 
 
@@ -160,45 +156,30 @@ class BarridoRthSkill(Skill):
         ahead, _ = server_minus_ny(self._offset)
         ts = df["ts"].to_numpy()
         arrays = tuple(df[k].to_numpy() for k in ("open", "high", "low", "close"))
-        zonas = {}                                      # (zona, día) -> (sesión de la skill TBR, Zona con su cierre en hora del servidor)
-        for s in t["sessions"]:
-            if s.complete and s.high > s.low and s.zone.key in ZONAS:
-                day0 = (s.day.toordinal() - date(1970, 1, 1).toordinal()) * 86400
-                close_ts = day0 + s.zone.start * 60 + s.zone.minutes * 60 + ahead
-                zonas[(s.zone.key, s.day)] = (s, Zona(s.zone.key, s.zone.name, s.day, s.high, s.low, close_ts))
-        days = sorted(day for key, day in zonas if key == "PRE_NY")
-        if not days:
+        contexts = contextos(symbol, minutes(ptf), ts, *arrays, t["sessions"], ahead, self.day_end, self.be_r)
+        if not contexts:
             caption("sin RTH cerrado")
             publish_updated(None, [], [], [], [])
             return
         results, figures, errors = [], [], []
-        first_drawn = days[-1].toordinal() - self.history_days + 1
-        last_tbr = None
-        for day in days:
-            session, rth = zonas[("PRE_NY", day)]
-            tbr = ActiveTbr("PRE_NY", session.zone.name, day, session.high, session.low, session.x0, session.x1)
-            last_tbr = tbr
-            recent = int(ts[-1]) - rth.close_ts <= RECENT_SECONDS
+        first_drawn = contexts[-1].tbr.day.toordinal() - self.history_days + 1
+        for ctx in contexts:
+            day = ctx.tbr.day
+            recent = int(ts[-1]) - ctx.rth.close_ts <= RECENT_SECONDS
             live = self.since is not None and day >= self.since       # desde el inicio del forwardtest se avisa de todo
             drawn = not background and self.history_days > 1 and day.toordinal() >= first_drawn
             if not (recent or live or drawn):
                 continue
-            previas = []
-            for key in ("ASIA", "LONDON"):                            # las últimas cerradas antes de que empezara NY Open
-                options = [z for (k, _d), (_s, z) in zonas.items() if k == key and z.close_ts <= rth.close_ts
-                           and rth.close_ts - z.close_ts <= MAX_GAP]
-                if options:
-                    previas.append(max(options, key=lambda z: z.close_ts))
-            ctx = Contexto(symbol, minutes(ptf), ts, *arrays, ahead, tbr, rth, tuple(previas), len(ts) - 1, self.day_end, self.be_r)
             try:
                 hits, figs = analizar(ctx, self.ajustes)
             except Exception as exc:                    # un día con error no debe tumbar a los demás
                 errors.append(f"Barrido RTH: {exc}")
                 continue
             if recent or live:
-                results += [(tbr, h) for h in hits]
+                results += [(ctx.tbr, h) for h in hits]
             if recent or drawn:
                 figures += figs
+        last_tbr = contexts[-1].tbr
         results.sort(key=lambda r: r[1].ts or 0)           # en orden de hora: así los decide Cortex
         hits = [h for _t, h in results]
         publish_updated(last_tbr, hits, errors, [], figures)
