@@ -656,3 +656,100 @@ def test_barrido_rth_breakeven_al_tomar_el_low_de_ny_open_y_configurable():
 def replace_order(order):
     from dataclasses import replace
     return replace(order, be_price=None)
+
+
+# -- perfil Barrido_ASIA: barrido del rango de Asia ----------------------------------------------------------------
+def _asia_ctx(candles, asia=(100.0, 90.0), symbol="NAS100"):
+    """Velas de M5 desde las 23:55 (hora NY = servidor): (open, high, low, close). Asia 20:00-00:00 del día 1970-01-01 (cierra a medianoche)."""
+    from tradingbot.skills._comun.contratos import ActiveTbr
+    from tradingbot.skills.barrido_asia.deteccion import Contexto, Zona
+    day, base = date(1970, 1, 1), 24 * 3600 - 300
+    ts = np.array([base + 300 * i for i in range(len(candles))])
+    o, h, l, c = (np.array(x, dtype=float) for x in zip(*candles))
+    zona = Zona("Asia", day, asia[0], asia[1], 24 * 3600)
+    return Contexto(symbol, 5, ts, o, h, l, c, 0, ActiveTbr("ASIA", "Asia", day, asia[0], asia[1], 0, 0), zona, len(ts) - 1)
+
+
+def test_barrido_asia_rotura_con_cierre_fuera_entrada_al_volver_dentro_y_objetivo_en_el_otro_lado():
+    from tradingbot.skills.barrido_asia.deteccion import analizar
+    # 23:55 y 00:00 dentro; 00:05 y 00:10 cierran fuera (rotura y swing en 105); 00:15 cierra dentro en 98: stop fijo 30 puntos (128) y objetivo en el Low de Asia
+    hits, figs = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98)]))
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0}      # sin breakeven ni segundo objetivo
+    assert figs[0].levels["entrada_ts"] == float(24 * 3600 - 300 + 300 * 4) and figs[0].zone == "Asia"
+    # rompe por debajo: largo, objetivo en el High de Asia; con el swing a más de 30 puntos, el stop es el swing + 5
+    hits, _ = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 40, 91)]))
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 35.0, "target": 100.0}
+
+
+def test_barrido_asia_casos_sin_setup_y_ventanas():
+    from tradingbot.skills.barrido_asia.deteccion import Ajustes, analizar
+    IN, OUT = (95, 98, 93, 95), (102, 104, 100, 103)
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0] == []      # una mecha no es rotura
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 92, 85, 86), (86, 88, 84, 85)]))[0] == []   # nunca vuelve
+    otro = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
+    assert [h.status for h in otro] == ["invalidated"]                                  # rompe también el otro lado
+    # 23:55 = vela 0; 00:00 = 1; 00:55 = 12; 01:00 = 13; 02:00 = 25
+    break_0055 = [(95, 99, 94, 96)] + [IN] * 11 + [OUT] * 4 + [(101, 102, 97, 98)]       # rotura a las 00:55, vuelve a las 01:15
+    assert [(h.direction, h.x) for h in analizar(_asia_ctx(break_0055))[0]] == [("short", 16)]
+    break_0100 = [(95, 99, 94, 96)] + [IN] * 12 + [OUT] + [(101, 102, 97, 98)]           # rotura a la 01:00: fuera de la ventana
+    assert analizar(_asia_ctx(break_0100))[0] == []
+    assert [h.status for h in analizar(_asia_ctx(break_0100), Ajustes(end=120))[0]] == ["detected"]
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)], symbol="EURUSD"))[0] == []   # solo índices USA
+
+
+def test_barrido_asia_ajustes_validos():
+    from tradingbot.skills.barrido_asia.deteccion import Ajustes
+    with pytest.raises(ValueError, match="BARRIDO_ASIA_END"):
+        Ajustes.desde(EnvConfig(parse("START=01:30\nEND=01:00\n")))
+    with pytest.raises(ValueError, match="STOP_POINTS"):
+        Ajustes.desde(EnvConfig(parse("STOP_POINTS=0\n")))
+    a = Ajustes.desde(None)
+    assert (a.start, a.end, a.entry_end, a.stop_points, a.stop_buffer) == (0, 60, 120, 30.0, 5.0)
+
+
+def test_el_perfil_barrido_asia_usa_su_propia_skill_y_no_depende_del_sesgo():
+    from tradingbot.config import BARRIDO_STRATEGIES, load_profiles, strategy_skills
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / ".env"
+        path.write_text("MT5_PUPRIME_LOGIN=7\nMT5_PUPRIME_SERVER=PUPrime-Demo\nMT5_PUPRIME_PASSWORD=x\nMT5_BARRIDO_ASIA_BASE=puprime\n"
+                        "MT5_BARRIDO_ASIA_NAME=Barrido_ASIA\nMT5_BARRIDO_ASIA_STRATEGY=asia_sweep\nMT5_BARRIDO_ASIA_CAPITAL=10000\n", encoding="utf-8")
+        p = load_profiles(path)[0]["barrido_asia"]
+    assert (p.display, p.strategy, p.capital, p.currency) == ("Barrido_ASIA", "asia_sweep", 10_000.0, "USD") and "asia_sweep" in BARRIDO_STRATEGIES
+    kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "asia_sweep")
+    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido_asia", 4)]
+
+
+def test_la_skill_barrido_asia_publica_el_setup_al_cerrar_la_vela_de_entrada_y_no_importa_de_otras_skills_de_patrones():
+    import ast
+    import pandas as pd
+    from pathlib import Path
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.tbr.zones import Session, Zone
+    import tradingbot.skills  # noqa: F401
+    for path in (Path(__file__).resolve().parent.parent / "tradingbot" / "skills" / "barrido_asia").glob("*.py"):     # independiente de Pattern y de Barrido RTH
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            module = getattr(node, "module", None) or ""
+            assert not (isinstance(node, ast.ImportFrom) and (module.startswith("pattern") or module.startswith("barrido_rth") or ".pattern" in module)), (path.name, module)
+    bus, found = EventBus(), []
+    bus.subscribe("t", "pattern.detected", found.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {"strategy": "asia_sweep"}}, EnvConfig(parse(""))), [{"type": "barrido_asia", "slot": 4}])
+    manager.start()
+    day = date(2026, 11, 3)                                                              # Asia del 3/11 20:00 a 4/11 00:00 NY
+    nyx = (day.toordinal() - date(1970, 1, 1).toordinal()) * 86400 + 20 * 3600           # 20:00 NY (el servidor va 7 h por delante)
+    rows = [(95, 99, 94, 96)] * 48 + [(95, 98, 93, 95)] * 2 + [(97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98), (98, 99, 97, 98)]
+    df = pd.DataFrame({"ts": [nyx + 7 * 3600 + 300 * i for i in range(len(rows))], "open": [r[0] for r in rows], "high": [r[1] for r in rows],
+                       "low": [r[2] for r in rows], "close": [r[3] for r in rows]})
+    asia = Session(Zone("ASIA", "Asia", 20 * 60, 0, "#FFD60A"), day, -0.5, 47.5, True, 100.0, 90.0)
+    bus.publish("tbr.updated", {"symbol": "NAS100.s", "timeframe": "5m", "sessions": [asia], "available": True}, source="tbr")
+    bus.publish("candles.loaded", {"symbol": "NAS100.s", "timeframe": "5m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not found and time.time() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    manager.stop()
+    hit = found[0].payload["hit"]
+    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 128.0, 90.0)
+    assert found[0].payload["tbr"].zone == "Asia" and found[0].payload["tbr"].day == day

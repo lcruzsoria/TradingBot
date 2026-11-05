@@ -19,6 +19,7 @@ from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
+from ..config import BARRIDO_STRATEGIES
 from ..skills.levels.skill import GAP_STRATEGIES
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
 from . import theme
@@ -369,7 +370,7 @@ class MainWindow(QMainWindow):
                                 "objetivo, zona roja hasta el stop, con el R:R.")
         self.pos_btn.setVisible(pattern_skill is not None or self.strategy == "calendario")
         self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
-        self.gaps_profile = app_cfg["app"].get("strategy") in GAP_STRATEGIES     # Barrido_NYAM: TBR y Entradas siempre a la vista, sin Fibo
+        self.gaps_profile = app_cfg["app"].get("strategy") in BARRIDO_STRATEGIES     # perfiles Barrido: TBR y Entradas siempre a la vista, sin Fibo
         if self.gaps_profile:
             self.fibo_btn.setChecked(False)
             self.fibo_btn.setVisible(False)                     # sus entradas no son fibos

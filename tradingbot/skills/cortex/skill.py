@@ -6,6 +6,7 @@ import time
 import numpy as np
 
 from ..bias import Direction, TradeFilter
+from ...config import BARRIDO_STRATEGIES
 from ..pattern.patterns import EXPIRED, INVALIDATED
 from ..bias.models import Bias, BiasResult
 from ...core import Event, Skill, register_skill
@@ -52,7 +53,7 @@ class CortexSkill(Skill):
         self.allow_no_bias = self.settings.get_bool("ALLOW_NO_BIAS", DEFAULT_ALLOW_NO_BIAS)   # tradingbot.env, bloque CORTEX
         self.calendar_use_bias = self.settings.get_bool("CALENDAR_USE_BIAS", False)
         self.strategy = str(app.get("strategy") or "")
-        self.pattern_use_bias = not (self.strategy == "barrido_nyam"       # Barrido_NYAM: el sesgo se muestra pero nunca desactiva una entrada
+        self.pattern_use_bias = not (self.strategy in BARRIDO_STRATEGIES   # Barrido_NYAM / Barrido_ASIA: el sesgo se muestra pero nunca desactiva una entrada
                                      or (self.strategy == "tbrvwap" and not self.settings.get_bool("TBRVWAP_USE_BIAS", False)))
         self._open: dict[str, object] = {}              # mercado -> orden abierta: hasta que cierre (stop, objetivo o tiempo) no se da otra
         self._candles: dict[str, object] = {}           # últimas velas de cada mercado, para que Setup resuelva enseguida lo ya ocurrido
@@ -175,8 +176,8 @@ class CortexSkill(Skill):
         for order in list(self._open.values()):
             if self.scope == "mercado" and order.symbol != symbol:
                 continue
-            if self.strategy == "barrido_nyam" and entry_ts and order.close_ts and entry_ts >= order.close_ts:
-                continue                                  # solo Barrido_NYAM: ya había vencido por tiempo (fin del día de trading o 24 h), aunque no haya velas para verlo
+            if self.strategy in BARRIDO_STRATEGIES and entry_ts and order.close_ts and entry_ts >= order.close_ts:
+                continue                                  # solo los perfiles Barrido: ya había vencido por tiempo (fin del día de trading o 24 h), aunque no haya velas para verlo
             df = self._candles.get(order.symbol)
             if df is not None and entry_ts:
                 closed = resolve(order, df["ts"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy())
@@ -265,7 +266,7 @@ class CortexSkill(Skill):
             elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
                 decision = Decision(False, self._session_reason(p))
             elif not self.pattern_use_bias:              # estrategia que no depende del sesgo (TBR con VWAP: CORTEX_TBRVWAP_USE_BIAS=false; Barrido_NYAM: siempre)
-                own = "Barrido_NYAM" if self.strategy == "barrido_nyam" else "TBR con VWAP"
+                own = {"barrido_nyam": "Barrido_NYAM", "asia_sweep": "Barrido_ASIA"}.get(self.strategy, "TBR con VWAP")
                 decision = Decision(True, f"estrategia {own}: no depende del sesgo; {result.summary}")
             else:
                 decision = validate(p["hit"].direction, result, self.allow_no_bias)
