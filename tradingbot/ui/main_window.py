@@ -412,9 +412,6 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate((self.level_btns["tdo"], self.level_btns["midnight"],
                                  self.level_btns["pdhl"], self.tbr_btn)):
             grid.addWidget(btn, i // 2, i % 2 + 1)
-        for i, group in enumerate(("ndog", "nwog")):         # solo en el perfil con huecos
-            if group in self.level_btns:
-                grid.addWidget(self.level_btns[group], 2, i + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.fibo_btn, 0, 3)
         grid.addWidget(self.pos_btn, 1, 3)
@@ -429,6 +426,13 @@ class MainWindow(QMainWindow):
             grid.addWidget(sma_cell, 0, 3)                   # y la SMA pasa al hueco de Fibo, que este perfil no usa
         else:
             grid.addWidget(sma_cell, 0, 0)               # a la izquierda de TDO (así el panel no crece en altura)
+        gap_btns = [self.level_btns[g] for g in ("ndog", "nwog") if g in self.level_btns]
+        if gap_btns:                                         # NDOG y NWOG (solo en el perfil con huecos): en columna, a la izquierda de SMA y Sesgo
+            gaps_col = QVBoxLayout()
+            gaps_col.setSpacing(6)
+            for btn in gap_btns:
+                gaps_col.addWidget(btn)
+            top.addLayout(gaps_col)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
