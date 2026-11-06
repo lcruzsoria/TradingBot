@@ -12,9 +12,11 @@ Reglas (velas de `BARRIDO_PDH_TF`, M5 al inicio):
    vela de 5 min debe cerrar a las 21:00 como tarde. Si no cierra de vuelta dentro de la ventana, no hay setup.
 5. Stop: fijo, a `BARRIDO_PDH_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing (el extremo desde el barrido hasta la
    entrada); si no, el swing más `BARRIDO_PDH_STOP_BUFFER` (5) puntos.
-6. Sin objetivo: la posición sale por TIEMPO, al precio de mercado cuando cierra el rango de Asia (00:00 NY), o antes en el stop; el riesgo es variable.
-   El Low (High) del rango solo se guarda como referencia (`target`). Como el cierre es lo que cuenta, la señal se da cuando Asia cierra con la entrada
-   ya fijada en la vela del barrido; la posición se simula desde esa vela. Sin breakeven.
+6. Objetivo: el extremo opuesto del rango de Asia ya formado en la vela de entrada (el Low si es un PDH, el High si es un PDL) mientras el precio siga
+   dentro del rango. Es dinámico: el rango solo se amplía cuando el precio lo rompe, y eso es llegar al objetivo. Si no hay extremo útil (el cierre de
+   entrada ya está en él), no hay objetivo y la posición sale por TIEMPO, al precio de mercado cuando cierra Asia (00:00 NY). Con o sin objetivo, antes
+   cierra el stop, y si el objetivo no llega, cierra por tiempo al cierre del rango; el riesgo es variable. La señal se da cuando Asia cierra con la
+   entrada ya fijada en la vela del barrido; la posición se simula desde esa vela. Sin breakeven.
 7. Una sola operación por noche: la del primer lado (PDH o PDL) cuya vela de entrada cierra antes.
 
 Solo índices USA (NAS100, SP500, DJ30...), no Forex.
@@ -29,6 +31,7 @@ import numpy as np
 
 from ...timeframes import parse_timeframe
 from .._comun.contratos import DETECTED, ActiveTbr, Figure, PatternHit
+from . import stops
 from ..setup.positions import resolve         # la misma regla con la que Setup cierra la posición simulada
 
 KEY = "barrido_pdh"
@@ -61,6 +64,7 @@ class Ajustes:
     end: int = minutos(DEFAULT_END, "END")
     stop_points: float = DEFAULT_STOP_POINTS
     stop_buffer: float = DEFAULT_STOP_BUFFER
+    stop_mercado: tuple = ()     # stop propio de algunos mercados: ((MERCADO, puntos, buffer), ...)
 
     @classmethod
     def desde(cls, settings, start: str = DEFAULT_START, end: str = DEFAULT_END, prefix: str = "BARRIDO_PDH") -> "Ajustes":
@@ -74,10 +78,15 @@ class Ajustes:
             raise ValueError(f"{prefix}_STOP_POINTS y {prefix}_STOP_BUFFER deben ser números.") from None
         if points <= 0 or buffer < 0:
             raise ValueError(f"{prefix}_STOP_POINTS debe ser mayor que 0 y {prefix}_STOP_BUFFER no puede ser negativo.")
-        a = cls(tf, minutos(get("START", start), "START", prefix), minutos(get("END", end), "END", prefix), points, buffer)
+        a = cls(tf, minutos(get("START", start), "START", prefix), minutos(get("END", end), "END", prefix), points, buffer,
+                stops.leer(settings, prefix, points, buffer))
         if a.end <= a.start:
             raise ValueError(f"{prefix}_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         return a
+
+    def stop_de(self, symbol: str) -> tuple[float, float]:
+        """(puntos, buffer) del stop fijo de un mercado: el suyo si el bloque lo define (STOP_POINTS_<MERCADO>), si no el general."""
+        return stops.de(self.stop_mercado, symbol, self.stop_points, self.stop_buffer)
 
 
 @dataclass(frozen=True)
@@ -139,7 +148,7 @@ def cierre_del_dia(ts: int, ahead: int, end_minutes: int) -> int:
     return end + ahead
 
 
-def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: float, target: float, label: str, key: str = KEY) -> Figure:
+def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: float, target: float, label: str, key: str = KEY, solo_tiempo: bool = True) -> Figure:
     """Posición para el gráfico: de la vela de la entrada a la del cierre (o a la última vela si sigue abierta)."""
     close = int(ctx.ts[t]) + MAX_HOLD_SECONDS
     if ctx.day_end:
@@ -150,7 +159,7 @@ def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: 
     tf_sec = ctx.tf_minutes * 60
     kind, idx = None, min(limit, len(ctx.ts) - 1)
     if limit >= t:
-        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, solo_tiempo=True)
+        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, solo_tiempo=solo_tiempo)
         end = limit + 1
         done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], None, tf_sec)
         if done is not None:
@@ -200,21 +209,26 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes(), key: str = KEY, title: str =
     extreme = float(np.max(ctx.high[sweep:t + 1]) if up else np.min(ctx.low[sweep:t + 1]))    # el swing del barrido
     close = float(ctx.close[t])
     sign = 1.0 if up else -1.0                                                # corto: el stop va por encima de la entrada; largo: por debajo
-    covers = sign * (extreme - close) <= a.stop_points
-    stop = close + sign * a.stop_points if covers else extreme + sign * a.stop_buffer
-    goal = asia.low if up else asia.high
+    puntos, buffer = a.stop_de(ctx.symbol)                                    # el stop fijo del mercado
+    covers = sign * (extreme - close) <= puntos
+    stop = close + sign * puntos if covers else extreme + sign * buffer
+    extremo = float(np.min(ctx.low[first:t + 1]) if up else np.max(ctx.high[first:t + 1]))    # extremo opuesto del rango formado hasta la entrada
+    con_objetivo = sign * (close - extremo) > 0                               # el precio sigue dentro del rango: ese extremo es el objetivo
+    goal = extremo if con_objetivo else (asia.low if up else asia.high)       # sin objetivo, el extremo final del rango solo es la referencia
+    lado = "Low" if up else "High"
+    salida = (f"objetivo en el {lado} de {rango} ya formado ({goal:.5g}), o salida por tiempo al precio de mercado cuando cierra {rango}" if con_objetivo else
+              f"sin objetivo (el precio ya está en el extremo del rango): salida por tiempo al precio de mercado cuando cierra {rango} (referencia: el {lado} final, {goal:.5g})")
     detail = (f"el {name} ({level:.5g}), sin tocar desde las 18:00, es barrido a las {hora_ny(ctx, sweep)} con swing en {extreme:.5g} y pasa a ser el "
               f"{'High' if up else 'Low'} de {rango} (nivel mitigado); la primera vela que cierra de nuevo {'por debajo' if up else 'por encima'} es la de "
               f"{hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en {stop:.5g} "
-              f"({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) "
-              f"y sin objetivo: salida por tiempo, al precio de mercado cuando cierra {rango} (referencia: el {'Low' if up else 'High'} de {rango}, {goal:.5g}). "
-              f"Riesgo variable según el precio de salida")
+              f"({'fijo a ' + format(puntos, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(buffer, 'g')}) "
+              f"y {salida}. Riesgo variable según el precio de salida")
     figures = []
     if t + 1 < len(ctx.ts):
-        fig = _figura_posicion(ctx, direction, t + 1, close, stop, goal, f"{name} {'▼' if up else '▲'} barrido", key)
+        fig = _figura_posicion(ctx, direction, t + 1, close, stop, goal, f"{name} {'▼' if up else '▲'} barrido", key, not con_objetivo)
         figures = [Figure(fig.kind, fig.key, fig.zone, fig.direction, fig.x0_ts, fig.x1_ts, {**fig.levels, "entrada_ts": float(ctx.ts[t])},
                           fig.state, fig.label, fig.day)]
-    levels = {"stop": stop, "target": goal, "solo_tiempo": 1.0, **({"cierre": float(ctx.salida)} if ctx.salida else {})}     # "cierre": hora (servidor) de la salida por tiempo; "target" solo es la referencia
+    levels = {"stop": stop, "target": goal, **({} if con_objetivo else {"solo_tiempo": 1.0}), **({"cierre": float(ctx.salida)} if ctx.salida else {})}     # "cierre": hora (servidor) de la salida por tiempo; "solo_tiempo" si no hay objetivo (entonces "target" es la referencia)
     return [PatternHit(key, title, direction, int(t), close, detail, levels, ts_hit, DETECTED)], figures
 
 

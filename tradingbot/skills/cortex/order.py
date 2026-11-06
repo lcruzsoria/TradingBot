@@ -60,7 +60,7 @@ def build_order(payload: dict, decision, bias_result) -> Order:
     hit, tbr = payload["hit"], payload["tbr"]
     return Order(payload["symbol"], payload["timeframe"], hit.direction, hit.title, hit.key, tbr.zone, tbr.day,
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
-                 bias_result.bias.value, float(bias_result.score), decision.reason, "cierre del rango" if hit.levels.get("solo_tiempo") else "fin del día de trading",
+                 bias_result.bias.value, float(bias_result.score), decision.reason, "cierre del rango" if hit.levels.get("cierre") else "fin del día de trading",
                  hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "",
                  be_price=hit.levels.get("be"), solo_tiempo=bool(hit.levels.get("solo_tiempo")), **_lateral(bias_result))
 

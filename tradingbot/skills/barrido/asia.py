@@ -27,6 +27,7 @@ import numpy as np
 
 from ...timeframes import parse_timeframe
 from .._comun.contratos import DETECTED, INVALIDATED, ActiveTbr, Figure, PatternHit
+from . import stops
 from ..setup.positions import resolve         # la misma regla con la que Setup cierra la posición simulada
 
 KEY = "barrido_asia"
@@ -60,6 +61,7 @@ class Ajustes:
     entry_end: int = minutos(DEFAULT_ENTRY_END, "ENTRY_END")
     stop_points: float = DEFAULT_STOP_POINTS
     stop_buffer: float = DEFAULT_STOP_BUFFER
+    stop_mercado: tuple = ()     # stop propio de algunos mercados: ((MERCADO, puntos, buffer), ...)
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
@@ -73,12 +75,17 @@ class Ajustes:
         if points <= 0 or buffer < 0:
             raise ValueError("BARRIDO_ASIA_STOP_POINTS debe ser mayor que 0 y BARRIDO_ASIA_STOP_BUFFER no puede ser negativo.")
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"),
-                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer)
+                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer,
+                stops.leer(settings, "BARRIDO_ASIA", points, buffer))
         if a.end <= a.start:
             raise ValueError(f"BARRIDO_ASIA_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         if a.entry_end < a.end:
             raise ValueError(f"BARRIDO_ASIA_ENTRY_END={a.entry_end // 60:02d}:{a.entry_end % 60:02d} no puede ser anterior a END.")
         return a
+
+    def stop_de(self, symbol: str) -> tuple[float, float]:
+        """(puntos, buffer) del stop fijo de un mercado: el suyo si el bloque lo define (STOP_POINTS_<MERCADO>), si no el general."""
+        return stops.de(self.stop_mercado, symbol, self.stop_points, self.stop_buffer)
 
 
 @dataclass(frozen=True)
@@ -186,12 +193,13 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
         return [PatternHit(KEY, TITLE, direction, int(t), close, "el precio rompe también el otro lado de Asia antes de volver dentro: "
                            "sin setup hoy", {}, ts_hit, INVALIDATED)], []
     sign = 1.0 if up else -1.0                                                # corto: el stop va por encima de la entrada; largo: por debajo
-    covers = sign * (extreme - close) <= a.stop_points                        # ¿el stop fijo cubre el swing?
-    stop = close + sign * a.stop_points if covers else extreme + sign * a.stop_buffer
+    puntos, buffer = a.stop_de(ctx.symbol)                                    # el stop fijo del mercado
+    covers = sign * (extreme - close) <= puntos                        # ¿el stop fijo cubre el swing?
+    stop = close + sign * puntos if covers else extreme + sign * buffer
     goal = asia.low if up else asia.high
     detail = (f"primera rotura del {side} de Asia ({asia.high if up else asia.low:.5g}) en {hora_ny(ctx, sweep)}, con swing en {extreme:.5g}; la "
               f"primera vela que cierra de nuevo dentro del rango es la de {hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en "
-              f"{stop:.5g} ({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) "
+              f"{stop:.5g} ({'fijo a ' + format(puntos, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(buffer, 'g')}) "
               f"y objetivo en el {'Low' if up else 'High'} de Asia ({goal:.5g})")
     figures = []
     if t + 1 < len(ctx.ts):

@@ -31,6 +31,7 @@ import numpy as np
 from ...timeframes import parse_timeframe
 from .._comun.contratos import DETECTED, INVALIDATED, ActiveTbr, Figure, PatternHit
 from .._comun.gaps import opening_gaps
+from . import stops
 from ..setup.positions import resolve         # la misma regla con la que Setup cierra la posición simulada
 
 KEY = "barrido_rth"
@@ -66,6 +67,7 @@ class Ajustes:
     stop_points: float = DEFAULT_STOP_POINTS
     stop_buffer: float = DEFAULT_STOP_BUFFER
     be: bool = True              # breakeven al tomar el Low (High) del TBR NY Open
+    stop_mercado: tuple = ()     # stop propio de algunos mercados: ((MERCADO, puntos, buffer), ...)
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
@@ -80,12 +82,17 @@ class Ajustes:
             raise ValueError("BARRIDO_RTH_STOP_POINTS debe ser mayor que 0 y BARRIDO_RTH_STOP_BUFFER no puede ser negativo.")
         be = str(get("BE", "true")).strip().lower() in ("1", "true", "yes", "si", "sí", "on")
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"),
-                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer, be)
+                minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer, be,
+                stops.leer(settings, "BARRIDO_RTH", points, buffer))
         if a.end <= a.start:
             raise ValueError(f"BARRIDO_RTH_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         if a.entry_end < a.end:
             raise ValueError(f"BARRIDO_RTH_ENTRY_END={a.entry_end // 60:02d}:{a.entry_end % 60:02d} no puede ser anterior a END.")
         return a
+
+    def stop_de(self, symbol: str) -> tuple[float, float]:
+        """(puntos, buffer) del stop fijo de un mercado: el suyo si el bloque lo define (STOP_POINTS_<MERCADO>), si no el general."""
+        return stops.de(self.stop_mercado, symbol, self.stop_points, self.stop_buffer)
 
 
 @dataclass(frozen=True)
@@ -210,12 +217,13 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
         return [PatternHit(KEY, TITLE, direction, int(t), close, "el precio rompe también el otro lado del RTH antes de volver dentro: "
                            "sin setup hoy", {}, ts_hit, INVALIDATED)], []
     sign = 1.0 if up else -1.0                                                # corto: el stop va por encima de la entrada; largo: por debajo
-    covers = sign * (extreme - close) <= a.stop_points                        # ¿el stop fijo cubre el swing?
-    stop = close + sign * a.stop_points if covers else extreme + sign * a.stop_buffer
+    puntos, buffer = a.stop_de(ctx.symbol)                                    # el stop fijo del mercado
+    covers = sign * (extreme - close) <= puntos                        # ¿el stop fijo cubre el swing?
+    stop = close + sign * puntos if covers else extreme + sign * buffer
     goal = rth.low if up else rth.high
     detail = (f"primera rotura del {side} del RTH ({rth.high if up else rth.low:.5g}) en {hora_ny(ctx, sweep)}, con swing en {extreme:.5g}; la primera "
               f"vela que cierra de nuevo dentro del rango es la de {hora_ny(ctx, t)} ({close:.5g}). Entrada a mercado a ese cierre, stop en "
-              f"{stop:.5g} ({'fijo a ' + format(a.stop_points, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(a.stop_buffer, 'g')}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
+              f"{stop:.5g} ({'fijo a ' + format(puntos, 'g') + ' puntos, cubre el swing' if covers else 'swing + ' + format(buffer, 'g')}) y objetivo 1 en el {'Low' if up else 'High'} del RTH ({goal:.5g})")
     levels = {"stop": stop, "target": goal}
     if a.be:                                                                  # breakeven al tomar el Low (High) del TBR NY Open que había hasta la entrada
         ny_open = int(np.searchsorted(ctx.ts, midnight + a.start * 60, "left"))

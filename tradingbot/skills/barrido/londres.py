@@ -10,7 +10,8 @@ Mismas reglas que el PDH/PDL de Asia (ver `pdh.py`), con estas diferencias (vela
    alto (bajo) del rango de Londres que se está formando.
 3. Entrada: la primera vela que cierra de vuelta por debajo del PDH (por encima del PDL), con cierre a las 03:00 como tarde.
 4. Stop: el de Asia, fijo a 30 puntos de la entrada si cubre el swing; si no, el swing más 5 puntos.
-5. Sin objetivo: la posición sale por TIEMPO, al precio de mercado cuando cierra la TBR de Londres (05:00 NY), o antes en el stop; el riesgo es variable.
+5. Objetivo: el extremo opuesto de Londres ya formado en la entrada, mientras el precio siga dentro; si no hay o no llega, sale por TIEMPO, al precio de
+   mercado cuando cierra la TBR de Londres (05:00 NY), o antes en el stop; el riesgo es variable.
    El extremo contrario de Londres solo se guarda como referencia. La señal se da al cierre de Londres, con la entrada ya fijada.
 
 Solo índices USA (NAS100, SP500, DJ30...), no Forex.
