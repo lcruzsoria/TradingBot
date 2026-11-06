@@ -1,4 +1,4 @@
-"""Patrón «Reversión»: toma de un lado de la TBR solo con la mecha, fibonacci de la mecha pivote al pivote siguiente y entrada en el 0,5.
+"""Patrón «Reversión»: toma de un lado de la TBR solo con la mecha, fibonacci de la primera pierna de reversión y entrada en el 0,5.
 
 Ejemplo bajista (el alcista es el espejo exacto, con el Low):
 
@@ -6,11 +6,14 @@ Ejemplo bajista (el alcista es el espejo exacto, con el Low):
    rotura con cuerpo y la TBR sería del patrón Continuación). Es la primera toma de un lado tras el cierre de la TBR.
 2. Mecha pivote: el pivote de tres velas (su máximo es el más alto de las tres) que forma esa mecha. Si antes de confirmarse alguna
    vela cierra por encima del High, el patrón se invalida (pasa a ser continuación).
-3. Fibonacci: el 1 es la mecha pivote y el 0 es el último pivote bajo confirmado que genera a continuación: mientras el precio
-   no revierta al 0,5, un pivote posterior más bajo sustituye al 0 y el fibo se recalcula. El 0,5 es el punto medio.
-4. Entrada: la primera vela que revierte hasta el 0,5 (su máximo lo toca). Stop en el 1 (la mecha pivote) y objetivo en el -0,5
-   (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R. Si el precio supera la mecha pivote antes de la entrada, se
-   invalida; si termina el plazo de la TBR sin reversión al 0,5, vence.
+3. Fibonacci (modo «swing», el de siempre): como en Continuación, de la primera pierna tras la toma. El 0 es el primer swing low posterior
+   a la mecha pivote (en el corto) y el 1 el swing high que viene después, que solo vale si queda por encima del máximo de la vela del 0.
+   Mientras el precio no revierta al 0,5, un swing low posterior más bajo sustituye al 0 y el 1 se busca de nuevo. El 0,5 es el punto
+   medio. La mecha de la toma ya no es el 1: solo invalida si el precio la pierde antes de que haya fibo. (Modo «mecha», el anterior:
+   el 1 es la mecha pivote y el 0 el último pivote bajo; queda para comparar en el backtest.)
+4. Entrada: la primera vela posterior a la que confirma el swing del 1 que revierte hasta el 0,5 (su máximo lo toca y abre por debajo).
+   Stop en el 1 y objetivo en el -0,5 (media vuelta del tramo más allá del 0): con entrada en el 0,5, son 2R. Si el precio pierde el 1
+   antes de la entrada, se invalida; si termina el plazo de la TBR sin reversión al 0,5, vence.
 5. Rotura con cuerpo: si, ya confirmada la mecha pivote, una vela CIERRA por encima del High tomado antes de la entrada, la reversión se
    anula (el mercado ha roto ese lado: ahora es continuación). Una rotura en la misma vela de la entrada o después no la anula.
 
@@ -21,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...timeframes import parse_timeframe
-from .continuacion import _when
+from .continuacion import _when, run_leg
 from . import confirm as confirmation
 from .fibo import at_level, fibo_levels, level_name, level_settings, rr_of, run_fibo
 from .trade import position_figure
@@ -29,6 +32,7 @@ from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternCo
 
 DEFAULT_TF = "15m"
 DEFAULT_SWING_BARS = 1
+DEFAULT_FIBO = "swing"      # «swing»: el fibo del swing high (0) al swing low posterior (1); «mecha»: el 1 es la mecha de la toma (modo anterior)
 KEY = "reversion"
 TITLE = "Reversión"
 
@@ -57,7 +61,7 @@ class Reversion(Pattern):
 
 
 def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, confirm: str = "none",
-            ltf: dict | None = None) -> tuple[list[PatternHit], list[Figure]]:
+            ltf: dict | None = None, mode: str = DEFAULT_FIBO) -> tuple[list[PatternHit], list[Figure]]:
     """`confirm`: "none" (entrada en el 0,5 sin más), "cisd" (antes de la entrada, una vela de M15 cierra bajo el CISD) o "bpr" (antes de la
     entrada, BPR + retest + cierre bajo el CISD en las velas `ltf` = {"ts", "open", "high", "low", "close", "tf_min"} de M5 o M3)."""
     tbr = ctx.tbr
@@ -132,10 +136,28 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, conf
                     cidx = li
                     done_at = int(lts[li]) + lsec           # la confirmación cierra ahí: la entrada, en una vela de M15 que abra después
                     not_before = int(np.searchsorted(ts, done_at, "left")) - 1
-    state = run_fibo(H, L, confirmed, end, origin_price, k, origin + 1, float(H[origin:confirmed + 1].max()),
-                     -o if up else o, not_before)
-    zero_idx, entry = state.zero_idx, state.entry
-    extreme = state.extreme
+    wick_price = origin_price
+    if mode == "swing":
+        # el fibo es de la primera pierna de reversión: 0 = swing high posterior a la mecha, 1 = swing low siguiente (por debajo del mínimo
+        # de la vela del 0); la mecha de la toma solo invalida si el precio la pierde antes de tener el fibo
+        leg = run_leg(H, L, confirmed, end, k, -o if up else o, wick_price, not_before)
+        if leg.origin is None:
+            if leg.breach is not None:
+                return [hit(INVALIDATED, direction, leg.breach, sign * wick_price,
+                            f"toma con mecha del {side} en {_when(ctx, j)}; el precio perdió la mecha pivote ({sign * wick_price:.5g}) en "
+                            f"{_when(ctx, leg.breach)} antes de definir el fibo (swing high y swing low): patrón invalidado")], []
+            if ctx.window_closed:
+                return expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero sin swing high y swing low posteriores")
+            return [], []
+        zero, zero_idx, extreme, origin_price = leg.zero, leg.zero_idx, leg.zero, leg.origin
+        entry, breach, x0 = leg.entry, leg.breach, leg.zero_idx
+        z, one = ("swing low", "swing high") if up else ("swing high", "swing low")           # en el corto el 0 es un mínimo y el 1 un máximo
+        legtxt = f"{z} (0) en {_when(ctx, zero_idx)} y {one} (1) en {_when(ctx, leg.origin_idx)}"
+    else:
+        state = run_fibo(H, L, confirmed, end, origin_price, k, origin + 1, float(H[origin:confirmed + 1].max()),
+                         -o if up else o, not_before)
+        zero, zero_idx, extreme, entry, breach, x0 = state.zero, state.zero_idx, state.extreme, state.entry, state.breach, origin
+        legtxt = f"0 en {_when(ctx, zero_idx)}"
     half = (extreme + origin_price) / 2
     target = at_level(extreme, origin_price, tp)              # objetivo y stop en los niveles configurados
     stop = at_level(extreme, origin_price, sl)
@@ -146,35 +168,36 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, conf
     def invalid(t, price, detail):
         """Invalidación. Si el 0 ya estaba fijado (hay fibo), lleva sus niveles y se dibuja el fibo hasta la vela que lo invalida:
         Cortex lo anota NO GO «I»."""
-        if state.zero is None:
+        if zero is None:
             return [hit(INVALIDATED, direction, t, price, detail)], []
         marks = {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half}
         return [hit(INVALIDATED, direction, t, price, detail, marks)], \
-            [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), int(ts[t]) + tf_sec, levels, "invalidada", label, tbr.day.isoformat(), target=level_name(tp))]
+            [Figure("fib", KEY, tbr.zone, direction, int(ts[x0]), int(ts[t]) + tf_sec, levels, "invalidada", label, tbr.day.isoformat(), target=level_name(tp))]
 
     broke = next((t for t in range(confirmed + 1, end + 1) if (c[t] > tbr.high if up else c[t] < tbr.low)), None)
-    if broke is not None and (entry is None or broke < entry[0]) and (state.breach is None or broke < state.breach):
+    if broke is not None and (entry is None or broke < entry[0]) and (breach is None or broke < breach):
         return invalid(broke, tbr.mid,
                        f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}; una vela cerró fuera del "
                        f"{side} en {_when(ctx, broke)} antes del retroceso al 0,5: rotura con cuerpo, ya no es reversión")
-    if state.breach is not None:
-        return invalid(state.breach, sign * origin_price,
-                       f"toma con mecha del {side} en {_when(ctx, j)}; el precio superó la mecha pivote ({sign * origin_price:.5g}) antes de "
+    if breach is not None:
+        lost = "el 1 del fibo" if mode == "swing" else "la mecha pivote"
+        return invalid(breach, sign * origin_price,
+                       f"toma con mecha del {side} en {_when(ctx, j)}; el precio {'perdió' if mode == 'swing' else 'superó'} {lost} ({sign * origin_price:.5g}) antes de "
                        f"llegar al 0,5: patrón invalidado")
     if entry is not None:
         t, half = entry
-        detail = (f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}, 0 en {_when(ctx, zero_idx)}; "
+        detail = (f"toma con mecha del {side} en {_when(ctx, j)}, mecha pivote en {_when(ctx, origin)}, {legtxt}; "
                   f"retroceso al 0,5 ({sign * half:.5g}) en {_when(ctx, t)}. Entrada en el 0,5, stop en el {level_name(sl)} y objetivo "
                   f"en el {level_name(tp)} (RR {rr_of(sl, tp):.2g})")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * stop, sign * target, label)
-        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
+        return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[x0]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
     if ctx.window_closed:                                     # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»
         why = "sin retroceso al 0,5" if confirm == "none" or cidx is not None else f"sin confirmación ({confirm.upper()})"
         found, _ = expired(direction, f"toma con mecha del {side} en {_when(ctx, j)} pero {why}")
         x = found[0].x
         return [hit(EXPIRED, direction, x, sign * half, found[0].detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})], \
-            [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "vencida", label, tbr.day.isoformat(), target=level_name(tp))]
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label, tbr.day.isoformat(), target=level_name(tp))]
+            [Figure("fib", KEY, tbr.zone, direction, int(ts[x0]), x_end, levels, "vencida", label, tbr.day.isoformat(), target=level_name(tp))]
+    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[x0]), x_end, levels, "en curso", label, tbr.day.isoformat(), target=level_name(tp))]

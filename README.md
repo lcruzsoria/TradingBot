@@ -105,11 +105,15 @@ Ejemplo bajista; el alcista es el espejo exacto. También trabaja siempre con ve
    alcista). Si cerrara fuera sería una rotura con cuerpo y la TBR es del patrón Continuación. Se evalúa la primera toma de un lado.
 2. **Mecha pivote:** el pivote de tres velas que forma esa mecha (su máximo es el más alto de las tres). Si antes de confirmarse
    una vela cierra por encima del High, el patrón se invalida.
-3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): el **1** es la mecha pivote y el **0** el último pivote bajo confirmado que
-   genera a continuación (mientras el precio no revierta al 0,5, un pivote posterior más bajo lo sustituye y el fibo se recalcula); 0,5 y -0,5 como en Continuación.
-4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí, después de la vela que confirma el pivote del 0 —no se puede
-   entrar en el propio swing que aún se está formando— y abriendo por encima del 0,5 en el largo, por debajo en el corto), **stop** en la mecha pivote (el 1) y **objetivo** en el -0,5: **2R**.
-   Si el precio supera la mecha pivote antes de la entrada, el patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5,
+3. **Fibonacci** (mismo botón **Fibo**, con el título «Rev»): como el de Continuación, de la primera pierna de reversión tras la toma: el **0**
+   es el swing posterior a la mecha en el sentido de la operación (en el corto, un swing low; en el largo, un swing high) y el **1** el
+   swing opuesto que viene después, que solo vale si supera el extremo de la vela del 0 (si no, se sigue buscando). Mientras el precio no
+   revierta al 0,5, un swing posterior más allá del 0 lo sustituye y el 1 se busca de nuevo; 0,5 y -0,5 como en Continuación. La mecha de
+   la toma ya no es el 1: solo invalida el patrón si el precio la pierde antes de tener el fibo. (El modo anterior, con la mecha como 1,
+   sigue disponible en el backtest con `--fibo-reversion mecha`.)
+4. **Entrada** en el 0,5 (la primera vela que revierte hasta ahí, después de la vela que confirma el swing del 1 —no se puede
+   entrar mientras ese swing aún se está formando— y abriendo por encima del 0,5 en el largo, por debajo en el corto), **stop** en el 1 y **objetivo** en el -0,5: **2R**.
+   Si el precio pierde el 1 antes de la entrada, el patrón se invalida; si el plazo de la TBR termina sin reversión al 0,5,
    vence. Ambos patrones pueden dar señal en la misma TBR: Cortex las valida con el sesgo.
 
 Cabecera: estado de la conexión y cuenta; a continuación, saldo/equity, P&L abierto, mercados con precio en vivo y hora del último tick

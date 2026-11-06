@@ -78,11 +78,14 @@ class Leg:
     breach: int | None        # vela en la que el precio perdió el 1 antes de la entrada
 
 
-def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None, opp: float | None = None) -> Leg:
+def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None, opp: float | None = None,
+            not_before: int = -1) -> Leg:
     """Recorre las velas `brk + 1 .. end` buscando el swing high (0), el swing low posterior (1) y la entrada en el 0,5.
 
     La entrada solo puede ser una vela posterior a la que confirma el swing low (hasta que cierra no se sabe que el 1 existe) y, si se
     dan las aperturas `O`, que abra por encima del 0,5 (viene del lado del 0, no cruza el nivel de largo).
+
+    `not_before`: la entrada tiene que ser posterior a esa vela (la de una confirmación previa).
 
     Si antes de confirmar el swing del 1 una vela toca `opp` (el extremo contrario de la TBR), el setup se invalida (`breach`, sin fibo)."""
     zero, zero_idx, origin, origin_idx = None, -1, None, -1
@@ -96,7 +99,7 @@ def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndar
             zero, zero_idx, origin, origin_idx = float(H[p]), p, None, -1       # sin reversión al 0,5, un swing high más alto mueve el 0
         if origin is not None:
             half = (zero + origin) / 2
-            if t > origin_idx + k and L[t] <= half and (O is None or O[t] > half):
+            if t > origin_idx + k and t > not_before and L[t] <= half and (O is None or O[t] > half):
                 return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None)
             continue
         if p >= max(brk, k):

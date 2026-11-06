@@ -3,14 +3,18 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from functools import partial
+
 import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.pattern.patterns import DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY
-from tradingbot.skills.pattern.reversion import Reversion, analyze
+from tradingbot.skills.pattern.reversion import Reversion, analyze as _analyze
 
 from tests.test_continuacion import ctx_for, m5_from_m15, mirror
 from tests.test_pattern import run_skill
+
+analyze = partial(_analyze, mode="mecha")          # los tests de abajo (hasta el de la skill) son del fibo con la mecha de la toma como 1
 
 # TBR 95-105 (50 % = 100). Velas M15 (open, high, low, close); las 0-2 dentro de la TBR y la 3 en adelante tras su cierre.
 ROWS = [(100, 101, 99, 100), (100, 102, 99, 101), (101, 103, 100, 102),
@@ -21,6 +25,11 @@ ROWS = [(100, 101, 99, 100), (100, 102, 99, 101), (101, 103, 100, 102),
         (99, 100, 96, 97),             # 7: el pivote bajo que genera a continuación (mínimo 96): el 0
         (97, 99.5, 96.5, 98.5),        # 8: lo confirma (no llega al 0,5: 101)
         (98.5, 101.5, 98, 101)]        # 9: retrocede hasta el 0,5: entrada
+
+# Fibo por defecto: 0 = swing low tras la mecha (vela 7, 96), 1 = swing high siguiente (vela 9, 101,5: por encima del máximo de la vela del 0, 100)
+ROWS_SWING = ROWS[:9] + [(98.5, 101.5, 98, 101),        # 9: swing high (el 1), lo confirma la 10
+                         (101, 101.2, 97.5, 98),        # 10: máximo más bajo que el de la 9 (confirma); cierra bajo el 0,5 (98,75)
+                         (98, 99.2, 97, 98.9)]          # 11: abre bajo el 0,5 y sube hasta él: entrada
 
 
 def run(rows, **kw):
@@ -116,14 +125,14 @@ def test_ajustes_del_patron_reversion():
 
 def test_la_skill_detecta_la_reversion_con_el_grafico_en_m5():
     inside = [(100, 101, 99, 100)] * 8                                # 10:00-12:00, dentro de la TBR
-    rows = inside + ROWS[4:] + [(101, 102, 100, 101)]                 # 12:00-13:15 (el plazo de NY Open acaba a las 13:30); la última sigue formándose
+    rows = inside + ROWS_SWING[4:] + [(101, 102, 100, 101)]                 # 12:00-13:15 (el plazo de NY Open acaba a las 13:30); la última sigue formándose
     manager, _bus, found, dropped, _s, updated = run_skill("PATTERN_TYPES=reversion\n", df=m5_from_m15(rows))
     manager.stop()
     assert len(found) == 1 and dropped == []
     p = found[0].payload
-    assert p["timeframe"] == "15m" and p["hit"].key == "reversion" and p["hit"].direction == "short" and p["hit"].price == 101.0
+    assert p["timeframe"] == "15m" and p["hit"].key == "reversion" and p["hit"].direction == "short" and p["hit"].price == 98.75
     fig = updated[-1].payload["figures"][0]
-    assert fig.key == "reversion" and fig.levels["1"] == 106.0 and fig.levels["0"] == 96.0
+    assert fig.key == "reversion" and fig.levels["1"] == 101.5 and fig.levels["0"] == 96.0
 
 
 def test_stop_y_objetivo_en_los_niveles_configurados():
@@ -131,10 +140,10 @@ def test_stop_y_objetivo_en_los_niveles_configurados():
     from tradingbot.skills.pattern.fibo import level_settings
     from tradingbot.skills.pattern.reversion import Reversion
     pat = Reversion(EnvConfig(parse("PATTERN_STOP_LEVEL=0.9\nPATTERN_TARGET_LEVEL=-0.2\n")).section("PATTERN"))
-    hits, figs = pat.detect(ctx_for(ROWS, first_bar=3)), pat.figures(ctx_for(ROWS, first_bar=3))
+    hits, figs = pat.detect(ctx_for(ROWS_SWING, first_bar=3)), pat.figures(ctx_for(ROWS_SWING, first_bar=3))
     h, f = hits[0], figs[0]
-    # el 0 en 96 y el 1 (mecha) en 106: stop en el 0,9 = 105, objetivo en el -0,2 = 94; entrada en el 0,5 = 101
-    assert h.levels["stop"] == pytest.approx(105.0) and h.levels["target"] == pytest.approx(94.0)
+    # el 0 en 96 y el 1 (swing high) en 101,5: stop en el 0,9 = 100,95, objetivo en el -0,2 = 94,9; entrada en el 0,5 = 98,75
+    assert h.levels["stop"] == pytest.approx(100.95) and h.levels["target"] == pytest.approx(94.9)
     assert set(f.levels) == {"-0,2", "0", "0,5", "0,9", "1"} and f.target == "-0,2"
     assert "stop en el 0,9 y objetivo en el -0,2" in h.detail
     assert level_settings(lambda k, d: d) == (1.0, -0.2)                                  # por defecto: stop en el 1, objetivo en el -0,2
@@ -196,3 +205,38 @@ def test_sin_retest_no_hay_confirmacion_bpr():
     rows = BPR.copy()
     rows[6] = (10, 10.5, 9.9, 10.1)                                   # no sube hasta el BPR
     assert bpr(rows) is None
+
+
+# -- fibo por defecto: del swing low (0) al swing high posterior (1), como en Continuación, tras la toma con mecha ---------------------------------
+def test_el_fibo_va_del_swing_posterior_a_la_mecha_al_swing_opuesto_y_entra_en_el_05():
+    hits, figs = _analyze(ctx_for(ROWS_SWING, first_bar=3), 1)
+    h = hits[0]
+    assert (h.status, h.direction, h.x, h.price) == (DETECTED, "short", 11, 98.75)
+    assert h.levels["stop"] == 101.5 and h.levels["target"] == pytest.approx(93.25)                  # stop en el 1 (el swing high), objetivo -0,5
+    assert figs[0].levels == {"-0,5": pytest.approx(93.25), "0": 96.0, "0,5": 98.75, "1": 101.5} and figs[0].x0_ts == int(ctx_for(ROWS_SWING).ts[7])
+    assert "swing low (0)" in h.detail and "swing high (1)" in h.detail                               # en el corto el 0 es el swing low y el 1 el high
+    hm, fm = _analyze(ctx_for(mirror(ROWS_SWING), first_bar=3), 1)
+    assert (hm[0].status, hm[0].direction, hm[0].x, hm[0].price) == (DETECTED, "long", 11, 101.25) and fm[0].levels["1"] == 98.5
+
+
+def test_el_1_tiene_que_quedar_mas_alla_del_extremo_de_la_vela_del_0():
+    rows = list(ROWS_SWING)
+    rows[9] = (98.5, 99.8, 98, 99)                                     # un swing high por debajo del máximo de la vela del 0 (100): no define el fibo
+    hits, figs = _analyze(ctx_for(rows[:11], first_bar=3), 1)
+    assert hits == [] and figs == []
+
+
+def test_sin_swing_high_posterior_no_hay_fibo_y_vence():
+    h = _analyze(ctx_for(ROWS[:9], first_bar=3, closed=True), 1)[0][0]
+    assert h.status == EXPIRED and "sin swing high y swing low posteriores" in h.detail
+
+
+def test_perder_la_mecha_antes_de_tener_el_fibo_invalida():
+    rows = ROWS[:7] + [(99, 106.5, 98, 105)]                           # supera la mecha (106) antes de que haya swing low
+    h = _analyze(ctx_for(rows, first_bar=3), 1)[0][0]
+    assert h.status == INVALIDATED and "perdió la mecha pivote" in h.detail
+
+
+def test_la_vela_que_confirma_el_swing_no_puede_ser_la_entrada():
+    rows = ROWS[:9] + [(98.5, 101.5, 98, 101), (101, 101.2, 98.7, 98.8)]          # 10 confirma el 1 y ya toca el 0,5: aún no se podía saber
+    assert _analyze(ctx_for(rows, first_bar=3), 1)[0] == []

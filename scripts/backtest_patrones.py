@@ -55,6 +55,7 @@ GLOBAL_SCOPE = os.environ.get("BT_ALCANCE", "global") != "mercado"
 EXTEND = ()
 CONFIRM = "none"                              # confirmación de Reversión: none, cisd (M15) o bpr (velas de LTF_TF); la fija main()
 LTF_TF = "5m"
+FIBO = "swing"                                   # fibo de Reversión: swing (por defecto) o mecha (el 1 es la mecha de la toma, modo anterior)
 ONLY_REVERSION = False
 BE_R = None                                   # breakeven en R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT); lo fija main()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
@@ -179,7 +180,7 @@ def run_symbol(source, sym: str, order, zones):
         for name, mod in PATTERNS.items():
             if ONLY_REVERSION and mod is not reversion:
                 continue
-            hits, _figs = mod.analyze(ctx, 1, **({"confirm": CONFIRM, "ltf": ltf} if mod is reversion else {}))
+            hits, _figs = mod.analyze(ctx, 1, **({"confirm": CONFIRM, "ltf": ltf, "mode": FIBO} if mod is reversion else {}))
             hit = hits[0] if hits else None
             status = "ignorada (otro patrón)" if hit is None else hit.status
             detail = "" if hit is None else hit.detail
@@ -443,8 +444,11 @@ def main() -> None:
     ap.add_argument("--confirmacion", choices=("none", "cisd", "bpr5", "bpr3"), default="none",
                     help="confirmación de Reversión antes de la entrada: CISD en M15, o BPR + retest + cierre bajo el CISD en velas de 5m o 3m")
     ap.add_argument("--solo-reversion", action="store_true")
+    ap.add_argument("--fibo-reversion", choices=("swing", "mecha"), default="swing",
+                    help="fibo de Reversión: del swing posterior a la toma al swing opuesto (por defecto) o con la mecha de la toma como 1 (anterior)")
     args = ap.parse_args()
-    global BE_R, CONFIRM, LTF_TF, ONLY_REVERSION
+    global BE_R, CONFIRM, LTF_TF, ONLY_REVERSION, FIBO
+    FIBO = args.fibo_reversion
     CONFIRM = "bpr" if args.confirmacion.startswith("bpr") else args.confirmacion
     LTF_TF = "3m" if args.confirmacion == "bpr3" else "5m"
     ONLY_REVERSION = args.solo_reversion
