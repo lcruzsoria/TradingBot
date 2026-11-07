@@ -53,6 +53,10 @@ class Enigma369Skill(Skill):
                 if not HEX.match(value):
                     raise ValueError(f"ENIGMA369_COLOR_{digit}={value} debe ser #RRGGBB")
                 self.colors[digit] = value
+        opacity = s.get_float("STRIPE_OPACITY", 40.0)
+        if not 0 <= opacity <= 100:
+            raise ValueError(f"ENIGMA369_STRIPE_OPACITY={opacity:g} debe estar entre 0 y 100 (%)")
+        self.stripe_opacity = opacity / 100
         self.symbols = s.get_list("SYMBOLS", [])
         env = self.services.env
         self.indices = env.get_list("LEVELS_US_INDICES", list(DEFAULT_US_INDICES)) if env is not None else list(DEFAULT_US_INDICES)
@@ -78,7 +82,7 @@ class Enigma369Skill(Skill):
 
     def update(self, p: dict) -> None:
         symbol, tf = p["symbol"], p["timeframe"]
-        base = {"symbol": symbol, "timeframe": tf, "mode": self.mode, "anchor": self.anchor, "wanted_tf": cuartos.MODE_TIMEFRAMES[self.mode]}
+        base = {"symbol": symbol, "timeframe": tf, "mode": self.mode, "anchor": self.anchor, "stripe_opacity": self.stripe_opacity, "wanted_tf": cuartos.MODE_TIMEFRAMES[self.mode]}
         if not is_us_index(symbol, self.symbols or self.indices):
             self.set_caption(f"{symbol}: solo índices USA")
             self.publish("enigma369.updated", {**base, "available": False, "reason": "Enigma369 solo funciona con índices USA"})
