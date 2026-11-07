@@ -86,7 +86,7 @@ def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str
         return SESSION_LABELS[digits[layer]]
     if layer == "semana":
         return f"W{digits[layer]}" if digits[layer] else "Q0"
-    return f"Q{digits[layer]}"
+    return zone_ref(layer, digits[layer])
 
 
 def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
