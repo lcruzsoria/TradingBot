@@ -1,0 +1,103 @@
+"""Skill Enigma369: cuartos → números 1-9, alineaciones 3-6-9, áreas del gráfico y franjas."""
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from datetime import datetime, timezone
+
+import numpy as np
+import pytest
+
+from tradingbot.config import STRATEGY_SKILLS_OFF, STRATEGY_SKILLS_ON, STRATEGY_TIMEFRAMES, strategy_skills
+from tradingbot.skills.enigma369 import cuartos as c
+
+AHEAD = 7 * 3600                      # servidor = Nueva York + 7 h
+
+
+def srv(y, m, d, h, mi):
+    return int(datetime(y, m, d, h, mi, tzinfo=timezone.utc).timestamp()) + AHEAD
+
+
+def zones(ts, anchor=17, mode="semana"):
+    return c.last_zones([ts], AHEAD, mode, anchor)
+
+
+def test_digit_sum_reduces_to_one_digit():
+    assert [c.reduce_digit(n) for n in (3, 9, 10, 12)] == [3, 9, 1, 3]       # 444 = 12 = 3
+
+
+def test_every_zone_has_a_number_between_1_and_9():
+    ts = np.arange(srv(2026, 11, 9, 0, 0), srv(2026, 11, 12, 17, 0), 300)     # de lunes a jueves a las 17:00 (luego es viernes, Q0)
+    for mode in c.MODES:
+        res = c.compute(ts, AHEAD, mode)
+        for row in res["rows"]:
+            assert row and all(1 <= s["number"] <= 9 for s in row)
+
+
+def test_tuesday_0220_anchor_18_is_222_66():
+    z = zones(srv(2026, 11, 10, 2, 20), anchor=18)
+    assert [x["code"] for x in z] == ["2", "22", "222", "222"]
+    assert [x["number"] for x in z] == [2, 4, 6, 6]
+    (run,) = c.alignments(z)
+    assert (run["n"], run["digit"], run["label"]) == (2, 2, "222 · 66")
+
+
+def test_anchor_17_moves_the_sessions_one_hour():
+    z = zones(srv(2026, 11, 10, 2, 20), anchor=17)                           # 9 h 20 min tras las 17:00: sesión 2, cuarto 3
+    assert [x["code"] for x in z] == ["2", "22", "222", "223"]
+    assert c.alignments(z) == []
+
+
+def test_friday_and_fifth_week_are_q0():
+    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 13, 2, 20)))     # viernes
+    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 12, 17, 30)))    # jueves 17:30 con ancla 17 ya es viernes
+    assert zones(srv(2026, 11, 8, 17, 30))[1]["digit"] == 1                   # domingo 17:30 ya es lunes
+    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 30, 10, 0)))     # lunes 30: 5.ª semana
+
+
+def test_alignment_needs_same_digit_and_critical_numbers():
+    ts = srv(2026, 11, 11, 9, 50)                                             # 233 / 334: sin alineación
+    assert c.alignments(zones(ts)) == []
+    z = [dict(layer="a", digit=3, number=3), dict(layer="b", digit=3, number=6), dict(layer="c", digit=3, number=9), dict(layer="d", digit=3, number=4)]
+    assert [(r["n"], c.OPACITY[r["n"]]) for r in c.alignments([{**x, "code": "x"} for x in z])] == [(3, 0.28)]
+
+
+def test_areas_follow_the_aligned_span_and_use_the_zone_color():
+    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
+    res = c.compute(ts, AHEAD, anchor_hour=18)
+    area = next(a for a in res["areas"] if a["label"] == "222 · 66")
+    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#FF9500", 0.14, "sesion", "cuarto")
+    assert (area["x1"] - area["x0"]) == 18                                    # 90 min en velas de 5m
+
+
+def test_day_micro_mode_has_four_rows_and_micro_segments():
+    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 3, 0), 60)
+    res = c.compute(ts, AHEAD, "dia")
+    assert res["layers"] == ("dia", "sesion", "cuarto", "micro")
+    assert len(res["rows"][3]) >= 8                                           # un micro cada 22,5 min
+
+
+def test_profile_wiring():
+    skills = strategy_skills([{"type": "pattern"}, {"type": "tbr"}, {"type": "bias"}, {"type": "feed"}], "enigma369")
+    assert [s["type"] for s in skills] == ["bias", "feed", "enigma369"]
+    assert STRATEGY_TIMEFRAMES["enigma369"] == "5m" and "enigma369" in STRATEGY_SKILLS_ON and "enigma369" in STRATEGY_SKILLS_OFF
+
+
+def test_chart_paints_areas_and_stripes_render():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from tradingbot.ui.chart import ChartView
+    from tradingbot.ui.enigma_stripes import EnigmaStripes
+    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
+    res = c.compute(ts, AHEAD, anchor_hour=18)
+    chart = ChartView()
+    chart.set_enigma(res["areas"])
+    assert chart.enigma_item_count == len(res["areas"]) >= 1
+    chart.set_enigma([])
+    assert chart.enigma_item_count == 0
+    stripes = EnigmaStripes()
+    now = c.last_zones(ts[-1:], AHEAD, "semana", 18)
+    stripes.set_data({"available": True, "mode": "semana", "now": now, "alignments_now": c.alignments(now), **res}, {"semana": "Semana"})
+    assert stripes.rows.segment_count == sum(len(r) for r in res["rows"])
+    stripes.set_data({"available": False, "mode": "dia", "reason": "solo índices USA"}, {})
+    assert stripes.rows.segment_count == 0 and stripes.buttons["dia"].isChecked()

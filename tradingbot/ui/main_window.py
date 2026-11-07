@@ -23,6 +23,7 @@ from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
 from . import theme
 from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
+from .enigma_stripes import EnigmaStripes
 from .sma_dialog import SHOW_NAMES, SmaDialog
 from .bridge import UiBridge
 from .chart import ChartView
@@ -46,7 +47,7 @@ BE_GREY = "#9E9E9E"                  # punto de las operaciones en breakeven (G 
 
 
 # Lo que el barrido de la watchlist publica en segundo plano y no se pinta (sí se anotan patrones, GO / NO GO y operaciones)
-CHART_TOPICS = frozenset({"candles.loaded", "tbr.updated", "levels.updated", "bias.updated", "bias.history",
+CHART_TOPICS = frozenset({"candles.loaded", "tbr.updated", "enigma369.updated", "levels.updated", "bias.updated", "bias.history",
                           "pattern.updated", "pattern.session", "feed.failed"})
 
 
@@ -148,7 +149,7 @@ class MainWindow(QMainWindow):
         self._handlers = {
             "feed.connected": self._on_connected, "feed.progress": self._on_progress,
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
-            "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr,
+            "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr, "enigma369.updated": self._on_enigma,
             "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed, "setup.account": self._on_setup_account,
             "setup.consolidated": self._on_setup_consolidated,
             "stats.session": self._on_stats_session, "stats.backtest": self._on_stats_backtest, "pattern.updated": self._on_pattern_updated,
@@ -460,6 +461,14 @@ class MainWindow(QMainWindow):
         self.hist_btn.toggled.connect(lambda on: self._select_bar(None) if not on else None)
         self.bias_hist.bar_selected.connect(self._select_bar)
         chart_panel.body.addWidget(self.bias_hist)
+        # Enigma369 (perfil Enigma369): selector de ciclos y franjas de cuartos, bajo el gráfico
+        self.enigma = EnigmaStripes()
+        self.enigma.link_to(self.chart)
+        self.enigma.setVisible(self.strategy == "enigma369")
+        self.enigma.mode_selected.connect(self._select_enigma_mode)
+        enigma_skill = self.manager.skills.get("enigma369")
+        self.enigma.set_mode((enigma_skill.settings.get("MODE", "semana") if enigma_skill is not None else "semana").lower())
+        chart_panel.body.addWidget(self.enigma)
         self.chart_stats = QLabel("Sin velas cargadas")
         self.chart_stats.setObjectName("Tiny")
         chart_panel.body.addWidget(self.chart_stats)
@@ -655,6 +664,25 @@ class MainWindow(QMainWindow):
             return "-"
         return f"{self._ny(df['ts'].iloc[int(x)]):%d/%m %H:%M} NY"
 
+    ENIGMA_NAMES = {"semana": "Semana", "dia": "Día", "sesion": "Sesión", "cuarto": "Cuarto 90m", "micro": "Micro 22,5m"}
+
+    def _select_enigma_mode(self, mode: str) -> None:
+        """Semana → Cuarto usa velas de 5m y Día → Micro velas de 1m: se cambia el timeframe y se avisa a la skill."""
+        from ..skills.enigma369.cuartos import MODE_TIMEFRAMES
+        self.bus.publish("enigma369.mode", {"mode": mode}, source="ui")
+        wanted = MODE_TIMEFRAMES[mode]
+        if self.current_tf() != wanted:
+            for btn in self.tf_group.buttons():
+                if btn.property("tf") == wanted:
+                    btn.click()
+                    break
+
+    def _on_enigma(self, p: dict) -> None:
+        if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
+            return                                      # llega tarde: ya se está viendo otro gráfico
+        self.chart.set_enigma(p.get("areas", []) if p.get("available") else [])
+        self.enigma.set_data(p, self.ENIGMA_NAMES)
+
     def current_tf(self) -> str:
         btn = self.tf_group.checkedButton()
         return btn.property("tf") if btn else DEFAULT_TIMEFRAME
@@ -848,6 +876,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(theme.stylesheet())
         self.chart.apply_theme()
         self.bias_hist.style()
+        self.enigma.style()
         self.sma_cfg_btn.setIcon(gear_icon(theme.TEXT))
         self._refresh_rules_link()
         self.rules_list.refresh()

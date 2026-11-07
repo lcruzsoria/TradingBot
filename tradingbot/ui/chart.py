@@ -393,6 +393,7 @@ class ChartView(pg.PlotWidget):
         self._tbr_opacity = 0.12
         self._tbr_line_opacity = 0.6
         self._tbr_visible = False
+        self._enigma_items: list = []             # áreas de alineación de la skill Enigma369
         self._day_items: list = []
         self._day_lines: list = []
         self._day_colors: dict[str, str] = {}
@@ -466,6 +467,7 @@ class ChartView(pg.PlotWidget):
         self.clear_levels()
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
+        self.set_enigma([])
         self.set_day_levels([], [], self._day_colors)
         self.set_sma(None)
         self.set_vwap(None)
@@ -1065,6 +1067,30 @@ class ChartView(pg.PlotWidget):
             label.setZValue(7)
             pi.addItem(label, ignoreBounds=True)
             self._bias_items += [box, label]
+
+    # -- Enigma369: áreas de alineación de cuartos (3, 6, 9) ----------------------------------------------------
+    def set_enigma(self, areas: list[dict]) -> None:
+        """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
+
+        area = {x0, x1, color, opacity, label}. Con [] se quitan todas.
+        """
+        pi = self.getPlotItem()
+        for item in self._enigma_items:
+            pi.removeItem(item)
+        self._enigma_items.clear()
+        for a in areas:
+            fill = QColor(a["color"])
+            fill.setAlphaF(float(a["opacity"]))
+            box = QGraphicsRectItem(QRectF(a["x0"], -1e9, a["x1"] - a["x0"], 2e9))
+            box.setBrush(fill)
+            box.setPen(QPen(Qt.PenStyle.NoPen))
+            box.setZValue(-9)                           # detrás de las velas
+            pi.addItem(box, ignoreBounds=True)          # no cambia la escala del precio
+            self._enigma_items.append(box)
+
+    @property
+    def enigma_item_count(self) -> int:
+        return len(self._enigma_items)
 
     # -- CRT del backtest (botón CRT del perfil CRT) --------------------------------------------------------
     def set_crts(self, crts: list[dict]) -> None:
