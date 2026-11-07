@@ -53,7 +53,7 @@ class Enigma369Skill(Skill):
                 if not HEX.match(value):
                     raise ValueError(f"ENIGMA369_COLOR_{digit}={value} debe ser #RRGGBB")
                 self.colors[digit] = value
-        opacity = s.get_float("STRIPE_OPACITY", 40.0)
+        opacity = s.get_float("STRIPE_OPACITY", 100.0)
         if not 0 <= opacity <= 100:
             raise ValueError(f"ENIGMA369_STRIPE_OPACITY={opacity:g} debe estar entre 0 y 100 (%)")
         self.stripe_opacity = opacity / 100

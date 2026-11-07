@@ -41,7 +41,7 @@ class StripeRows(pg.PlotWidget):
     def link_to(self, chart) -> None:
         self.getPlotItem().setXLink(chart.getPlotItem())
 
-    def set_rows(self, layers: tuple, rows: list[list[dict]], names: dict[str, str], opacity: float = 0.4) -> None:
+    def set_rows(self, layers: tuple, rows: list[list[dict]], names: dict[str, str], opacity: float = 1.0) -> None:
         pi = self.getPlotItem()
         for item in self._items:
             pi.removeItem(item)
@@ -63,7 +63,7 @@ class StripeRows(pg.PlotWidget):
                 self._items.append(box)
                 if s["x1"] - s["x0"] >= MIN_LABEL_BARS:
                     text = pg.TextItem(anchor=(0.5, 0.5))
-                    text.setHtml(f'<span style="font-size:8pt; color:#E8E8E8; font-weight:600">{html.escape(s["text"])}</span>')
+                    text.setHtml(f'<span style="font-size:8pt; color:#2B2B2B; font-weight:600">{html.escape(s["text"])}</span>')
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
                     pi.addItem(text, ignoreBounds=True)
                     self._items.append(text)
@@ -125,7 +125,7 @@ class EnigmaStripes(QWidget):
             self.rows.set_rows((), [], names)
             self.info.setText(p.get("reason", ""))
             return
-        self.rows.set_rows(p["layers"], p["rows"], names, p.get("stripe_opacity", 0.4))
+        self.rows.set_rows(p["layers"], p["rows"], names, p.get("stripe_opacity", 1.0))
         now = " · ".join(f'{names.get(z["layer"], z["layer"])} {z["text"].replace(" · ", " (") + ")" if z["number"] else z["text"]}' for z in p["now"])
         runs = p["alignments_now"]
         self.info.setText(("Alineado: " + ", ".join(r["label"] for r in runs) + "   |   " if runs else "") + "Última vela: " + now)

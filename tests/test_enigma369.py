@@ -58,7 +58,7 @@ def test_friday_weekend_and_fifth_week_are_yellow_q0_without_numbers():
     assert zones(srv(2026, 11, 8, 18, 30))[1]["digit"] == 1                    # domingo 18:30 ya es lunes
     fifth = zones(srv(2026, 11, 30, 10, 0))                                    # lunes 30: 5.ª semana
     assert fifth[0]["digit"] == 0 and all(x["number"] == 0 for x in fifth)
-    assert c.DEFAULT_COLORS[0] == "#FFD60A"
+    assert c.DEFAULT_COLORS[0] == "#EFD9A8"
 
 
 def test_alignment_needs_same_digit_and_critical_numbers():
@@ -72,7 +72,7 @@ def test_areas_follow_the_aligned_span_and_use_the_zone_color():
     ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
     res = c.compute(ts, AHEAD, anchor_hour=18)
     area = next(a for a in res["areas"] if a["label"] == "222 · 66")
-    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#FF3B30", 0.14, "sesion", "cuarto")
+    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#E398A1", 0.14, "sesion", "cuarto")
     assert (area["x1"] - area["x0"]) == 18                                    # 90 min en velas de 5m
 
 
