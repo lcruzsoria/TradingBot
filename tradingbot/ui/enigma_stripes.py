@@ -16,7 +16,7 @@ MIN_LABEL_BARS = 3      # una franja más estrecha que esto no lleva texto
 
 
 class StripeRows(pg.PlotWidget):
-    """Una fila por capa, de la mayor (arriba) a la menor; el eje de tiempo sigue al del gráfico de precio."""
+    """Una fila por capa, de la menor (arriba) a la mayor (abajo); el eje de tiempo sigue al del gráfico de precio."""
 
     def __init__(self) -> None:
         super().__init__(background=theme.CHART_BG)
@@ -50,7 +50,7 @@ class StripeRows(pg.PlotWidget):
         count = len(layers)
         self.setFixedHeight(ROW_HEIGHT * count + 6)
         for i, segs in enumerate(rows):
-            y = count - 1 - i
+            y = i                                    # la capa mayor abajo y la menor arriba
             for s in segs:
                 color = QColor(s["color"])
                 color.setAlphaF(0.85 if s["digit"] else 0.15)
@@ -67,7 +67,7 @@ class StripeRows(pg.PlotWidget):
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
                     pi.addItem(text, ignoreBounds=True)
                     self._items.append(text)
-        tick_rows = [(count - 1 - i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
+        tick_rows = [(i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
         pi.getAxis("right").setTicks([tick_rows])
         pi.getViewBox().setYRange(0, count, padding=0)
 
