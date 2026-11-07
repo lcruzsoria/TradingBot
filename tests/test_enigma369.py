@@ -107,3 +107,14 @@ def test_chart_paints_areas_and_stripes_render():
     assert stripes.rows.segment_count == sum(len(r) for r in res["rows"])
     stripes.set_data({"available": False, "mode": "dia", "reason": "solo índices USA"}, {})
     assert stripes.rows.segment_count == 0 and stripes.buttons["dia"].isChecked()
+
+
+def test_futures_weekend_gap_like_the_indicator():
+    """MNQ1! en M5 (captura del indicador): el jueves a las 18:05 empieza Friday (Asia), amarillo, con la semana 4 (azul); sin barras
+    el fin de semana; el domingo a las 18:00 empieza Asia del lunes, gris, ya en la semana 1 de noviembre."""
+    start = zones(srv(2026, 10, 29, 18, 5))
+    assert [x["digit"] for x in start] == [4, 0, 1, 1] and start[1]["text"] == "Friday" and start[2]["text"] == "Asia"
+    assert zones(srv(2026, 10, 29, 17, 55))[1]["digit"] == 4                         # justo antes: aún jueves
+    assert zones(srv(2026, 10, 30, 17, 55))[2]["text"] == "NY PM"                    # último tramo del viernes
+    monday = zones(srv(2026, 11, 1, 18, 5))
+    assert [x["digit"] for x in monday[:3]] == [1, 1, 1] and monday[2]["text"] == "111 · 3" and monday[0]["text"] == "1 · 1"
