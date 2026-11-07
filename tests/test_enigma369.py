@@ -126,3 +126,16 @@ def test_zone_labels_carry_the_period_reference_and_number():
     assert [zones(srv(2026, 11, 3 + 7 * w, 10, 0))[0]["text"][:2] for w in range(3)] == ["W1", "W2", "W3"]
     micro = zones(srv(2026, 11, 10, 2, 20), mode="dia")
     assert micro[3]["text"].startswith("M") and micro[3]["layer"] == "micro"
+
+
+def test_q0_numeros_de_referencia_y_aviso_telegram():
+    import calendar
+    from tradingbot.skills.telegram import messages
+    ts = calendar.timegm((2027, 1, 1, 7 + 6, 0, 0))                      # viernes 1 ene 2027, 06:00 NY: día Q0
+    from tradingbot.skills.enigma369 import cuartos
+    now = cuartos.last_zones([ts], 25200, "semana", 18)
+    assert all(z["number"] == 0 for z in now) and all(1 <= z["ref_number"] <= 9 for z in now)
+    refs = cuartos.alignments(now, "ref_number")
+    p = {"symbol": "NAS100.s", "timeframe": "M5", "now": now, "alignments_now": [], "ref_alignments_now": refs}
+    text = messages.enigma(p)
+    assert "Enigma369" in text and "Números de referencia" in text

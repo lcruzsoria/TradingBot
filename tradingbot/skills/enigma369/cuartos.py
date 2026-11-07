@@ -91,34 +91,36 @@ def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str
 
 def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
     """Una zona por capa: dígito, código (los dígitos de su capa y las dos de arriba), suma, número y texto.
+    `ref_number` es el número que tendría si contara (solo orientativo en Q0).
 
     En Q0 (viernes, sábado, domingo o 5.ª semana) las zonas se ven pero no cuentan: número 0.
     """
     out_of_count = digits["semana"] == 0 or digits["dia"] == 0
+    ref = {**digits, "semana": digits["semana"] or 5, "dia": digits["dia"] or digits["weekday"] + 1}   # Q0 de referencia: 5.ª semana; viernes 5, sábado 6, domingo 7
     zones = []
     for i, layer in enumerate(layers):
         window = "".join(str(digits[c]) for c in layers[max(0, i - 2): i + 1])
-        total = sum(int(ch) for ch in window)
+        total = sum(int(ch) for ch in "".join(str(ref[c]) for c in layers[max(0, i - 2): i + 1]))
         number = 0 if out_of_count else reduce_digit(total)
         text = zone_text(layer, digits, number, window)
-        zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number, text=text,
+        zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number, ref_number=reduce_digit(total), text=text,
                           ref=zone_ref(layer, digits[layer]) if number else text))
     return zones
 
 
-def alignments(zones: list[dict]) -> list[dict]:
+def alignments(zones: list[dict], key: str = "number") -> list[dict]:
     """Tramos de 2 o más zonas seguidas con el mismo dígito y número crítico: {first, last, n, digit, label}."""
     runs, i = [], 0
     while i < len(zones):
-        if zones[i]["number"] not in CRITICAL:
+        if zones[i][key] not in CRITICAL:
             i += 1
             continue
         j = i
-        while j + 1 < len(zones) and zones[j + 1]["number"] in CRITICAL and zones[j + 1]["digit"] == zones[i]["digit"]:
+        while j + 1 < len(zones) and zones[j + 1][key] in CRITICAL and zones[j + 1]["digit"] == zones[i]["digit"]:
             j += 1
         if j > i:
             runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"],
-                             label=" · ".join([zones[j]["code"], "".join(str(z["number"]) for z in zones[i:j + 1])])))
+                             label=" · ".join([zones[j]["code"], "".join(str(z[key]) for z in zones[i:j + 1])])))
         i = j + 1
     return runs
 

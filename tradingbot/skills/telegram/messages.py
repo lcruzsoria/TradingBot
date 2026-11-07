@@ -98,6 +98,22 @@ def started(profile: str | None = None) -> str:
     return f"🤖 <b>TradingBot en marcha</b>{_footer(profile)}"
 
 
+def enigma(p: dict, profile: str | None = None) -> str:
+    """Aviso de Enigma369: una alineación 3-6-9 que acaba de empezar; en Q0 (no cuenta) con los números solo de referencia."""
+    now = p["now"]
+    q0 = not any(z["number"] for z in now)
+    runs = p["ref_alignments_now"] if q0 else p["alignments_now"]
+    lines = [f"🔢 <b>Enigma369 · {_e(p['symbol'])}</b> · {_e(p['timeframe'])}"]
+    for run in runs:
+        zs = now[run["first"]: run["last"] + 1]
+        lines.append(f"🎯 <b>Alineación {run['n']} zonas · {_e(run['label'])}</b>" + (" <i>(referencia, Q0 no cuenta)</i>" if q0 else ""))
+        lines.append(" · ".join(_e(z["text"]) for z in zs))
+    lines.append("Ahora: " + " | ".join(_e(z["text"]) for z in now))
+    if q0:
+        lines.append("Números de referencia: " + " ".join(f"{z['layer']} {z['ref_number']}" for z in now))
+    return "\n".join(lines) + _footer(profile)
+
+
 # -- respuestas a los comandos (lo mismo que enseña el panel) -------------------------------------------------------
 COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana del bot"),
             ("dibujar", "Dibuja los setups ejecutados hoy (/dibujar 2, /dibujar nas100)"),

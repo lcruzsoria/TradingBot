@@ -98,4 +98,5 @@ class Enigma369Skill(Skill):
         runs = cuartos.alignments(now)
         head = " ".join(z["text"] for z in now)
         self.set_caption(f"{runs[-1]['label']}" if runs else head)
-        self.publish("enigma369.updated", {**base, "available": True, "estimated": estimated, "now": now, "alignments_now": runs, **result})
+        self.publish("enigma369.updated", {**base, "available": True, "estimated": estimated, "now": now, "alignments_now": runs,
+                                               "ref_alignments_now": [] if any(z["number"] for z in now) else cuartos.alignments(now, "ref_number"), **result})
