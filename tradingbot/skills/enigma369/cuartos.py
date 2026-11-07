@@ -68,16 +68,24 @@ def layer_digits(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> dict
     }
 
 
+def zone_ref(layer: str, digit: int) -> str:
+    """Referencia del periodo: W1-W4 (semana), Monday-Sunday (día), Asia / London / NY AM / NY PM (sesión), Q1-Q4 (90 min), M1-M4 (micro)."""
+    return {"semana": f"W{digit}", "dia": WEEKDAY_NAMES[digit - 1] if 1 <= digit <= 4 else "", "sesion": SESSION_LABELS.get(digit, ""),
+            "cuarto": f"Q{digit}", "micro": f"M{digit}"}[layer]
+
+
 def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str:
-    """Texto de la franja: «código · número»; en Q0, el nombre que da el indicador (Friday, Asia, Q2...)."""
+    """Texto de la franja: «referencia código · número» (W2 · 2, Tuesday 22 · 4, London 222 · 6, Q3 223 · 7);
+    en Q0, el nombre que da el indicador (Friday, Asia, Q2...)."""
     if number:
-        return f"{code} · {number}"
+        ref = zone_ref(layer, digits[layer])
+        return f"{ref} · {number}" if layer == "semana" else f"{ref} {code} · {number}"
     if layer == "dia":
         return WEEKDAY_NAMES[digits["weekday"]]
     if layer == "sesion":
         return SESSION_LABELS[digits[layer]]
     if layer == "semana":
-        return f"Week {digits[layer]}" if digits[layer] else "Q0"
+        return f"W{digits[layer]}" if digits[layer] else "Q0"
     return f"Q{digits[layer]}"
 
 

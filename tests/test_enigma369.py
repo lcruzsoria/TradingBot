@@ -117,4 +117,12 @@ def test_futures_weekend_gap_like_the_indicator():
     assert zones(srv(2026, 10, 29, 17, 55))[1]["digit"] == 4                         # justo antes: aún jueves
     assert zones(srv(2026, 10, 30, 17, 55))[2]["text"] == "NY PM"                    # último tramo del viernes
     monday = zones(srv(2026, 11, 1, 18, 5))
-    assert [x["digit"] for x in monday[:3]] == [1, 1, 1] and monday[2]["text"] == "111 · 3" and monday[0]["text"] == "1 · 1"
+    assert [x["digit"] for x in monday[:3]] == [1, 1, 1] and monday[2]["text"] == "Asia 111 · 3" and monday[0]["text"] == "W1 · 1"
+
+
+def test_zone_labels_carry_the_period_reference_and_number():
+    z = zones(srv(2026, 11, 10, 2, 20))                                        # martes 02:20: 222 · 66
+    assert [x["text"] for x in z] == ["W2 · 2", "Tuesday 22 · 4", "London 222 · 6", "Q2 222 · 6"]
+    assert [zones(srv(2026, 11, 3 + 7 * w, 10, 0))[0]["text"][:2] for w in range(3)] == ["W1", "W2", "W3"]
+    micro = zones(srv(2026, 11, 10, 2, 20), mode="dia")
+    assert micro[3]["text"].startswith("M") and micro[3]["layer"] == "micro"

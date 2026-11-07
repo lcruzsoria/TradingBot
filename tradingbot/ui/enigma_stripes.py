@@ -30,6 +30,8 @@ class StripeRows(pg.PlotWidget):
         pi.getViewBox().setMouseEnabled(x=False, y=False)
         self._items: list = []
         self._layers: tuple = ()
+        self._labels: list[tuple] = []          # (texto, inicio y fin de su franja en velas, y)
+        self.getPlotItem().getViewBox().sigRangeChanged.connect(lambda *_: self._fit_labels())
         self.style()
 
     def style(self) -> None:
@@ -46,6 +48,7 @@ class StripeRows(pg.PlotWidget):
         for item in self._items:
             pi.removeItem(item)
         self._items.clear()
+        self._labels.clear()
         self._layers = tuple(layers)
         count = len(layers)
         self.setFixedHeight(ROW_HEIGHT * count + 6)
@@ -67,9 +70,21 @@ class StripeRows(pg.PlotWidget):
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
                     pi.addItem(text, ignoreBounds=True)
                     self._items.append(text)
+                    self._labels.append((text, s["x0"], s["x1"], y + 0.5))
         tick_rows = [(i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
         pi.getAxis("right").setTicks([tick_rows])
         pi.getViewBox().setYRange(0, count, padding=0)
+        self._fit_labels()
+
+    def _fit_labels(self) -> None:
+        """Un texto solo se ve si cabe en su franja con el zoom actual (si no, se solapa con el de al lado)."""
+        vb = self.getPlotItem().getViewBox()
+        x0, x1 = vb.viewRange()[0]
+        per_bar = vb.width() / max(x1 - x0, 1e-9)
+        for text, left, right, y in self._labels:
+            left, right = max(left, x0), min(right, x1)             # solo la parte visible de la franja
+            text.setVisible(right > left and (right - left) * per_bar >= text.boundingRect().width() + 8)
+            text.setPos((left + right) / 2, y)
 
     @property
     def segment_count(self) -> int:
