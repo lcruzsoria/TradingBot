@@ -13,7 +13,7 @@ Dos modos, cada uno con 4 capas visibles (y su timeframe de velas):
   dia    → micro    (velas de 1m)
 
 Regla:
-  1. Cada capa aporta un dígito 1-4 (su cuarto). El color es ese dígito: 1 gris, 2 naranja, 3 verde, 4 azul.
+  1. Cada capa aporta un dígito 1-4 (su cuarto). El color es ese dígito: 1 gris, 2 rojo, 3 verde, 4 azul.
   2. El código de una zona son los dígitos de su capa y de las dos capas de arriba (menos si no las hay).
   3. Número de la zona = suma de los dígitos del código reducida a una cifra (444 = 12 → 3). Toda zona de lunes a jueves lleva número.
   4. Son críticos los números 3, 6 y 9.
@@ -34,7 +34,7 @@ SESSION_NAMES = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
 DAY_NAMES = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves"}
 CRITICAL = (3, 6, 9)
 OPACITY = {2: 0.14, 3: 0.28, 4: 0.42}
-DEFAULT_COLORS = {0: "#FFD60A", 1: "#9E9E9E", 2: "#FF9500", 3: "#00C853", 4: "#2979FF"}   # 0 = Q0 (amarillo)
+DEFAULT_COLORS = {0: "#FFD60A", 1: "#9E9E9E", 2: "#FF3B30", 3: "#00C853", 4: "#2979FF"}   # 0 = Q0 (amarillo)
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 SESSION_LABELS = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
 MAX_BARS = 3000          # solo se calculan las zonas de las últimas velas

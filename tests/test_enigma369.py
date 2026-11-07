@@ -72,7 +72,7 @@ def test_areas_follow_the_aligned_span_and_use_the_zone_color():
     ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
     res = c.compute(ts, AHEAD, anchor_hour=18)
     area = next(a for a in res["areas"] if a["label"] == "222 · 66")
-    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#FF9500", 0.14, "sesion", "cuarto")
+    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#FF3B30", 0.14, "sesion", "cuarto")
     assert (area["x1"] - area["x0"]) == 18                                    # 90 min en velas de 5m
 
 
