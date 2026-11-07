@@ -664,7 +664,7 @@ class MainWindow(QMainWindow):
             return "-"
         return f"{self._ny(df['ts'].iloc[int(x)]):%d/%m %H:%M} NY"
 
-    ENIGMA_NAMES = {"semana": "Semana", "dia": "Día", "sesion": "Sesión", "cuarto": "Cuarto 90m", "micro": "Micro 22,5m"}
+    ENIGMA_NAMES = {"semana": "Semana", "dia": "Día", "sesion": "Sesión", "cuarto": "Cuarto 90m", "micro": "Micro"}
 
     def _select_enigma_mode(self, mode: str) -> None:
         """Semana → Cuarto usa velas de 5m y Día → Micro velas de 1m: se cambia el timeframe y se avisa a la skill."""
