@@ -139,3 +139,14 @@ def test_q0_numeros_de_referencia_y_aviso_telegram():
     p = {"symbol": "NAS100.s", "timeframe": "M5", "now": now, "alignments_now": [], "ref_alignments_now": refs}
     text = messages.enigma(p)
     assert "Enigma369" in text and "Números de referencia" in text
+
+
+def test_alineaciones_grandes_con_mes_y_aviso_previo():
+    from tradingbot.skills.telegram import messages
+    from datetime import datetime
+    found = c.upcoming_big(datetime(2026, 12, 22, 9, 0), 48)
+    assert [(x["start"], x["n"]) for x in found] == [(datetime(2026, 12, 22, 18), 3), (datetime(2026, 12, 23, 6), 4), (datetime(2026, 12, 23, 12), 3)]
+    assert found[1]["text"].startswith("Mes 3")
+    assert [x["start"] for x in c.upcoming_big(datetime(2026, 11, 17, 9, 0), 48)] == [datetime(2026, 11, 18, 6)]   # sin mes: semana-día-sesión
+    assert c.upcoming_big(datetime(2027, 1, 1, 0, 0), 24) == []                                                     # 1 ene 2027: Q0
+    assert "Madrid" in messages.enigma_ahead(found[1], 90)

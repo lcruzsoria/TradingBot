@@ -114,6 +114,18 @@ def enigma(p: dict, profile: str | None = None) -> str:
     return "\n".join(lines) + _footer(profile)
 
 
+def enigma_ahead(item: dict, minutes_left: int, profile: str | None = None) -> str:
+    """Aviso previo de una alineación grande de Enigma369 (mes-semana-día-sesión o semana-día-sesión)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    ny = item["start"].replace(tzinfo=ZoneInfo("America/New_York"))
+    mad = ny.astimezone(ZoneInfo("Europe/Madrid"))
+    when = f"{ny:%a %d/%m %H:%M} NY · {mad:%H:%M} Madrid"
+    left = f"{minutes_left // 60} h" if minutes_left >= 90 else f"{minutes_left} min"
+    return (f"⏰ <b>Enigma369 · alineación de {item['n']} niveles</b> en {left}\n"
+            f"<b>{_e(item['label'])}</b>\n{_e(item['text'])}\nEmpieza: {when}" + _footer(profile))
+
+
 # -- respuestas a los comandos (lo mismo que enseña el panel) -------------------------------------------------------
 COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana del bot"),
             ("dibujar", "Dibuja los setups ejecutados hoy (/dibujar 2, /dibujar nas100)"),

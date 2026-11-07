@@ -11,6 +11,7 @@ from datetime import datetime
 from ...clock import NY, ny_from_server, trading_day
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
+from ..enigma369 import cuartos as enigma_cuartos
 from ..setup import store
 from ..tbr.zones import zones_from_settings
 from . import card, messages, setup_chart, telegram
@@ -73,6 +74,9 @@ class TelegramSkill(Skill):
         except ValueError:
             self.zones = []
         self.sent = 0
+        self._enigma_checked = 0.0
+        self._enigma_sent: set = set()                       # avisos previos ya mandados
+        self._advance_hours = env.section("ENIGMA369").get_int("ADVANCE_HOURS", 24)
         self._enigma: dict[str, tuple] = {}                  # mercado -> última alineación de Enigma369 vista
         self.server: PanelServer | None = None
         self.board = PanelState(self.services.app_cfg, env.section("STATS").get("FORWARD_DIR"))
@@ -140,7 +144,30 @@ class TelegramSkill(Skill):
         except telegram.TelegramError:
             self._offset = None                              # sin red al arrancar: se reintenta en el primer tick
 
+    def _enigma_ahead(self) -> None:
+        """Avisos previos (ENIGMA369_ADVANCE_HOURS antes y 15 min antes) de las alineaciones de 3-4 niveles con semana y, si lo hay, mes."""
+        now = time.monotonic()
+        if now - self._enigma_checked < 60:
+            return
+        self._enigma_checked = now
+        hours = max(1, self._advance_hours)
+        wall = datetime.now(NY).replace(tzinfo=None)
+        for item in enigma_cuartos.upcoming_big(wall, hours):
+            left = int((item["start"] - wall).total_seconds() // 60)
+            for threshold in (hours * 60, 15):
+                key = (item["start"], item["label"], threshold)
+                if left <= threshold and left >= 0 and key not in self._enigma_sent and (threshold == hours * 60 or left <= 15):
+                    self._enigma_sent.add(key)
+                    if threshold == hours * 60 and left <= 15:
+                        continue                                  # ya queda poco: basta el aviso de los 15 min
+                    self._send(messages.enigma_ahead(item, left, self.profile))
+
     def tick(self) -> None:
+        if self.telegram and not self.error and "enigma" in self.notify:
+            try:
+                self._enigma_ahead()
+            except telegram.TelegramError:
+                pass
         if not self.telegram or not self.commands or self.error:
             return
         if self._capture_asked is not None and time.monotonic() - self._capture_asked > CAPTURE_TIMEOUT:

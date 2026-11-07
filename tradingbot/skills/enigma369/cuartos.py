@@ -24,6 +24,8 @@ Regla:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import numpy as np
 
 DEFAULT_ANCHOR_HOUR = 18
@@ -58,7 +60,9 @@ def layer_digits(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> dict
     monday = (day - weekday).astype("datetime64[D]")
     day_of_month = (monday - monday.astype("datetime64[M]")).astype(np.int64)    # 0-based
     week = day_of_month // 7 + 1
+    month = monday.astype("datetime64[M]").astype(np.int64) % 12                    # 0-based: enero = 0
     return {
+        "mes": (month % 3 + 1).astype(np.int8),                                     # mes dentro del trimestre (1-3), el del lunes de la semana
         "semana": np.where(week <= 4, week, 0).astype(np.int8),
         "dia": np.where(weekday <= 3, weekday + 1, 0).astype(np.int8),
         "sesion": (minutes // 360 + 1).astype(np.int8),
@@ -71,7 +75,7 @@ def layer_digits(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> dict
 def zone_ref(layer: str, digit: int) -> str:
     """Referencia del periodo: W1-W4 (semana), Monday-Sunday (día), Asia / London / NY AM / NY PM (sesión), Q1-Q4 (90 min), M1-M4 (micro)."""
     return {"semana": f"W{digit}", "dia": WEEKDAY_NAMES[digit - 1] if 1 <= digit <= 4 else "", "sesion": SESSION_LABELS.get(digit, ""),
-            "cuarto": f"Q{digit}", "micro": f"M{digit}"}[layer]
+            "cuarto": f"Q{digit}", "micro": f"M{digit}", "mes": f"Mes {digit}"}[layer]
 
 
 def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str:
@@ -79,7 +83,7 @@ def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str
     en Q0, el nombre que da el indicador (Friday, Asia, Q2...)."""
     if number:
         ref = zone_ref(layer, digits[layer])
-        return f"{ref} · {number}" if layer == "semana" else f"{ref} {code} · {number}"
+        return f"{ref} · {number}" if layer in ("semana", "mes") else f"{ref} {code} · {number}"
     if layer == "dia":
         return WEEKDAY_NAMES[digits["weekday"]]
     if layer == "sesion":
@@ -184,3 +188,30 @@ def last_zones(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_
     """Las zonas de la última vela (para el subtítulo del panel)."""
     dig = layer_digits(np.asarray(ts)[-1:], ahead, anchor_hour)
     return zones_at({c: int(v[0]) for c, v in dig.items()}, MODES[mode])
+
+
+BIG_LAYERS = ("mes", "semana", "dia", "sesion")
+
+
+def upcoming_big(now_wall: datetime, hours: float, anchor_hour: int = DEFAULT_ANCHOR_HOUR, min_n: int = 3) -> list[dict]:
+    """Alineaciones de `min_n` o más zonas seguidas que EMPIEZAN en las próximas `hours` horas, en dos juegos de capas:
+    semana-día-sesión y mes-semana-día-sesión (con el mes dentro del trimestre).
+
+    `now_wall`: hora de pared de Nueva York (sin zona). Devuelve [{start, n, label, text, layers}] con start en hora de NY."""
+    base = int(now_wall.replace(tzinfo=timezone.utc).timestamp() // 900 * 900)
+    found = {}
+    for layers in (BIG_LAYERS, BIG_LAYERS[1:]):                       # primero las de 4 niveles: mandan si empiezan a la vez
+        prev = None
+        for k in range(-1, int(hours * 4) + 2):
+            ts = base + k * 900
+            dig = layer_digits(np.array([ts]), 0, anchor_hour)
+            zones = zones_at({c: int(v[0]) for c, v in dig.items()}, layers)
+            runs = [r for r in alignments(zones) if r["n"] >= min_n]
+            key = tuple((r["first"], r["label"]) for r in runs)
+            if runs and key != prev and k >= 0:
+                r = runs[0]
+                start = datetime.fromtimestamp(ts, timezone.utc).replace(tzinfo=None)
+                found.setdefault(start, dict(start=start, n=r["n"], label=r["label"], layers=layers[r["first"]: r["last"] + 1],
+                                             text=" · ".join(z["text"] for z in zones[r["first"]: r["last"] + 1])))
+            prev = key
+    return sorted(found.values(), key=lambda x: x["start"])
