@@ -203,6 +203,37 @@ class DaySeparators(pg.GraphicsObject):
             p.drawText(QPointF(pt.x() - metrics.horizontalAdvance(label) / 2, pt.y() - 6), label)
 
 
+class EnigmaAreas(pg.GraphicsObject):
+    """Franjas verticales traslúcidas de las alineaciones de Enigma369, de arriba a abajo de la vista (solo pinta lo visible)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._areas: list[dict] = []
+
+    def set_data(self, areas: list[dict]) -> None:
+        self._areas = list(areas)
+        self.prepareGeometryChange()
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        vb = self.getViewBox()
+        return vb.viewRect() if vb is not None else QRectF()
+
+    def paint(self, p, *args) -> None:
+        vb = self.getViewBox()
+        if vb is None or not self._areas:
+            return
+        (vx0, vx1), (y0, y1) = vb.viewRange()
+        p.setPen(Qt.PenStyle.NoPen)
+        for a in self._areas:
+            if a["x1"] < vx0 or a["x0"] > vx1:
+                continue
+            fill = QColor(a["color"])
+            fill.setAlphaF(float(a["opacity"]))
+            p.setBrush(fill)
+            p.drawRect(QRectF(a["x0"], y0, a["x1"] - a["x0"], y1 - y0))
+
+
 class ScaleAxis(pg.AxisItem):
     """Eje que se redimensiona al arrastrarlo, como en TradingView. Doble clic: vuelve a la escala automática.
 
@@ -393,7 +424,10 @@ class ChartView(pg.PlotWidget):
         self._tbr_opacity = 0.12
         self._tbr_line_opacity = 0.6
         self._tbr_visible = False
-        self._enigma_items: list = []             # áreas de alineación de la skill Enigma369
+        self.enigma = EnigmaAreas()               # áreas de alineación de la skill Enigma369
+        self.enigma.setZValue(-9)                 # detrás de las velas
+        pi.addItem(self.enigma, ignoreBounds=True)
+        vb.sigRangeChanged.connect(lambda *_: (self.enigma.prepareGeometryChange(), self.enigma.update()))
         self._day_items: list = []
         self._day_lines: list = []
         self._day_colors: dict[str, str] = {}
@@ -1072,25 +1106,13 @@ class ChartView(pg.PlotWidget):
     def set_enigma(self, areas: list[dict]) -> None:
         """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
 
-        area = {x0, x1, color, opacity, label}. Con [] se quitan todas.
+        area = {x0, x1, color, opacity}. Con [] se quitan todas.
         """
-        pi = self.getPlotItem()
-        for item in self._enigma_items:
-            pi.removeItem(item)
-        self._enigma_items.clear()
-        for a in areas:
-            fill = QColor(a["color"])
-            fill.setAlphaF(float(a["opacity"]))
-            box = QGraphicsRectItem(QRectF(a["x0"], -1e9, a["x1"] - a["x0"], 2e9))
-            box.setBrush(fill)
-            box.setPen(QPen(Qt.PenStyle.NoPen))
-            box.setZValue(-9)                           # detrás de las velas
-            pi.addItem(box, ignoreBounds=True)          # no cambia la escala del precio
-            self._enigma_items.append(box)
+        self.enigma.set_data(areas)
 
     @property
     def enigma_item_count(self) -> int:
-        return len(self._enigma_items)
+        return len(self.enigma._areas)
 
     # -- CRT del backtest (botón CRT del perfil CRT) --------------------------------------------------------
     def set_crts(self, crts: list[dict]) -> None:
