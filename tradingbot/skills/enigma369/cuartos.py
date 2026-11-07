@@ -1,7 +1,7 @@
 """Enigma369: traducción de los cuartos (Quarterly Theory Cycles) a un número del 1 al 9 por zona.
 
-Capas, en hora de Nueva York. El día de trading empieza a las 18:00 NY, con la sesión Asia (como el indicador;
-ENIGMA369_ANCHOR_HOUR lo cambia, p. ej. 17 para el cierre de los futuros CME):
+Capas, en hora de Nueva York. El día de trading empieza a las 17:00 NY (cierre de los futuros de índices;
+ENIGMA369_ANCHOR_HOUR lo cambia, p. ej. 18 para un broker con el día a las 18:00):
   semana : cuarto del mes (1.ª a 4.ª semana, según el lunes de esa semana). La 5.ª semana es Q0 y no cuenta
   dia    : lunes = 1 ... jueves = 4. Viernes (y fin de semana) = Q0, no cuenta
   sesion : sesión de 6 h (Asia 1, London 2, NY AM 3, NY PM 4)
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-DEFAULT_ANCHOR_HOUR = 18
+DEFAULT_ANCHOR_HOUR = 17
 MODES = {"semana": ("semana", "dia", "sesion", "cuarto"), "dia": ("dia", "sesion", "cuarto", "micro")}
 MODE_TIMEFRAMES = {"semana": "5m", "dia": "1m"}
 LAYER_NAMES = {"semana": "Semana", "dia": "Día", "sesion": "Sesión", "cuarto": "Cuarto", "micro": "Micro"}

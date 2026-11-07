@@ -18,7 +18,7 @@ def srv(y, m, d, h, mi):
     return int(datetime(y, m, d, h, mi, tzinfo=timezone.utc).timestamp()) + AHEAD
 
 
-def zones(ts, anchor=18, mode="semana"):
+def zones(ts, anchor=17, mode="semana"):
     return c.last_zones([ts], AHEAD, mode, anchor)
 
 
@@ -27,15 +27,15 @@ def test_digit_sum_reduces_to_one_digit():
 
 
 def test_every_zone_has_a_number_between_1_and_9():
-    ts = np.arange(srv(2026, 11, 9, 0, 0), srv(2026, 11, 12, 18, 0), 300)     # de lunes a jueves a las 18:00 (luego es viernes, Q0)
+    ts = np.arange(srv(2026, 11, 9, 0, 0), srv(2026, 11, 12, 17, 0), 300)     # de lunes a jueves a las 17:00 (luego es viernes, Q0)
     for mode in c.MODES:
         res = c.compute(ts, AHEAD, mode)
         for row in res["rows"]:
             assert row and all(1 <= s["number"] <= 9 for s in row)
 
 
-def test_tuesday_0220_is_222_66():
-    z = zones(srv(2026, 11, 10, 2, 20))
+def test_tuesday_0220_anchor_18_is_222_66():
+    z = zones(srv(2026, 11, 10, 2, 20), anchor=18)
     assert [x["code"] for x in z] == ["2", "22", "222", "222"]
     assert [x["number"] for x in z] == [2, 4, 6, 6]
     (run,) = c.alignments(z)
@@ -49,13 +49,13 @@ def test_anchor_17_moves_the_sessions_one_hour():
 
 
 def test_friday_weekend_and_fifth_week_are_yellow_q0_without_numbers():
-    for ts in (srv(2026, 11, 13, 2, 20), srv(2026, 11, 12, 18, 30), srv(2026, 11, 14, 10, 0), srv(2026, 11, 15, 10, 0)):   # vie, jueves 18:30 (ya es viernes), sáb, dom
+    for ts in (srv(2026, 11, 13, 2, 20), srv(2026, 11, 12, 17, 30), srv(2026, 11, 14, 10, 0), srv(2026, 11, 15, 10, 0)):   # vie, vie 17:30 (ancla 17), sáb, dom
         z = zones(ts)
         assert [x["number"] for x in z] == [0, 0, 0, 0] and z[1]["digit"] == 0 and c.alignments(z) == []
         assert all(x["digit"] > 0 for x in z[2:])                              # sesión y cuarto conservan su color 1-4
     assert [zones(srv(2026, 11, d, 2, 20))[1]["text"] for d in (13, 14, 15)] == ["Friday", "Saturday", "Sunday"]
     assert zones(srv(2026, 11, 13, 2, 20))[2]["text"] == "London"
-    assert zones(srv(2026, 11, 8, 18, 30))[1]["digit"] == 1                    # domingo 18:30 ya es lunes
+    assert zones(srv(2026, 11, 8, 17, 30))[1]["digit"] == 1                    # domingo 17:30 ya es lunes
     fifth = zones(srv(2026, 11, 30, 10, 0))                                    # lunes 30: 5.ª semana
     assert fifth[0]["digit"] == 0 and all(x["number"] == 0 for x in fifth)
     assert c.DEFAULT_COLORS[0] == "#FFD60A"
