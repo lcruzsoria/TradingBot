@@ -100,8 +100,9 @@ def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
         window = "".join(str(digits[c]) for c in layers[max(0, i - 2): i + 1])
         total = sum(int(ch) for ch in window)
         number = 0 if out_of_count else reduce_digit(total)
-        zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number,
-                          text=zone_text(layer, digits, number, window)))
+        text = zone_text(layer, digits, number, window)
+        zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number, text=text,
+                          ref=zone_ref(layer, digits[layer]) if number else text))
     return zones
 
 
@@ -155,7 +156,7 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
             if cur is not None and cur["sig"] == sig:
                 cur["x1"] = x + 0.5
             else:
-                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"], text=z["text"],
+                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"], text=z["text"], ref=z["ref"],
                            color=colors.get(z["digit"], "#555555"), sig=sig)
                 rows[i].append(cur)
                 open_rows[i] = cur

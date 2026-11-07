@@ -12,7 +12,6 @@ from . import theme
 from .bias_hist import PRICE_AXIS_WIDTH
 
 ROW_HEIGHT = 24
-MIN_LABEL_BARS = 3      # una franja más estrecha que esto no lleva texto
 
 
 class StripeRows(pg.PlotWidget):
@@ -64,13 +63,15 @@ class StripeRows(pg.PlotWidget):
                 box.setPen(edge)
                 pi.addItem(box, ignoreBounds=True)
                 self._items.append(box)
-                if s["x1"] - s["x0"] >= MIN_LABEL_BARS:
+                labels = []
+                for shown in dict.fromkeys((s["text"], s.get("ref", s["text"]))):       # texto completo y, si no cabe, solo la referencia (Q1, W2...)
                     text = pg.TextItem(anchor=(0.5, 0.5))
-                    text.setHtml(f'<span style="font-size:8pt; color:#2B2B2B; font-weight:600">{html.escape(s["text"])}</span>')
+                    text.setHtml(f'<span style="font-size:8pt; color:#2B2B2B; font-weight:600">{html.escape(shown)}</span>')
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
                     pi.addItem(text, ignoreBounds=True)
                     self._items.append(text)
-                    self._labels.append((text, s["x0"], s["x1"], y + 0.5))
+                    labels.append(text)
+                self._labels.append((labels, s["x0"], s["x1"], y + 0.5))
         tick_rows = [(i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
         pi.getAxis("right").setTicks([tick_rows])
         pi.getViewBox().setYRange(0, count, padding=0)
@@ -81,10 +82,13 @@ class StripeRows(pg.PlotWidget):
         vb = self.getPlotItem().getViewBox()
         x0, x1 = vb.viewRange()[0]
         per_bar = vb.width() / max(x1 - x0, 1e-9)
-        for text, left, right, y in self._labels:
+        for texts, left, right, y in self._labels:
             left, right = max(left, x0), min(right, x1)             # solo la parte visible de la franja
-            text.setVisible(right > left and (right - left) * per_bar >= text.boundingRect().width() + 8)
-            text.setPos((left + right) / 2, y)
+            room = (right - left) * per_bar - 8
+            shown = next((t for t in texts if t.boundingRect().width() <= room), None)
+            for t in texts:
+                t.setVisible(t is shown)
+                t.setPos((left + right) / 2, y)
 
     @property
     def segment_count(self) -> int:
