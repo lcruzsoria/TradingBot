@@ -53,7 +53,7 @@ class StripeRows(pg.PlotWidget):
             y = i                                    # la capa mayor abajo y la menor arriba
             for s in segs:
                 color = QColor(s["color"])
-                color.setAlphaF(0.85 if s["digit"] else 0.15)
+                color.setAlphaF(0.85)
                 box = QGraphicsRectItem(s["x0"], y + 0.06, s["x1"] - s["x0"], 0.88)
                 box.setBrush(color)
                 edge = QPen(QColor(theme.CHART_BG), 1)
@@ -61,9 +61,9 @@ class StripeRows(pg.PlotWidget):
                 box.setPen(edge)
                 pi.addItem(box, ignoreBounds=True)
                 self._items.append(box)
-                if s["digit"] and s["x1"] - s["x0"] >= MIN_LABEL_BARS:
+                if s["x1"] - s["x0"] >= MIN_LABEL_BARS:
                     text = pg.TextItem(anchor=(0.5, 0.5))
-                    text.setHtml(f'<span style="font-size:8pt; color:#111; font-weight:600">{html.escape(s["code"])} · {s["number"]}</span>')
+                    text.setHtml(f'<span style="font-size:8pt; color:#111; font-weight:600">{html.escape(s["text"])}</span>')
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
                     pi.addItem(text, ignoreBounds=True)
                     self._items.append(text)
@@ -126,6 +126,6 @@ class EnigmaStripes(QWidget):
             self.info.setText(p.get("reason", ""))
             return
         self.rows.set_rows(p["layers"], p["rows"], names)
-        now = " · ".join(f'{names.get(z["layer"], z["layer"])} {z["code"] or "Q0"}' + (f' ({z["number"]})' if z["number"] else "") for z in p["now"])
+        now = " · ".join(f'{names.get(z["layer"], z["layer"])} {z["text"].replace(" · ", " (") + ")" if z["number"] else z["text"]}' for z in p["now"])
         runs = p["alignments_now"]
         self.info.setText(("Alineado: " + ", ".join(r["label"] for r in runs) + "   |   " if runs else "") + "Última vela: " + now)

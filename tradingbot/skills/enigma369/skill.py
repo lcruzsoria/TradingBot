@@ -92,6 +92,6 @@ class Enigma369Skill(Skill):
         result = cuartos.compute(ts, ahead, self.mode, self.anchor, self.colors)
         now = cuartos.last_zones(ts, ahead, self.mode, self.anchor)
         runs = cuartos.alignments(now)
-        head = " ".join(z["code"] or "Q0" for z in now)
+        head = " ".join(z["text"] for z in now)
         self.set_caption(f"{runs[-1]['label']}" if runs else head)
         self.publish("enigma369.updated", {**base, "available": True, "estimated": estimated, "now": now, "alignments_now": runs, **result})

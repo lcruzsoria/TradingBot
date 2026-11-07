@@ -15,9 +15,11 @@ Dos modos, cada uno con 4 capas visibles (y su timeframe de velas):
 Regla:
   1. Cada capa aporta un dígito 1-4 (su cuarto). El color es ese dígito: 1 gris, 2 naranja, 3 verde, 4 azul.
   2. El código de una zona son los dígitos de su capa y de las dos capas de arriba (menos si no las hay).
-  3. Número de la zona = suma de los dígitos del código reducida a una cifra (444 = 12 → 3). Toda zona lleva número.
+  3. Número de la zona = suma de los dígitos del código reducida a una cifra (444 = 12 → 3). Toda zona de lunes a jueves lleva número.
   4. Son críticos los números 3, 6 y 9.
-  5. Alineación = 2 o más zonas seguidas con el mismo dígito (mismo color) y número crítico cada una.
+  5. Q0 (viernes, sábado, domingo y 5.ª semana): se ven en amarillo, como en el indicador, pero no cuentan: sin número
+     ni alineaciones. Sus sesiones y cuartos conservan su color 1-4, sin número.
+  6. Alineación = 2 o más zonas seguidas con el mismo dígito (mismo color) y número crítico cada una.
      Opacidad del área: 2 zonas 0,14 / 3 zonas 0,28 / 4 zonas 0,42.
 """
 from __future__ import annotations
@@ -32,7 +34,9 @@ SESSION_NAMES = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
 DAY_NAMES = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves"}
 CRITICAL = (3, 6, 9)
 OPACITY = {2: 0.14, 3: 0.28, 4: 0.42}
-DEFAULT_COLORS = {1: "#9E9E9E", 2: "#FF9500", 3: "#00C853", 4: "#2979FF"}
+DEFAULT_COLORS = {0: "#FFD60A", 1: "#9E9E9E", 2: "#FF9500", 3: "#00C853", 4: "#2979FF"}   # 0 = Q0 (amarillo)
+WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+SESSION_LABELS = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
 MAX_BARS = 3000          # solo se calculan las zonas de las últimas velas
 
 
@@ -60,22 +64,37 @@ def layer_digits(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> dict
         "sesion": (minutes // 360 + 1).astype(np.int8),
         "cuarto": (minutes % 360 // 90 + 1).astype(np.int8),
         "micro": (minutes % 90 // 22.5 + 1).astype(np.int8),
+        "weekday": weekday.astype(np.int8),
     }
 
 
-def zone_of(digits: dict[str, int], layers: tuple[str, ...], i: int) -> dict:
-    """Zona de la capa `i`: sus dígitos y los de las dos capas de arriba, la suma y el número (0 si es Q0)."""
-    window = [digits[c] for c in layers[max(0, i - 2): i + 1]]
-    if digits["semana"] == 0 and "semana" in layers or digits["dia"] == 0 and "dia" in layers or 0 in window:
-        return dict(layer=layers[i], digit=0, code="", total=0, number=0)
-    total = sum(window)
-    return dict(layer=layers[i], digit=digits[layers[i]], code="".join(map(str, window)), total=total, number=reduce_digit(total))
+def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str:
+    """Texto de la franja: «código · número»; en Q0, el nombre que da el indicador (Friday, Asia, Q2...)."""
+    if number:
+        return f"{code} · {number}"
+    if layer == "dia":
+        return WEEKDAY_NAMES[digits["weekday"]]
+    if layer == "sesion":
+        return SESSION_LABELS[digits[layer]]
+    if layer == "semana":
+        return f"Week {digits[layer]}" if digits[layer] else "Q0"
+    return f"Q{digits[layer]}"
 
 
 def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
-    if digits["semana"] == 0 or digits["dia"] == 0:                     # Q0: todo el día queda fuera aunque la semana no esté en pantalla
-        return [dict(layer=c, digit=0, code="", total=0, number=0) for c in layers]
-    return [zone_of(digits, layers, i) for i in range(len(layers))]
+    """Una zona por capa: dígito, código (los dígitos de su capa y las dos de arriba), suma, número y texto.
+
+    En Q0 (viernes, sábado, domingo o 5.ª semana) las zonas se ven pero no cuentan: número 0.
+    """
+    out_of_count = digits["semana"] == 0 or digits["dia"] == 0
+    zones = []
+    for i, layer in enumerate(layers):
+        window = "".join(str(digits[c]) for c in layers[max(0, i - 2): i + 1])
+        total = sum(int(ch) for ch in window)
+        number = 0 if out_of_count else reduce_digit(total)
+        zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number,
+                          text=zone_text(layer, digits, number, window)))
+    return zones
 
 
 def alignments(zones: list[dict]) -> list[dict]:
@@ -107,8 +126,8 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     n = len(ts)
     first = max(0, n - MAX_BARS)
     dig = layer_digits(ts[first:], ahead, anchor_hour)
-    stack = np.stack([dig[c] for c in ("semana", "dia", "sesion", "cuarto", "micro")], axis=1)
-    names = ("semana", "dia", "sesion", "cuarto", "micro")
+    names = ("semana", "dia", "sesion", "cuarto", "micro", "weekday")
+    stack = np.stack([dig[c] for c in names], axis=1)
     cache: dict[tuple, tuple] = {}
     rows: list[list[dict]] = [[] for _ in layers]
     areas: list[dict] = []
@@ -124,11 +143,11 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
         x = first + k
         for i, z in enumerate(zones):
             cur = open_rows[i]
-            sig = (z["code"], z["digit"])
+            sig = (z["code"], z["digit"], z["number"], z["text"])
             if cur is not None and cur["sig"] == sig:
                 cur["x1"] = x + 0.5
             else:
-                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"],
+                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"], text=z["text"],
                            color=colors.get(z["digit"], "#555555"), sig=sig)
                 rows[i].append(cur)
                 open_rows[i] = cur

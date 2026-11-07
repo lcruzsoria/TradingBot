@@ -48,11 +48,17 @@ def test_anchor_17_moves_the_sessions_one_hour():
     assert c.alignments(z) == []
 
 
-def test_friday_and_fifth_week_are_q0():
-    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 13, 2, 20)))     # viernes
-    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 12, 17, 30)))    # jueves 17:30 con ancla 17 ya es viernes
-    assert zones(srv(2026, 11, 8, 17, 30))[1]["digit"] == 1                   # domingo 17:30 ya es lunes
-    assert all(x["number"] == 0 for x in zones(srv(2026, 11, 30, 10, 0)))     # lunes 30: 5.ª semana
+def test_friday_weekend_and_fifth_week_are_yellow_q0_without_numbers():
+    for ts in (srv(2026, 11, 13, 2, 20), srv(2026, 11, 12, 17, 30), srv(2026, 11, 14, 10, 0), srv(2026, 11, 15, 10, 0)):   # vie, vie 17:30 (ancla 17), sáb, dom
+        z = zones(ts)
+        assert [x["number"] for x in z] == [0, 0, 0, 0] and z[1]["digit"] == 0 and c.alignments(z) == []
+        assert all(x["digit"] > 0 for x in z[2:])                              # sesión y cuarto conservan su color 1-4
+    assert [zones(srv(2026, 11, d, 2, 20))[1]["text"] for d in (13, 14, 15)] == ["Friday", "Saturday", "Sunday"]
+    assert zones(srv(2026, 11, 13, 2, 20))[2]["text"] == "London"
+    assert zones(srv(2026, 11, 8, 17, 30))[1]["digit"] == 1                    # domingo 17:30 ya es lunes
+    fifth = zones(srv(2026, 11, 30, 10, 0))                                    # lunes 30: 5.ª semana
+    assert fifth[0]["digit"] == 0 and all(x["number"] == 0 for x in fifth)
+    assert c.DEFAULT_COLORS[0] == "#FFD60A"
 
 
 def test_alignment_needs_same_digit_and_critical_numbers():
