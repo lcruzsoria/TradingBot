@@ -40,7 +40,21 @@ class StripeRows(pg.PlotWidget):
         ax.setTextPen(pg.mkPen(theme.CHART_TEXT))
 
     def link_to(self, chart) -> None:
-        self.getPlotItem().setXLink(chart.getPlotItem())
+        """El rango de velas visible es el del gráfico de precio. Se copia a mano (sin XLink) en cada cambio de rango y de tamaño:
+        el XLink de pyqtgraph deja el rango desplazado unas velas si el ancho de las franjas cambia después de enlazarlas."""
+        self._chart_vb = chart.getPlotItem().getViewBox()
+        self._chart_vb.sigRangeChanged.connect(lambda *_: self.sync_x())
+        self._chart_vb.sigResized.connect(lambda *_: self.sync_x())
+        self.sync_x()
+
+    def sync_x(self) -> None:
+        vb = getattr(self, "_chart_vb", None)
+        if vb is not None:
+            self.getPlotItem().getViewBox().setXRange(*vb.viewRange()[0], padding=0)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.sync_x()
 
     def set_rows(self, layers: tuple, rows: list[list[dict]], names: dict[str, str], opacity: float = 1.0) -> None:
         pi = self.getPlotItem()
@@ -75,6 +89,7 @@ class StripeRows(pg.PlotWidget):
         tick_rows = [(i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
         pi.getAxis("right").setTicks([tick_rows])
         pi.getViewBox().setYRange(0, count, padding=0)
+        self.sync_x()
         self._fit_labels()
 
     def _fit_labels(self) -> None:
