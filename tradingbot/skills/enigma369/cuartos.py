@@ -144,7 +144,7 @@ def same_color_runs(zones: list[dict], min_n: int = 3) -> list[dict]:
         while j + 1 < len(zones) and zones[j + 1]["digit"] == zones[i]["digit"]:
             j += 1
         if j - i + 1 >= min_n:
-            runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"], label="".join(str(z["digit"]) for z in zones[i:j + 1])))
+            runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"], label="".join(str(z["digit"]) for z in zones[i:j + 1]), number=zones[j]["number"]))
         i = j + 1
     return runs
 
@@ -208,7 +208,7 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
             if tk in open_triples:
                 open_triples[tk]["x1"] = x + 0.5
             else:
-                open_triples[tk] = dict(x0=x - 0.5, x1=x + 0.5, n=r["n"], digit=r["digit"], color=colors[r["digit"]], label=r["label"],
+                open_triples[tk] = dict(x0=x - 0.5, x1=x + 0.5, n=r["n"], digit=r["digit"], color=colors[r["digit"]], label=r["label"], number=r["number"],
                                         first=layers[r["first"]], last=layers[r["last"]])
                 triples.append(open_triples[tk])
     for segs in rows:

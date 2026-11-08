@@ -249,9 +249,9 @@ class EnigmaAreas(pg.GraphicsObject):
         p.resetTransform()                                                # combinaciones de 3 zonas del mismo color: franja arriba, en píxeles
         font = p.font()
         font.setPointSize(8)
-        font.setWeight(QFont.Weight.DemiBold)
-        p.setFont(font)
-        metrics = p.fontMetrics()
+        font.setWeight(QFont.Weight.Normal)
+        bold = QFont(font)
+        bold.setWeight(QFont.Weight.Bold)
         top = transform.map(QPointF(0, y1)).y()
         for t in visible:
             left, right = transform.map(QPointF(max(t["x0"], vx0), 0)).x(), transform.map(QPointF(min(t["x1"], vx1), 0)).x()
@@ -264,8 +264,12 @@ class EnigmaAreas(pg.GraphicsObject):
             p.setPen(edge)
             p.drawLine(QPointF(left, top + 16), QPointF(right, top + 16))
             p.setPen(QColor("#2B2B2B"))
-            label = t["label"]
-            if metrics.horizontalAdvance(label) <= right - left - 6:
+            four = t["n"] >= 4 and t.get("number")                         # 4 colores iguales: el código con su número, en negrita
+            p.setFont(bold if four else font)
+            label = f'{t["label"]} · {t["number"]}' if four else t["label"]
+            if four and p.fontMetrics().horizontalAdvance(label) > right - left - 6:
+                label = str(t["number"])
+            if p.fontMetrics().horizontalAdvance(label) <= right - left - 6:
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
 

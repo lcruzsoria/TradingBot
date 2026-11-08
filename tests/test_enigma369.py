@@ -84,7 +84,7 @@ def test_combinaciones_de_tres_zonas_del_mismo_color():
     ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)      # martes de la 2.ª semana: London (2), cuarto 2 de 01:30 a 03:00 → 2222
     res = c.compute(ts, AHEAD, anchor_hour=18)
     (tri,) = [t for t in res["triples"] if t["label"] == "2222"]
-    assert (tri["n"], tri["color"], tri["first"], tri["last"]) == (4, "#E398A1", "semana", "cuarto")
+    assert (tri["n"], tri["color"], tri["first"], tri["last"], tri["number"]) == (4, "#E398A1", "semana", "cuarto", 8)
     assert tri["x1"] - tri["x0"] == 18
     assert c.same_color_runs(zones(srv(2026, 11, 9, 9, 0))) == []              # 2133: solo dos zonas seguidas del mismo color
     assert c.same_color_runs(zones(srv(2026, 11, 13, 2, 20))) == []            # viernes en modo semana: solo sesión y cuarto tienen color (2 zonas)
