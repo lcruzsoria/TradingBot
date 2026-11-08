@@ -680,7 +680,7 @@ class MainWindow(QMainWindow):
     def _on_enigma(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return                                      # llega tarde: ya se está viendo otro gráfico
-        self.chart.set_enigma(p.get("areas", []) if p.get("available") else [])
+        self.chart.set_enigma(p.get("areas", []) if p.get("available") else [], p.get("quarter_lines") if p.get("available") else None)
         self.enigma.set_data(p, self.ENIGMA_NAMES)
 
     def current_tf(self) -> str:

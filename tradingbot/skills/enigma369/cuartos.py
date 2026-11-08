@@ -181,7 +181,25 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     for segs in rows:
         for s in segs:
             s.pop("sig", None)
-    return {"layers": layers, "rows": rows, "areas": areas}
+    return {"layers": layers, "rows": rows, "areas": areas, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors)}
+
+
+def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None) -> list[dict]:
+    """Inicio y fin del cuarto (90 min) en curso, para dibujarlos como líneas punteadas verticales sobre el precio.
+
+    [{x, kind: "start" | "end", color}] en índices de vela; el fin cae después de la última vela (proyectado)."""
+    ts = np.asarray(ts, dtype=np.int64)
+    if len(ts) < 2:
+        return []
+    colors = {**DEFAULT_COLORS, **(colors or {})}
+    last = int(ts[-1])
+    since = (last - int(ahead) - anchor_hour * 3600) % 86400
+    start = last - (since % 5400)
+    step = max(1, int(np.median(np.diff(ts[-200:]))))
+    digit = int(layer_digits(np.array([last]), ahead, anchor_hour)["cuarto"][0])
+    x_start = int(np.searchsorted(ts, start)) - 0.5
+    x_end = len(ts) - 1.5 + (start + 5400 - last) / step
+    return [dict(x=x_start, kind="start", color=colors.get(digit, "#555555")), dict(x=x_end, kind="end", color=colors.get(digit, "#555555"))]
 
 
 def last_zones(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> list[dict]:

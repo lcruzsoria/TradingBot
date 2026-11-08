@@ -167,3 +167,12 @@ def test_selector_de_timeframes_90m_y_6h_solo_en_enigma369():
     assert {int(t % 5400) for t in out90["ts"]} == {3600}                                  # siempre 01:00 + k·90 min
     out6 = aggregate_candles(m15, 21600, day_offset=3600)
     assert {int(t % 86400) // 3600 for t in out6["ts"]} == {1, 7, 13, 19}
+
+
+def test_lineas_punteadas_del_cuarto_en_curso():
+    ts = np.arange(25 * 3600 + 86400 * 2, 25 * 3600 + 86400 * 2 + 6 * 3600 + 20 * 60, 300)     # M5; última vela a las 06:15 NY +...
+    lines = c.compute(ts, 25200, "semana", 18)["quarter_lines"]
+    assert [ln["kind"] for ln in lines] == ["start", "end"]
+    n = len(ts)
+    assert lines[0]["x"] < n - 1 < lines[1]["x"]
+    assert abs((lines[1]["x"] - lines[0]["x"]) - 90 / 5) < 1e-6                             # 90 min = 18 velas de M5

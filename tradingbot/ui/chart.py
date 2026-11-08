@@ -209,9 +209,11 @@ class EnigmaAreas(pg.GraphicsObject):
     def __init__(self) -> None:
         super().__init__()
         self._areas: list[dict] = []
+        self._lines: list[dict] = []
 
-    def set_data(self, areas: list[dict]) -> None:
+    def set_data(self, areas: list[dict], lines: list[dict] | None = None) -> None:
         self._areas = list(areas)
+        self._lines = list(lines or [])
         self.prepareGeometryChange()
         self.update()
 
@@ -221,7 +223,7 @@ class EnigmaAreas(pg.GraphicsObject):
 
     def paint(self, p, *args) -> None:
         vb = self.getViewBox()
-        if vb is None or not self._areas:
+        if vb is None or not (self._areas or self._lines):
             return
         (vx0, vx1), (y0, y1) = vb.viewRange()
         p.setPen(Qt.PenStyle.NoPen)
@@ -232,6 +234,12 @@ class EnigmaAreas(pg.GraphicsObject):
             fill.setAlphaF(float(a["opacity"]))
             p.setBrush(fill)
             p.drawRect(QRectF(a["x0"], y0, a["x1"] - a["x0"], y1 - y0))
+        for ln in self._lines:                                            # inicio y fin del cuarto en curso: punteadas
+            if vx0 <= ln["x"] <= vx1:
+                pen = pg.mkPen(QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
+                pen.setCosmetic(True)
+                p.setPen(pen)
+                p.drawLine(QPointF(ln["x"], y0), QPointF(ln["x"], y1))
 
 
 class ScaleAxis(pg.AxisItem):
@@ -1103,12 +1111,12 @@ class ChartView(pg.PlotWidget):
             self._bias_items += [box, label]
 
     # -- Enigma369: áreas de alineación de cuartos (3, 6, 9) ----------------------------------------------------
-    def set_enigma(self, areas: list[dict]) -> None:
+    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None) -> None:
         """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
 
-        area = {x0, x1, color, opacity}. Con [] se quitan todas.
+        area = {x0, x1, color, opacity}. Con [] se quitan todas. `lines`: inicio y fin del cuarto en curso, punteadas.
         """
-        self.enigma.set_data(areas)
+        self.enigma.set_data(areas, lines)
 
     @property
     def enigma_item_count(self) -> int:
