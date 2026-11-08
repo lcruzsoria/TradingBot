@@ -26,7 +26,7 @@ WEEKDAYS = ("LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DO
 DEFAULT_DAYS = 10
 DEFAULT_MAX_TF_MINUTES = 720          # hasta H12: con velas diarias "el día" es una sola vela
 DEFAULT_COLORS = {"TDO": "#787B86", "MIDNIGHT": "#FF9800", "PDHL": "#2962FF", "SEPARATOR": "#787B86", "SMA": "#00ACC1",
-                  "VWAP": "#E040FB"}
+                  "VWAP": "#E040FB", "NDOG": "#00BFA5", "NWOG": "#F06292"}
 DEFAULT_SMA_PERIOD = 30                # velas del timeframe que se está viendo
 SMA_STYLES = ("normal", "discontinuo", "punteado")
 SMA_SHOWS = ("sma", "vwap", "ambos")   # qué dibuja el botón SMA: la media, el VWAP o los dos

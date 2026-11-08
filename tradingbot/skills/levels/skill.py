@@ -9,11 +9,13 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import display_label, minutes
 import numpy as np
 
+from .._comun.gaps import gap_lines
 from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT_INDEX_DAY_START,
                         DEFAULT_MARKET_CLOSE, DEFAULT_MAX_TF_MINUTES, DEFAULT_SMA_PERIOD, DEFAULT_SMA_SHOW, DEFAULT_US_INDICES,
-                        SMA_SHOWS, SMA_STYLES, compute, days, is_us_index, market_close, new_trading_day, parse_time, vwap)
+                        SMA_SHOWS, SMA_STYLES, Line, compute, days, is_us_index, market_close, new_trading_day, parse_time, vwap)
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+GAP_STRATEGIES = ("barrido_nyam", "enigma369")     # perfiles de estrategia que dibujan y usan los huecos NDOG / NWOG
 
 
 @register_skill("levels")
@@ -70,6 +72,11 @@ class LevelsSkill(Skill):
         if self.vwap_style not in SMA_STYLES:
             raise ValueError(f"LEVELS_VWAP_STYLE={self.vwap_style!r}: usa {', '.join(SMA_STYLES)}.")
 
+    @property
+    def strategy(self) -> str:
+        cfg = self.services.app_cfg
+        return (cfg["app"].get("strategy") or "") if cfg else ""
+
     def start_for(self, symbol: str) -> int:
         """Minutos (hora de NY) a los que empieza el día de trading de este activo."""
         return self.index_day_start if is_us_index(symbol, self.us_indices) else self.day_start
@@ -122,6 +129,8 @@ class LevelsSkill(Skill):
             lines = compute(ts, df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), ahead, start,
                             self.days)
             day_list = days(ts, ahead, start) if self.separators else []
+            if self.strategy in GAP_STRATEGIES:                  # NDOG / NWOG (con su 50 %): solo en los perfiles que los usan
+                lines += gap_lines(ts, df["open"].to_numpy(), df["close"].to_numpy(), ahead, Line)
         sma = df["close"].rolling(self.sma_period).mean().to_numpy()
         if available:                                        # el VWAP se reinicia cada día: con velas diarias no tiene sentido
             volume = df["tick_volume"].to_numpy() if "tick_volume" in df else np.zeros(len(df))

@@ -18,6 +18,7 @@ from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
+from ..skills.levels.skill import GAP_STRATEGIES
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes, selector_timeframes
 from . import theme
@@ -310,7 +311,11 @@ class MainWindow(QMainWindow):
         for group, text, tip, key in (
                 ("tdo", "TDO", "Apertura del mercado: precio de apertura de la primera vela del día", "SHOW_TDO"),
                 ("midnight", "Midnight", "Precio de apertura a las 00:00 de Nueva York", "SHOW_MIDNIGHT"),
-                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL")):
+                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL"),
+                ("ndog", "NDOG", "Hueco de apertura diario (cierre de las 17:00 frente a la reapertura) con su 50 %", "SHOW_NDOG"),
+                ("nwog", "NWOG", "Hueco de apertura semanal (cierre del viernes frente a la apertura del domingo) con su 50 %", "SHOW_NWOG")):
+            if group in ("ndog", "nwog") and app_cfg["app"].get("strategy") not in GAP_STRATEGIES:
+                continue                                    # los huecos solo se ven en los perfiles que los usan
             btn = QPushButton(text)
             btn.setProperty("chip", "true")
             btn.setCheckable(True)
@@ -422,6 +427,13 @@ class MainWindow(QMainWindow):
             grid.addWidget(sma_cell, 0, 3)                   # y la SMA pasa al hueco de Fibo, que este perfil no usa
         else:
             grid.addWidget(sma_cell, 0, 0)               # a la izquierda de TDO (así el panel no crece en altura)
+        gap_btns = [self.level_btns[g] for g in ("ndog", "nwog") if g in self.level_btns]
+        if gap_btns:                                         # NDOG y NWOG (solo en los perfiles con huecos): en columna, a la izquierda de SMA y Sesgo
+            gaps_col = QVBoxLayout()
+            gaps_col.setSpacing(6)
+            for btn in gap_btns:
+                gaps_col.addWidget(btn)
+            top.addLayout(gaps_col)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
