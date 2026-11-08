@@ -81,11 +81,11 @@ def test_areas_follow_the_aligned_span_and_use_the_zone_color():
 
 
 def test_combinaciones_de_tres_zonas_del_mismo_color():
-    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)      # martes de la 2.ª semana: London (2), cuarto 2 de 01:30 a 03:00 → 2222
+    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 2, 20), 300)      # martes de la 2.ª semana: London (2), cuarto 2 de 01:30 a 03:00 → 2222
     res = c.compute(ts, AHEAD, anchor_hour=18)
     (tri,) = [t for t in res["triples"] if t["label"] == "2222"]
     assert (tri["n"], tri["color"], tri["first"], tri["last"], tri["number"]) == (4, "#E398A1", "semana", "cuarto", 8)
-    assert tri["x1"] - tri["x0"] == 18
+    assert tri["x1"] - tri["x0"] == 10                                         # activa: lleva 50 min (01:30-02:20)
     assert c.same_color_runs(zones(srv(2026, 11, 9, 9, 0))) == []              # 2133: solo dos zonas seguidas del mismo color
     assert c.same_color_runs(zones(srv(2026, 11, 13, 2, 20))) == []            # viernes en modo semana: solo sesión y cuarto tienen color (2 zonas)
     fri = c.compute(np.arange(srv(2026, 11, 13, 0, 0), srv(2026, 11, 13, 12, 0), 60), AHEAD, "dia")["triples"]   # viernes en modo día: dia amarillo, sesión-cuarto-micro del mismo color
@@ -93,6 +93,8 @@ def test_combinaciones_de_tres_zonas_del_mismo_color():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     from tradingbot.ui.chart import ChartView
+    xs = [ln for ln in res["quarter_lines"] if ln["color"] == "#E398A1"]
+    assert sorted(ln["x"] for ln in xs) == [tri["x0"], tri["x0"] + 18]          # 02:20: la combinación 2222 está activa (01:30-03:00): líneas de inicio y fin (las del cuarto coinciden)
     chart = ChartView()
     chart.set_enigma(res["areas"], res["quarter_lines"], res["triples"])
     assert len(chart.enigma._triples) == len(res["triples"]) >= 1

@@ -22,7 +22,7 @@ class Enigma369Skill(Skill):
                    "solo identificación visual, no opera.")
     subscribes = ("candles.loaded", "clock.offset", "enigma369.mode")
     publishes = ("enigma369.updated",)
-    slot = "aux2"
+    slot = 2
 
     def on_start(self) -> None:
         self.error = "Configuración Enigma369 no válida"

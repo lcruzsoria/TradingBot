@@ -214,7 +214,9 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     for segs in rows:
         for s in segs:
             s.pop("sig", None)
-    return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])}
+    lines = quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])
+    lines += [ln for ln in triple_lines(ts, ahead, anchor_hour, list(open_triples.values()), layers) if all(abs(ln["x"] - o["x"]) > 1e-6 for o in lines)]
+    return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": lines}
 
 
 def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None, layer: str = "cuarto") -> list[dict]:
@@ -234,6 +236,29 @@ def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors
     x_start = int(np.searchsorted(ts, start)) - 0.5
     x_end = len(ts) - 1.5 + (start + period - last) / step
     return [dict(x=x_start, kind="start", color=colors.get(digit, "#555555")), dict(x=x_end, kind="end", color=colors.get(digit, "#555555"))]
+
+
+LAYER_SECONDS = {"micro": 1350, "cuarto": 5400, "sesion": 21600, "dia": 86400}
+
+
+def triple_lines(ts, ahead: int, anchor_hour: int, active: list[dict], layers: tuple[str, ...]) -> list[dict]:
+    """Líneas verticales de inicio y fin de cada combinación de color activa (la de la última vela), del color de sus zonas.
+
+    La combinación acaba cuando cambia su capa más fina; el fin se proyecta después de la última vela."""
+    ts = np.asarray(ts, dtype=np.int64)
+    if len(ts) < 2:
+        return []
+    last = int(ts[-1])
+    step = max(1, int(np.median(np.diff(ts[-200:]))))
+    since = (last - int(ahead) - anchor_hour * 3600) % 86400
+    out = []
+    for t in active:
+        period = LAYER_SECONDS.get(t["last"])
+        if period is None:
+            continue
+        start = last - (since % period)
+        out += [dict(x=t["x0"], kind="start", color=t["color"]), dict(x=len(ts) - 1.5 + (start + period - last) / step, kind="end", color=t["color"])]
+    return out
 
 
 def last_zones(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANCHOR_HOUR) -> list[dict]:

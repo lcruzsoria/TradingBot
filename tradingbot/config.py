@@ -83,7 +83,7 @@ STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario
                        "enigma369": ("pattern", "tbr", "calendario")}   # skills que un perfil de estrategia no usa (solo opera la suya; CRT tiene su propio sesgo)
 
 STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},),
-                      "enigma369": ({"type": "enigma369", "slot": "aux2"},)}   # skills que solo existen en ese perfil de estrategia
+                      "enigma369": ({"type": "enigma369", "slot": 2},)}   # skills que solo existen en ese perfil de estrategia
 
 STRATEGY_TIMEFRAMES = {"crt": "5m", "enigma369": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
