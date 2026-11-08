@@ -21,6 +21,8 @@ Regla:
      ni alineaciones. Sus sesiones y cuartos conservan su color 1-4, sin número.
   6. Alineación = 2 o más zonas seguidas con el mismo dígito (mismo color) y número crítico cada una.
      Opacidad del área: 2 zonas 0,14 / 3 zonas 0,28 / 4 zonas 0,42.
+  7. Combinación de color = 3 o más zonas seguidas del mismo color (crítico o no): se marca en el gráfico con una franja
+     del color en el borde superior y su código.
 """
 from __future__ import annotations
 
@@ -129,6 +131,22 @@ def alignments(zones: list[dict], key: str = "number") -> list[dict]:
     return runs
 
 
+def same_color_runs(zones: list[dict], min_n: int = 3) -> list[dict]:
+    """Tramos de `min_n` o más zonas seguidas con el mismo dígito (mismo color), sea o no crítico su número; Q0 no cuenta."""
+    runs, i = [], 0
+    while i < len(zones):
+        if not zones[i]["number"]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(zones) and zones[j + 1]["number"] and zones[j + 1]["digit"] == zones[i]["digit"]:
+            j += 1
+        if j - i + 1 >= min_n:
+            runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"], label=zones[j]["code"]))
+        i = j + 1
+    return runs
+
+
 def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None) -> dict:
     """Zonas de las últimas velas: filas (franjas bajo el gráfico) y áreas de alineación para el gráfico de precio.
 
@@ -149,12 +167,14 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     open_rows: list[dict | None] = [None] * len(layers)
     open_area: dict | None = None
     area_key = None
+    triples: list[dict] = []
+    open_triples: dict[tuple, dict] = {}
     for k in range(len(stack)):
         key = tuple(stack[k])
         if key not in cache:
             zones = zones_at(dict(zip(names, map(int, key))), layers)
-            cache[key] = (zones, alignments(zones))
-        zones, runs = cache[key]
+            cache[key] = (zones, alignments(zones), same_color_runs(zones))
+        zones, runs, triples_now = cache[key]
         x = first + k
         for i, z in enumerate(zones):
             cur = open_rows[i]
@@ -178,10 +198,21 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
             area_key = new_key
         else:
             open_area, area_key = None, None
+        # combinaciones de 3 o más zonas seguidas del mismo color: una marca por cada tramo, mientras no cambie ninguna de sus zonas
+        keys = {(r["first"], r["last"], tuple(zones[j]["code"] for j in range(r["first"], r["last"] + 1))): r for r in triples_now}
+        for tk in [k for k in open_triples if k not in keys]:
+            del open_triples[tk]
+        for tk, r in keys.items():
+            if tk in open_triples:
+                open_triples[tk]["x1"] = x + 0.5
+            else:
+                open_triples[tk] = dict(x0=x - 0.5, x1=x + 0.5, n=r["n"], digit=r["digit"], color=colors[r["digit"]], label=r["label"],
+                                        first=layers[r["first"]], last=layers[r["last"]])
+                triples.append(open_triples[tk])
     for segs in rows:
         for s in segs:
             s.pop("sig", None)
-    return {"layers": layers, "rows": rows, "areas": areas, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])}
+    return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])}
 
 
 def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None, layer: str = "cuarto") -> list[dict]:
