@@ -87,7 +87,9 @@ def test_combinaciones_de_tres_zonas_del_mismo_color():
     assert (tri["n"], tri["color"], tri["first"], tri["last"]) == (4, "#E398A1", "semana", "cuarto")
     assert tri["x1"] - tri["x0"] == 18
     assert c.same_color_runs(zones(srv(2026, 11, 9, 9, 0))) == []              # 2133: solo dos zonas seguidas del mismo color
-    assert c.same_color_runs(zones(srv(2026, 11, 13, 2, 20))) == []            # viernes (Q0): no cuenta
+    assert c.same_color_runs(zones(srv(2026, 11, 13, 2, 20))) == []            # viernes en modo semana: solo sesión y cuarto tienen color (2 zonas)
+    fri = c.compute(np.arange(srv(2026, 11, 13, 0, 0), srv(2026, 11, 13, 12, 0), 60), AHEAD, "dia")["triples"]   # viernes en modo día: dia amarillo, sesión-cuarto-micro del mismo color
+    assert [(t["label"], t["n"], t["first"], t["color"]) for t in fri] == [("222", 3, "sesion", "#E398A1"), ("333", 3, "sesion", "#A6CFA9")]
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     from tradingbot.ui.chart import ChartView

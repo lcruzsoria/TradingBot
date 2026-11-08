@@ -132,17 +132,19 @@ def alignments(zones: list[dict], key: str = "number") -> list[dict]:
 
 
 def same_color_runs(zones: list[dict], min_n: int = 3) -> list[dict]:
-    """Tramos de `min_n` o más zonas seguidas con el mismo dígito (mismo color), sea o no crítico su número; Q0 no cuenta."""
+    """Tramos de `min_n` o más zonas seguidas con el mismo dígito (mismo color), sea o no crítico su número.
+    Cuenta el color, no el número: en Q0 (viernes...) la sesión, el cuarto y el micro conservan su color 1-4, así que también cuentan
+    (solo se excluyen las zonas amarillas, dígito 0)."""
     runs, i = [], 0
     while i < len(zones):
-        if not zones[i]["number"]:
+        if not zones[i]["digit"]:
             i += 1
             continue
         j = i
-        while j + 1 < len(zones) and zones[j + 1]["number"] and zones[j + 1]["digit"] == zones[i]["digit"]:
+        while j + 1 < len(zones) and zones[j + 1]["digit"] == zones[i]["digit"]:
             j += 1
         if j - i + 1 >= min_n:
-            runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"], label=zones[j]["code"]))
+            runs.append(dict(first=i, last=j, n=j - i + 1, digit=zones[i]["digit"], label="".join(str(z["digit"]) for z in zones[i:j + 1])))
         i = j + 1
     return runs
 
