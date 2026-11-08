@@ -1,6 +1,6 @@
 """Timeframes disponibles en la interfaz.
 
-Claves internas: 1m 3m 5m 15m 30m 1h 3h 4h 7h 12h 1d 1w. En pantalla se ven como M1 M3 M5 M15 M30 H1 H3 H4 H7 H12 1D 1W.
+Claves internas: 1m 3m 5m 15m 30m 1h 3h 4h 7h 12h 1d 1w. En pantalla se ven como M1 M3 M5 M15 M30 H1 M90 H3 H4 H6 H7 H12 1D 1W.
 
 MT5 no tiene H7 (solo H1, H2, H3, H4, H6, H8 y H12), así que 7h se construye agrupando velas de 1h
 (ver DERIVED y datasource.aggregate_candles).
@@ -10,7 +10,7 @@ from __future__ import annotations
 # clave -> minutos que dura la vela
 TIMEFRAMES: dict[str, int] = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
-    "1h": 60, "3h": 180, "4h": 240, "7h": 420, "12h": 720,
+    "1h": 60, "90m": 90, "3h": 180, "4h": 240, "6h": 360, "7h": 420, "12h": 720,
     "1d": 1440, "1w": 10080,
 }
 DEFAULT_TIMEFRAME = "15m"
@@ -23,7 +23,21 @@ NATIVE: dict[str, str] = {
 }
 
 # timeframes que MT5 no ofrece y se construyen a partir de otro: clave -> timeframe base
-DERIVED: dict[str, str] = {"7h": "1h"}
+DERIVED: dict[str, str] = {"7h": "1h", "90m": "15m", "6h": "1h"}
+
+# 90m y 6h siguen las sesiones y los cuartos de Quarterly Theory: empiezan a las 18:00 de Nueva York (01:00 del servidor,
+# que va 7 h por delante). Con ancla = su desfase en segundos desde la medianoche del servidor (ver aggregate_candles)
+SESSION_ANCHORED: dict[str, int] = {"90m": 3600, "6h": 3600}
+
+# Timeframes que solo salen en el selector de ciertos perfiles, y los que ese perfil quita: estrategia -> (añade, quita)
+HIDDEN_BY_DEFAULT = ("90m", "6h")
+STRATEGY_TIMEFRAMES_CHANGES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {"enigma369": (("90m", "6h"), ("7h",))}
+
+
+def selector_timeframes(strategy: str | None = None) -> list[str]:
+    """Los timeframes que enseña el selector del perfil de `strategy`, de menor a mayor."""
+    add, drop = STRATEGY_TIMEFRAMES_CHANGES.get(strategy or "", ((), ()))
+    return [t for t in TIMEFRAMES if (t not in HIDDEN_BY_DEFAULT or t in add) and t not in drop]
 
 
 def minutes(label: str) -> int:
@@ -36,7 +50,7 @@ def minutes(label: str) -> int:
 def display_label(label: str) -> str:
     """Nombre que se ve en pantalla: M15, H4, 1D, 1W."""
     m = minutes(label)
-    if m < 60:
+    if m < 60 or (m < 1440 and m % 60):
         return f"M{m}"
     if m < 1440:
         return f"H{m // 60}"

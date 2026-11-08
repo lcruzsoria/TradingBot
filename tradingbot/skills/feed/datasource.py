@@ -51,15 +51,19 @@ class DataSource(Protocol):
     def close(self) -> None: ...
 
 
-def aggregate_candles(df: pd.DataFrame, seconds: int, anchor: int = 0) -> pd.DataFrame:
+def aggregate_candles(df: pd.DataFrame, seconds: int, anchor: int = 0, day_offset: int | None = None) -> pd.DataFrame:
     """Agrupa velas en velas más largas de `seconds` segundos.
 
     - Menos de un día: las velas se alinean con la medianoche (hora del servidor) de cada día, así que
       la última vela del día puede ser más corta (por ejemplo, con 7 h: 00-07, 07-14, 14-21 y 21-24).
     - Un día o más: ventanas consecutivas desde `anchor` (epoch en segundos).
+    - `day_offset` (menos de un día): ventanas seguidas que empiezan a esa hora del día del servidor (segundos desde su
+      medianoche), p. ej. 3600 con 90 min o 6 h: 01:00, 02:30... / 01:00, 07:00, 13:00, 19:00 (las 18:00 de NY).
     """
     ts = df["ts"].to_numpy(dtype=np.int64)
-    if seconds < 86400:
+    if day_offset is not None and seconds < 86400:
+        start = (ts - day_offset) // seconds * seconds + day_offset
+    elif seconds < 86400:
         start = ts - ts % 86400 + (ts % 86400) // seconds * seconds
     else:
         start = (ts - anchor) // seconds * seconds + anchor

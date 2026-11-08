@@ -19,7 +19,7 @@ from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
-from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes
+from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes, selector_timeframes
 from . import theme
 from .icons import gear_icon
 from .bias_hist import PRICE_AXIS_WIDTH, BiasHistogram
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
         self.tf_group = QButtonGroup(self)
         self.tf_group.setExclusive(True)
         wanted = app_cfg["app"].get("timeframe", DEFAULT_TIMEFRAME)
-        for label in TIMEFRAMES:
+        for label in selector_timeframes(self.strategy):
             btn = QPushButton(display_label(label))
             btn.setProperty("chip", "true")
             btn.setProperty("tf", label)

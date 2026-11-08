@@ -150,3 +150,20 @@ def test_alineaciones_grandes_con_mes_y_aviso_previo():
     assert [x["start"] for x in c.upcoming_big(datetime(2026, 11, 17, 9, 0), 48)] == [datetime(2026, 11, 18, 6)]   # sin mes: semana-día-sesión
     assert c.upcoming_big(datetime(2027, 1, 1, 0, 0), 24) == []                                                     # 1 ene 2027: Q0
     assert "Madrid" in messages.enigma_ahead(found[1], 90)
+
+
+def test_selector_de_timeframes_90m_y_6h_solo_en_enigma369():
+    import pandas as pd
+    from tradingbot.timeframes import selector_timeframes, display_label
+    from tradingbot.skills.feed.datasource import aggregate_candles, normalize_candles
+    assert "90m" not in selector_timeframes("crt") and "6h" not in selector_timeframes("") and "7h" in selector_timeframes("crt")
+    enig = selector_timeframes("enigma369")
+    assert "90m" in enig and "6h" in enig and "7h" not in enig and enig.index("90m") == enig.index("1h") + 1
+    assert (display_label("90m"), display_label("6h")) == ("M90", "H6")
+    # las velas de 90 m y 6 h empiezan a las 18:00 NY (01:00 del servidor): 01:00, 02:30...
+    ts = np.arange(0, 86400 * 2, 900, dtype=np.int64)                                # M15 de dos días (servidor)
+    m15 = normalize_candles(pd.DataFrame({"ts": ts, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "tick_volume": 1}))
+    out90 = aggregate_candles(m15, 5400, day_offset=3600)
+    assert {int(t % 5400) for t in out90["ts"]} == {3600}                                  # siempre 01:00 + k·90 min
+    out6 = aggregate_candles(m15, 21600, day_offset=3600)
+    assert {int(t % 86400) // 3600 for t in out6["ts"]} == {1, 7, 13, 19}

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
-from ...timeframes import DERIVED, minutes
+from ...timeframes import DERIVED, SESSION_ANCHORED, minutes
 
 SERVER_OFFSET = 3 * 3600   # el servidor simulado va 3 h por delante de UTC (como muchos brokers en verano)
 DAYS = 150          # historial de velas de minutos
@@ -109,7 +109,14 @@ class DemoSource:
     def load_candles(self, symbol: str, timeframe: str, progress: ProgressFn | None = None) -> pd.DataFrame:
         m = minutes(timeframe)
         scale = PRICE.get(symbol.upper(), 1.0850) / 1.0850
-        if m < 60:
+        if m == 90:                                    # 90m: se agrupa desde M1, empezando a las 18:00 NY (01:00 del servidor)
+            df = aggregate_candles(self._minute_bars().reset_index(names="time").assign(
+                ts=lambda d: d["time"].astype("datetime64[s]").astype("int64")), 5400, day_offset=SESSION_ANCHORED["90m"])
+        elif m == 360:
+            hours = self._hour_bars().copy()
+            hours["ts"] = hours.index.astype("datetime64[s]").astype("int64")
+            df = aggregate_candles(normalize_candles(hours.reset_index(drop=True)), 21600, day_offset=SESSION_ANCHORED["6h"])
+        elif m < 60:
             base = self._minute_bars()
             agg = base.copy() if m == 1 else base.resample(f"{m}min").agg(
                 {"open": "first", "high": "max", "low": "min", "close": "last", "tick_volume": "sum"}).dropna()

@@ -10,7 +10,7 @@ from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from . import cuartos
 
 STRATEGY = "enigma369"
-MAX_TF_MINUTES = 15
+MAX_TF_MINUTES = 360
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -89,7 +89,7 @@ class Enigma369Skill(Skill):
             return
         if minutes(tf) > MAX_TF_MINUTES or p.get("df") is None or not len(p["df"]):
             self.set_caption(f"no en {display_label(tf)}")
-            self.publish("enigma369.updated", {**base, "available": False, "reason": f"Enigma369 se lee con velas de M1 a M{MAX_TF_MINUTES}"})
+            self.publish("enigma369.updated", {**base, "available": False, "reason": f"Enigma369 se lee con velas de M1 a H{MAX_TF_MINUTES // 60}"})
             return
         ahead, estimated = server_minus_ny(self.offset)
         ts = p["df"]["ts"].to_numpy()
