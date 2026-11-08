@@ -239,14 +239,19 @@ class EnigmaAreas(pg.GraphicsObject):
             p.drawRect(QRectF(a["x0"], y0, a["x1"] - a["x0"], y1 - y0))
         for ln in self._lines:                                            # inicio y fin del cuarto en curso: punteadas
             if vx0 <= ln["x"] <= vx1:
-                pen = pg.mkPen(QColor(ln["color"]) if ln.get("bright") else QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
+                if ln.get("bright"):                                      # fin y inicio de una combinación: finas y con pocos guiones
+                    pen = pg.mkPen(QColor(ln["color"]), width=1)
+                    pen.setDashPattern([3, 8])
+                else:
+                    pen = pg.mkPen(QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
                 pen.setCosmetic(True)
                 p.setPen(pen)
                 p.drawLine(QPointF(ln["x"], y0), QPointF(ln["x"], y1))
         visible = [t for t in self._triples if t["x1"] >= vx0 and t["x0"] <= vx1]
         if not visible:
             return
-        dash = pg.mkPen(QColor("#FFFFFF"), width=1.5, style=Qt.PenStyle.DashLine)
+        dash = pg.mkPen(QColor("#FFFFFF"), width=1)
+        dash.setDashPattern([3, 8])                                       # línea fina, guiones cortos y muy separados
         for t in visible:                                                 # cada combinación queda delimitada por líneas verticales discontinuas de su color
             dash.setColor(QColor(t["color"]))
             dash.setCosmetic(True)
