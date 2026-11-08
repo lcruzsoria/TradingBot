@@ -14,8 +14,8 @@ Dos modos, cada uno con 4 capas visibles (y su timeframe de velas):
 
 Regla:
   1. Cada capa aporta un dígito 1-4 (su cuarto). El color es ese dígito: 1 gris, 2 rojo (rosado), 3 verde, 4 azul, todos en tonos pastel.
-  2. El código de una zona son los dígitos de su capa y de las dos capas de arriba (menos si no las hay).
-  3. Número de la zona = suma de los dígitos del código reducida a una cifra (444 = 12 → 3). Toda zona de lunes a jueves lleva número.
+  2. El código de una zona son los dígitos de su capa y de las tres capas de arriba (menos si no las hay: 4 cifras en el último nivel).
+  3. Número de la zona = suma de los dígitos del código reducida a una cifra (4444 = 16 → 7). Toda zona de lunes a jueves lleva número.
   4. Son críticos los números 3, 6 y 9.
   5. Q0 (viernes, sábado, domingo y 5.ª semana): se ven en amarillo, como en el indicador, pero no cuentan: sin número
      ni alineaciones. Sus sesiones y cuartos conservan su color 1-4, sin número.
@@ -79,7 +79,7 @@ def zone_ref(layer: str, digit: int) -> str:
 
 
 def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str:
-    """Texto de la franja: «referencia código · número» (W2 · 2, Tuesday 22 · 4, London 222 · 6, Q3 223 · 7);
+    """Texto de la franja: «referencia código · número» (W2 · 2, Tuesday 22 · 4, London 222 · 6, Q3 2223 · 9);
     en Q0, el nombre que da el indicador (Friday, Asia, Q2...)."""
     if number:
         ref = zone_ref(layer, digits[layer])
@@ -94,7 +94,7 @@ def zone_text(layer: str, digits: dict[str, int], number: int, code: str) -> str
 
 
 def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
-    """Una zona por capa: dígito, código (los dígitos de su capa y las dos de arriba), suma, número y texto.
+    """Una zona por capa: dígito, código (los dígitos de su capa y las tres de arriba), suma, número y texto.
     `ref_number` es el número que tendría si contara (solo orientativo en Q0).
 
     En Q0 (viernes, sábado, domingo o 5.ª semana) las zonas se ven pero no cuentan: número 0.
@@ -103,12 +103,12 @@ def zones_at(digits: dict[str, int], layers: tuple[str, ...]) -> list[dict]:
     ref = {**digits, "semana": digits["semana"] or 5, "dia": digits["dia"] or digits["weekday"] + 1}   # Q0 de referencia: 5.ª semana; viernes 5, sábado 6, domingo 7
     zones = []
     for i, layer in enumerate(layers):
-        window = "".join(str(digits[c]) for c in layers[max(0, i - 2): i + 1])
-        total = sum(int(ch) for ch in "".join(str(ref[c]) for c in layers[max(0, i - 2): i + 1]))
+        window = "".join(str(digits[c]) for c in layers[max(0, i - 3): i + 1])
+        total = sum(int(ch) for ch in "".join(str(ref[c]) for c in layers[max(0, i - 3): i + 1]))
         number = 0 if out_of_count else reduce_digit(total)
         text = zone_text(layer, digits, number, window)
         zones.append(dict(layer=layer, digit=digits[layer], code=window, total=total, number=number, ref_number=reduce_digit(total), text=text,
-                          ref=zone_ref(layer, digits[layer]) if number else text))
+                          ref=f"{zone_ref(layer, digits[layer])} · {number}" if number else text, num=str(number) if number else ""))
     return zones
 
 
@@ -162,7 +162,7 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
             if cur is not None and cur["sig"] == sig:
                 cur["x1"] = x + 0.5
             else:
-                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"], text=z["text"], ref=z["ref"],
+                cur = dict(x0=x - 0.5, x1=x + 0.5, layer=z["layer"], digit=z["digit"], code=z["code"], number=z["number"], text=z["text"], ref=z["ref"], num=z["num"],
                            color=colors.get(z["digit"], "#555555"), sig=sig)
                 rows[i].append(cur)
                 open_rows[i] = cur
@@ -181,24 +181,25 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     for segs in rows:
         for s in segs:
             s.pop("sig", None)
-    return {"layers": layers, "rows": rows, "areas": areas, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors)}
+    return {"layers": layers, "rows": rows, "areas": areas, "quarter_lines": quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])}
 
 
-def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None) -> list[dict]:
-    """Inicio y fin del cuarto (90 min) en curso, para dibujarlos como líneas punteadas verticales sobre el precio.
+def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None, layer: str = "cuarto") -> list[dict]:
+    """Inicio y fin del cuarto (90 min) o del micro (22,5 min) en curso, para dibujarlos como líneas punteadas verticales sobre el precio.
 
     [{x, kind: "start" | "end", color}] en índices de vela; el fin cae después de la última vela (proyectado)."""
+    period = 1350 if layer == "micro" else 5400
     ts = np.asarray(ts, dtype=np.int64)
     if len(ts) < 2:
         return []
     colors = {**DEFAULT_COLORS, **(colors or {})}
     last = int(ts[-1])
     since = (last - int(ahead) - anchor_hour * 3600) % 86400
-    start = last - (since % 5400)
+    start = last - (since % period)
     step = max(1, int(np.median(np.diff(ts[-200:]))))
-    digit = int(layer_digits(np.array([last]), ahead, anchor_hour)["cuarto"][0])
+    digit = int(layer_digits(np.array([last]), ahead, anchor_hour)[layer][0])
     x_start = int(np.searchsorted(ts, start)) - 0.5
-    x_end = len(ts) - 1.5 + (start + 5400 - last) / step
+    x_end = len(ts) - 1.5 + (start + period - last) / step
     return [dict(x=x_start, kind="start", color=colors.get(digit, "#555555")), dict(x=x_end, kind="end", color=colors.get(digit, "#555555"))]
 
 

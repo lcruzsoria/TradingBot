@@ -480,6 +480,7 @@ class MainWindow(QMainWindow):
         self.log_view.setFixedHeight(110)
         self._logged: dict[str, object] = {}       # última traza de cada tipo: no se repite si no cambia
         log.body.addWidget(self.log_view)
+        log.setVisible(self.strategy != "enigma369")     # en Enigma369 el gráfico ocupa también esa zona
         left.addWidget(log)
         return left
 

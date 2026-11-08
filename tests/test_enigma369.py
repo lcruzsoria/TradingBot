@@ -23,7 +23,7 @@ def zones(ts, anchor=18, mode="semana"):
 
 
 def test_digit_sum_reduces_to_one_digit():
-    assert [c.reduce_digit(n) for n in (3, 9, 10, 12)] == [3, 9, 1, 3]       # 444 = 12 = 3
+    assert [c.reduce_digit(n) for n in (3, 9, 10, 12, 16)] == [3, 9, 1, 3, 7]       # 444 = 12 = 3; 4444 = 16 = 7
 
 
 def test_every_zone_has_a_number_between_1_and_9():
@@ -34,17 +34,21 @@ def test_every_zone_has_a_number_between_1_and_9():
             assert row and all(1 <= s["number"] <= 9 for s in row)
 
 
-def test_tuesday_0220_is_222_66():
+def test_tuesday_0220_has_four_digits_at_the_last_level():
     z = zones(srv(2026, 11, 10, 2, 20))
-    assert [x["code"] for x in z] == ["2", "22", "222", "222"]
-    assert [x["number"] for x in z] == [2, 4, 6, 6]
+    assert [x["code"] for x in z] == ["2", "22", "222", "2222"]
+    assert [x["number"] for x in z] == [2, 4, 6, 8]
+    assert c.alignments(z) == []
+    micro = zones(srv(2026, 11, 10, 2, 20), mode="dia")                       # el micro suma también el día: 2 + 2 + 2 + 3 = 9
+    assert (micro[3]["code"], micro[3]["number"]) == ("2223", 9)
+    z = zones(srv(2026, 11, 9, 9, 0))                                         # lunes 09:00: 2133 · 69
     (run,) = c.alignments(z)
-    assert (run["n"], run["digit"], run["label"]) == (2, 2, "222 · 66")
+    assert (run["n"], run["digit"], run["label"]) == (2, 3, "2133 · 69")
 
 
 def test_anchor_17_moves_the_sessions_one_hour():
     z = zones(srv(2026, 11, 10, 2, 20), anchor=17)                           # 9 h 20 min tras las 17:00: sesión 2, cuarto 3
-    assert [x["code"] for x in z] == ["2", "22", "222", "223"]
+    assert [x["code"] for x in z] == ["2", "22", "222", "2223"]
     assert c.alignments(z) == []
 
 
@@ -69,10 +73,10 @@ def test_alignment_needs_same_digit_and_critical_numbers():
 
 
 def test_areas_follow_the_aligned_span_and_use_the_zone_color():
-    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
+    ts = np.arange(srv(2026, 11, 9, 0, 0), srv(2026, 11, 9, 18, 0), 300)
     res = c.compute(ts, AHEAD, anchor_hour=18)
-    area = next(a for a in res["areas"] if a["label"] == "222 · 66")
-    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#E398A1", 0.14, "sesion", "cuarto")
+    area = next(a for a in res["areas"] if a["label"] == "2133 · 69")
+    assert (area["color"], area["opacity"], area["first"], area["last"]) == ("#A6CFA9", 0.14, "sesion", "cuarto")
     assert (area["x1"] - area["x0"]) == 18                                    # 90 min en velas de 5m
 
 
@@ -94,7 +98,7 @@ def test_chart_paints_areas_and_stripes_render():
     app = QApplication.instance() or QApplication([])
     from tradingbot.ui.chart import ChartView
     from tradingbot.ui.enigma_stripes import EnigmaStripes
-    ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 6, 0), 300)
+    ts = np.arange(srv(2026, 11, 9, 0, 0), srv(2026, 11, 9, 18, 0), 300)
     res = c.compute(ts, AHEAD, anchor_hour=18)
     chart = ChartView()
     chart.set_enigma(res["areas"])
@@ -121,8 +125,8 @@ def test_futures_weekend_gap_like_the_indicator():
 
 
 def test_zone_labels_carry_the_period_reference_and_number():
-    z = zones(srv(2026, 11, 10, 2, 20))                                        # martes 02:20: 222 · 66
-    assert [x["text"] for x in z] == ["W2 · 2", "Tuesday 22 · 4", "London 222 · 6", "Q2 222 · 6"]
+    z = zones(srv(2026, 11, 10, 2, 20))                                        # martes 02:20: 222 · 6, 2222 · 8
+    assert [x["text"] for x in z] == ["W2 · 2", "Tuesday 22 · 4", "London 222 · 6", "Q2 2222 · 8"]
     assert [zones(srv(2026, 11, 3 + 7 * w, 10, 0))[0]["text"][:2] for w in range(3)] == ["W1", "W2", "W3"]
     micro = zones(srv(2026, 11, 10, 2, 20), mode="dia")
     assert micro[3]["text"].startswith("M") and micro[3]["layer"] == "micro"
@@ -176,3 +180,11 @@ def test_lineas_punteadas_del_cuarto_en_curso():
     n = len(ts)
     assert lines[0]["x"] < n - 1 < lines[1]["x"]
     assert abs((lines[1]["x"] - lines[0]["x"]) - 90 / 5) < 1e-6                             # 90 min = 18 velas de M5
+
+
+def test_lineas_punteadas_del_micro_en_modo_dia():
+    ts = np.arange(25 * 3600 + 86400 * 2, 25 * 3600 + 86400 * 2 + 3 * 3600 + 600, 60)          # M1
+    lines = c.compute(ts, 25200, "dia", 18)["quarter_lines"]
+    assert [ln["kind"] for ln in lines] == ["start", "end"]
+    assert lines[0]["x"] < len(ts) - 1 < lines[1]["x"]
+    assert abs((lines[1]["x"] - lines[0]["x"]) - 22.5) < 1e-6                                  # 22,5 min = 22,5 velas de M1

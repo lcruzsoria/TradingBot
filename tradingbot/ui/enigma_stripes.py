@@ -64,7 +64,7 @@ class StripeRows(pg.PlotWidget):
                 pi.addItem(box, ignoreBounds=True)
                 self._items.append(box)
                 labels = []
-                for shown in dict.fromkeys((s["text"], s.get("ref", s["text"]))):       # texto completo y, si no cabe, solo la referencia (Q1, W2...)
+                for shown in dict.fromkeys(filter(None, (s["text"], s.get("ref", s["text"]), s.get("num", "")))):       # texto completo; si no cabe, referencia con número (Q1 · 3) y, al final, solo el número
                     text = pg.TextItem(anchor=(0.5, 0.5))
                     text.setHtml(f'<span style="font-size:8pt; color:#2B2B2B; font-weight:600">{html.escape(shown)}</span>')
                     text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
@@ -124,9 +124,9 @@ class EnigmaStripes(QWidget):
         self.info.setObjectName("Tiny")
         self.info.setWordWrap(True)
         head.addWidget(self.info, 1)
-        lay.addLayout(head)
         self.rows = StripeRows()
         lay.addWidget(self.rows)
+        lay.addLayout(head)                          # los selectores van debajo de las franjas
 
     def link_to(self, chart) -> None:
         self.rows.link_to(chart)
