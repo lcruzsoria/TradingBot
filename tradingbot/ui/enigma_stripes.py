@@ -1,12 +1,10 @@
 """Franjas de la skill Enigma369 bajo el gráfico de precio: una fila por capa de cuartos, con su código y su número."""
 from __future__ import annotations
 
-import html
-
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QButtonGroup, QGraphicsRectItem, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPen
+from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
 from .bias_hist import PRICE_AXIS_WIDTH
@@ -27,10 +25,10 @@ class StripeRows(pg.PlotWidget):
         ax.setWidth(PRICE_AXIS_WIDTH)
         pi.setMenuEnabled(False)
         pi.getViewBox().setMouseEnabled(x=False, y=False)
-        self._items: list = []
         self._layers: tuple = ()
-        self._labels: list[tuple] = []          # (texto, inicio y fin de su franja en velas, y)
-        self.getPlotItem().getViewBox().sigRangeChanged.connect(lambda *_: self._fit_labels())
+        self._item = StripeItem()
+        pi.addItem(self._item, ignoreBounds=True)
+        pi.getViewBox().sigRangeChanged.connect(lambda *_: (self._item.prepareGeometryChange(), self._item.update()))
         self.style()
 
     def style(self) -> None:
@@ -58,56 +56,78 @@ class StripeRows(pg.PlotWidget):
 
     def set_rows(self, layers: tuple, rows: list[list[dict]], names: dict[str, str], opacity: float = 1.0) -> None:
         pi = self.getPlotItem()
-        for item in self._items:
-            pi.removeItem(item)
-        self._items.clear()
-        self._labels.clear()
         self._layers = tuple(layers)
         count = len(layers)
         self.setFixedHeight(ROW_HEIGHT * count + 6)
-        for i, segs in enumerate(rows):
-            y = i                                    # la capa mayor abajo y la menor arriba
-            for s in segs:
-                color = QColor(s["color"])
-                color.setAlphaF(opacity)
-                box = QGraphicsRectItem(s["x0"], y + 0.06, s["x1"] - s["x0"], 0.88)
-                box.setBrush(color)
-                edge = QPen(QColor(theme.CHART_BG), 1)
-                edge.setCosmetic(True)
-                box.setPen(edge)
-                pi.addItem(box, ignoreBounds=True)
-                self._items.append(box)
-                labels = []
-                for shown in dict.fromkeys(filter(None, (s["text"], s.get("ref", s["text"]), s.get("num", "")))):       # texto completo; si no cabe, referencia con número (Q1 · 3) y, al final, solo el número
-                    text = pg.TextItem(anchor=(0.5, 0.5))
-                    text.setHtml(f'<span style="font-size:8pt; color:#2B2B2B; font-weight:600">{html.escape(shown)}</span>')
-                    text.setPos((s["x0"] + s["x1"]) / 2, y + 0.5)
-                    pi.addItem(text, ignoreBounds=True)
-                    self._items.append(text)
-                    labels.append(text)
-                self._labels.append((labels, s["x0"], s["x1"], y + 0.5))
+        self._item.set_data(rows, opacity)
         tick_rows = [(i + 0.5, names.get(layer, layer)) for i, layer in enumerate(layers)]
         pi.getAxis("right").setTicks([tick_rows])
         pi.getViewBox().setYRange(0, count, padding=0)
         self.sync_x()
-        self._fit_labels()
-
-    def _fit_labels(self) -> None:
-        """Un texto solo se ve si cabe en su franja con el zoom actual (si no, se solapa con el de al lado)."""
-        vb = self.getPlotItem().getViewBox()
-        x0, x1 = vb.viewRange()[0]
-        per_bar = vb.width() / max(x1 - x0, 1e-9)
-        for texts, left, right, y in self._labels:
-            left, right = max(left, x0), min(right, x1)             # solo la parte visible de la franja
-            room = (right - left) * per_bar - 8
-            shown = next((t for t in texts if t.boundingRect().width() <= room), None)
-            for t in texts:
-                t.setVisible(t is shown)
-                t.setPos((left + right) / 2, y)
 
     @property
     def segment_count(self) -> int:
-        return sum(isinstance(i, QGraphicsRectItem) for i in self._items)
+        return self._item.segment_count
+
+
+class StripeItem(pg.GraphicsObject):
+    """Todas las franjas en un solo objeto: pinta solo las visibles (con miles de velas, un objeto por franja y texto es lento).
+
+    Cada texto se elige al pintar: el completo, y si no cabe en su franja con el zoom actual, la referencia con número o solo el número."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: list[list[dict]] = []
+        self._opacity = 1.0
+
+    def set_data(self, rows: list[list[dict]], opacity: float) -> None:
+        self._rows = [list(r) for r in rows]
+        self._opacity = opacity
+        self.prepareGeometryChange()
+        self.update()
+
+    @property
+    def segment_count(self) -> int:
+        return sum(len(r) for r in self._rows)
+
+    def boundingRect(self) -> QRectF:
+        vb = self.getViewBox()
+        return vb.viewRect() if vb is not None else QRectF()
+
+    def paint(self, p, *args) -> None:
+        vb = self.getViewBox()
+        if vb is None or not self._rows:
+            return
+        (vx0, vx1), _ = vb.viewRange()
+        transform = p.transform()
+        edge = QPen(QColor(theme.CHART_BG), 1)
+        edge.setCosmetic(True)
+        texts = []
+        for y, segs in enumerate(self._rows):
+            for s in segs:
+                if s["x1"] < vx0 or s["x0"] > vx1:
+                    continue
+                color = QColor(s["color"])
+                color.setAlphaF(self._opacity)
+                p.setPen(edge)
+                p.setBrush(color)
+                p.drawRect(QRectF(s["x0"], y + 0.06, s["x1"] - s["x0"], 0.88))
+                texts.append((s, y))
+        p.resetTransform()                                     # los textos, en píxeles
+        font = p.font()
+        font.setPointSize(8)
+        font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(font)
+        p.setPen(QColor("#2B2B2B"))
+        metrics = p.fontMetrics()
+        for s, y in texts:
+            left, right = max(s["x0"], vx0), min(s["x1"], vx1)
+            room = transform.map(QPointF(right, 0)).x() - transform.map(QPointF(left, 0)).x() - 8
+            shown = next((t for t in dict.fromkeys(filter(None, (s["text"], s.get("ref", s["text"]), s.get("num", "")))) if metrics.horizontalAdvance(t) <= room), None)
+            if shown is None:
+                continue
+            c = transform.map(QPointF((left + right) / 2, y + 0.5))
+            p.drawText(QPointF(c.x() - metrics.horizontalAdvance(shown) / 2, c.y() + metrics.ascent() / 2 - 1), shown)
 
 
 class EnigmaStripes(QWidget):

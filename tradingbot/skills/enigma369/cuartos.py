@@ -39,7 +39,7 @@ OPACITY = {2: 0.14, 3: 0.28, 4: 0.42}
 DEFAULT_COLORS = {0: "#EFD9A8", 1: "#B2B6C1", 2: "#E398A1", 3: "#A6CFA9", 4: "#98AEF8"}   # tonos pastel del indicador; 0 = Q0 (amarillo)
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 SESSION_LABELS = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
-MAX_BARS = 3000          # solo se calculan las zonas de las últimas velas
+MAX_BARS = 20000         # solo se calculan las zonas de las últimas velas (= FEED_MAX_BARS por defecto: unas 3 semanas en M1)
 
 
 def reduce_digit(total: int) -> int:
