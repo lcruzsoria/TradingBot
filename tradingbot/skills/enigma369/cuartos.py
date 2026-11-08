@@ -214,6 +214,8 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
     for segs in rows:
         for s in segs:
             s.pop("sig", None)
+    for t in open_triples.values():
+        t["active"] = True                                                    # la de la última vela: su fin se proyecta con una línea aparte
     lines = quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])
     lines += [ln for ln in triple_lines(ts, ahead, anchor_hour, list(open_triples.values()), layers) if all(abs(ln["x"] - o["x"]) > 1e-6 for o in lines)]
     return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": lines}
@@ -257,7 +259,8 @@ def triple_lines(ts, ahead: int, anchor_hour: int, active: list[dict], layers: t
         if period is None:
             continue
         start = last - (since % period)
-        out += [dict(x=t["x0"], kind="start", color=t["color"]), dict(x=len(ts) - 1.5 + (start + period - last) / step, kind="end", color=t["color"])]
+        out += [dict(x=t["x0"], kind="start", color=t["color"], bright=True),
+                dict(x=len(ts) - 1.5 + (start + period - last) / step, kind="end", color=t["color"], bright=True)]
     return out
 
 
