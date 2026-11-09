@@ -505,3 +505,62 @@ def test_la_apertura_de_crt_dice_la_vela_htf_en_la_que_entro():
               htf_candle="H4 04/11 05:00–09:00 NY")
     assert messages.opened(o, "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4 04/11 05:00–09:00 NY"
     assert messages.opened(Order(**{**o.__dict__, "htf_candle": ""}), "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4"
+
+
+def test_enigma369_1m_y_5m_dibujan_las_zonas_del_mercado_del_grafico(sent):
+    import numpy as np
+    pedidos = []
+
+    class Source:
+        def symbols(self):
+            return ["NAS100.s", "SP500.s"]
+
+        def load_recent(self, symbol, tf, bars):
+            step = 60 * int(tf[:-1])
+            ts = 1_794_000_000 - np.arange(bars)[::-1] * step                     # las últimas `bars` velas
+            pedidos.append((symbol, tf, bars))
+            return pd.DataFrame({"ts": ts, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5})
+
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    bus = EventBus()
+    app = {"strategy": "enigma369", "symbol": "NAS100.s"}
+    manager = SkillManager(bus, Services(Source(), None, {"app": app}, EnvConfig(parse("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n"))),
+                           [{"type": "telegram"}])
+    manager.start()
+    time.sleep(0.2)
+    caps = []
+    bus.subscribe("ui", "telegram.capture.request", caps.append)
+    skill = manager.skills["telegram"]
+    assert ("enigma369_1m", messages_mod().ENIGMA_COMMANDS[0][1]) in skill._command_menu()
+    INBOX.append(message(1, "/enigma369_1m"))
+    INBOX.append(message(2, "/enigma369_5m sp500"))
+    skill.tick()
+    time.sleep(0.3)
+    assert pedidos == [("NAS100.s", "1m", 370), ("SP500.s", "5m", 298)]                # 6 h de 1m y 24 h de 5m (+10)
+    p1, p5 = (c.payload for c in caps)
+    assert (p1["enigma"]["mode"], p1["bars"], p5["enigma"]["mode"], p5["bars"]) == ("dia", 360, "semana", 288)
+    assert p1["enigma"]["layers"] == ("dia", "sesion", "cuarto", "micro") and p1["enigma"]["rows"]
+    bus.publish("telegram.capture", {"request_id": "enigma369_5m", "png": b"\x89PNG-5m"}, source="ui")
+    time.sleep(0.4)
+    manager.stop()
+    assert PHOTOS[0][1] == b"\x89PNG-5m" and "SP500.s 5m" in PHOTOS[0][2] and "24 h" in PHOTOS[0][2]
+
+
+def test_la_imagen_de_enigma369_se_dibuja_con_sus_franjas():
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.enigma369 import cuartos
+    from tradingbot.ui.enigma_shot import render
+    QApplication.instance() or QApplication([])
+    ts = 1_794_000_000 - np.arange(400)[::-1] * 60
+    df = pd.DataFrame({"ts": ts, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5})
+    now = cuartos.last_zones(ts, 7 * 3600, "dia")
+    e = {"available": True, "mode": "dia", "now": now, "alignments_now": [], **cuartos.compute(ts, 7 * 3600, "dia")}
+    png = render({"enigma": e, "df": df, "bars": 360, "title": "NAS100 · 1m"})
+    assert png[:4] == b"\x89PNG" and len(png) > 5000
+
+
+def messages_mod():
+    from tradingbot.skills.telegram import messages
+    return messages

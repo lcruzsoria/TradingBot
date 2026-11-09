@@ -694,7 +694,7 @@ class MainWindow(QMainWindow):
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return                                      # llega tarde: ya se está viendo otro gráfico
         self.chart.set_enigma(p.get("areas", []) if p.get("available") else [], p.get("quarter_lines") if p.get("available") else None,
-                             p.get("triples") if p.get("available") else None)
+                             p.get("triples") if p.get("available") else None, p.get("windows") if p.get("available") else None)
         self.enigma.set_data(p, self.ENIGMA_NAMES)
 
     def current_tf(self) -> str:
@@ -876,6 +876,8 @@ class MainWindow(QMainWindow):
             self.backtest_dialog = BacktestDialog(self, self.backtest, self.backtest_error)
             self.backtest_dialog.hidden.connect(lambda: self.backtest_btn.setChecked(False))
             self.backtest_dialog.reload_requested.connect(lambda: self.bus.publish("stats.reload", {}, source="ui"))
+            if self.backtest is not None and self.backtest.groups_of(self.strategy):     # un perfil con backtest propio (Enigma369) abre el suyo
+                self.backtest_dialog.set_profile(self.strategy)
         self.backtest_dialog.popup_at(self.backtest_btn)
 
     # -- tema -------------------------------------------------------------------------------------
@@ -904,6 +906,15 @@ class MainWindow(QMainWindow):
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
     def _on_capture_request(self, p: dict) -> None:
         """La skill Telegram pide una captura de la ventana (/captura por Telegram): se dibuja aquí, en el hilo de la interfaz."""
+        if p.get("enigma"):                          # /enigma369_1m y /enigma369_5m: gráfico propio con sus zonas, no la ventana
+            from .enigma_shot import render
+            try:
+                png = render(p)
+            except Exception as exc:  # noqa: BLE001 - la imagen no puede tumbar la interfaz
+                self.log(f"telegram: no se pudo dibujar Enigma369 ({exc})", tone="warn")
+                png = b""
+            self.bus.publish("telegram.capture", {"request_id": p.get("request_id"), "png": png}, source="ui")
+            return
         from PySide6.QtCore import QBuffer, QByteArray, QIODevice
         data = QByteArray()
         buffer = QBuffer(data)

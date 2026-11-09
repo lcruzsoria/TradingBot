@@ -102,6 +102,24 @@ def test_combinaciones_de_tres_zonas_del_mismo_color():
     chart.grab()                                                               # pinta sin errores
 
 
+def test_ventanas_de_reversion_asia_q1_ny_am_q3_ny_pm_q3():
+    ts = np.arange(srv(2026, 11, 9, 18, 0), srv(2026, 11, 10, 17, 0), 300)     # día de trading del martes, en 5m
+    res = c.compute(ts, AHEAD, anchor_hour=18)
+    got = [(w["label"], w["same"], w["color"], w["x1"] - w["x0"]) for w in res["windows"]]
+    assert got == [("Asia Q1", True, "#B2B6C1", 18), ("NY AM Q3", True, "#A6CFA9", 18), ("NY PM Q3", False, "#A6CFA9", 18)]
+    assert res["windows"][1]["x0"] == (srv(2026, 11, 10, 9, 0) - ts[0]) // 300 - 0.5
+    fri = np.arange(srv(2026, 11, 12, 18, 0), srv(2026, 11, 13, 17, 0), 300)    # viernes (Q0): no se marca
+    assert c.compute(fri, AHEAD)["windows"] == []
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from tradingbot.ui.chart import ChartView
+    chart = ChartView()
+    chart.set_enigma(res["areas"], res["quarter_lines"], res["triples"], res["windows"])
+    assert len(chart.enigma._windows) == 3
+    chart.resize(800, 400)
+    chart.grab()
+
+
 def test_day_micro_mode_has_four_rows_and_micro_segments():
     ts = np.arange(srv(2026, 11, 10, 0, 0), srv(2026, 11, 10, 3, 0), 60)
     res = c.compute(ts, AHEAD, "dia")
@@ -210,3 +228,39 @@ def test_lineas_punteadas_del_micro_en_modo_dia():
     assert [ln["kind"] for ln in lines] == ["start", "end"]
     assert lines[0]["x"] < len(ts) - 1 < lines[1]["x"]
     assert abs((lines[1]["x"] - lines[0]["x"]) - 22.5) < 1e-6                                  # 22,5 min = 22,5 velas de M1
+
+
+def test_backtest_de_extremos_en_la_ventana():
+    from tradingbot.skills.stats.backtest import Backtest, Group
+    from tradingbot.skills.stats.extremos import CONDITIONS, Extremes
+    # dos días de un mercado: el máximo en Asia Q1 (combinación de color) y el mínimo en NY AM Q3
+    bs = [0] * 16
+    bs[0], bs[10] = 6, 6
+    day = {"t": [20403, 20404], "wd": [0, 1], "q0": [0, 0], "k": [92, 92], "bs": [[6] * 15 + [2]] * 2, "bn": [[10] * 9, [10] * 9],
+           "ba": [2, 2], "bt": [6, 6], "fc": [0, 0], "fa": [0, 0], "ft": [1, 1], "k3": [0, 0], "bm": [[0] * 4] * 2, "bmn": [[0] * 9] * 2,
+           "bma": [0, 0], "bmt": [0, 0], "c3": [[0] * 16] * 2, "c3c": [[0] * 16] * 2, "c3a": [[0] * 16] * 2, "c3t": [[0] * 16] * 2, "m": [0, 0]}
+    ops = {"i": [0, 0, 1, 1], "d": [0, 1, 0, 1], "e": [1, 2, 3, 4], "x": [1, 2, 3, 4], "s": [1, 3, 1, 3], "q": [1, 3, 1, 3],
+           "nw": [2] * 4, "nd": [3] * 4, "ns": [5] * 4, "n": [5, 3, 6, 9], "a": [0] * 4, "c": [3, 0, 3, 0], "g": [1, 0, 0, 0],
+           "mi": [0] * 4, "mn": [0] * 4, "ma": [0] * 4, "mc": [0] * 4, "m": [0] * 4}
+    raw = {"key": "enigma369:indices", "nombre": "Índices", "tipo": "extremos", "perfil": "enigma369", "perfil_nombre": "Enigma369",
+           "cats": {"m": ["NAS100.s"]}, "ops": ops, "dias": day, "patrones": ["Ambos", "Máximo", "Mínimo"],
+           "filtros": {"cuentan": "Días que cuentan", "cuentan_sa": "Sin apertura", "todos": "Todos"}}
+    g = Group(raw["key"], raw["nombre"], raw)
+    x = Extremes(raw)
+    sel = x.select()
+    combo = sel.condition("Combinación de color hasta el cuarto")
+    assert (combo.hits, combo.n, round(combo.base, 4), combo.ctrl) == (2, 4, round(6 / 92, 4), 0.5)   # Asia Q1 lo cumple los dos días: el horario lo explica
+    assert sel.condition("Cuarto 3-6-9").hits == 3
+    assert x.select("Máximo", "cuentan_sa").n == 1                                    # sin el máximo de la vela de apertura
+    assert dict((c, s.hits) for c, s in sel.cells())[(3, 3)] == 2
+    assert [k for k, _ in x.split("wd", range(5), "Ambos", "cuentan")] == [0, 1]
+    assert set(CONDITIONS) >= {"Micro 3-6-9"}
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from tradingbot.ui.backtest_dialog import BacktestDialog
+    d = BacktestDialog(None, Backtest([g], {}))
+    assert d.extremos.isVisibleTo(d) and not d.curve_card.isVisibleTo(d)
+    d.extremos.by_day.click(1)
+    assert d.days == {1} and d.extremos.tiles["days"].value.text() == "1"
+    d.set_pattern("Mínimo")
+    assert len(d.extremos.cells.rows) == 16

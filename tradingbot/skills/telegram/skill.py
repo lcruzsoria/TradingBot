@@ -8,7 +8,7 @@ import re
 import time
 from datetime import datetime
 
-from ...clock import NY, ny_from_server, trading_day
+from ...clock import NY, ny_from_server, server_minus_ny, trading_day
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
 from ..enigma369 import cuartos as enigma_cuartos
@@ -78,6 +78,8 @@ class TelegramSkill(Skill):
         self._enigma_sent: set = set()                       # avisos previos ya mandados
         self._advance_hours = env.section("ENIGMA369").get_int("ADVANCE_HOURS", 24)
         self._enigma: dict[str, tuple] = {}                  # mercado -> última alineación de Enigma369 vista
+        self._enigma_symbol = str(app.get("symbol") or "")    # mercado de /enigma369_1m y /enigma369_5m (el del gráfico)
+        self._shots: dict[str, str] = {}                     # pie de foto de cada imagen pedida a la interfaz
         self.server: PanelServer | None = None
         self.board = PanelState(self.services.app_cfg, env.section("STATS").get("FORWARD_DIR"))
         self.telegram = False
@@ -118,7 +120,7 @@ class TelegramSkill(Skill):
 
     def _accounts(self) -> dict[str, str]:
         """Los perfiles del selector (cuentas) con nombre válido de comando de Telegram: {nombre: texto del menú}."""
-        taken = {c for c, _ in messages.COMMANDS} | {"start", "help"}
+        taken = {c for c, _ in (*messages.COMMANDS, *messages.ENIGMA_COMMANDS)} | {"start", "help"}
         found = {}
         for name, display in (self.services.app_cfg.get("app") or {}).get("profiles") or []:
             name = str(name).lower()
@@ -127,7 +129,16 @@ class TelegramSkill(Skill):
         return found
 
     def _command_menu(self) -> list[tuple[str, str]]:
-        return [*messages.COMMANDS, *self.accounts.items()]
+        return [*messages.COMMANDS, *self._extra_commands()]
+
+    def _extra_commands(self) -> list[tuple[str, str]]:
+        """Los de cada cuenta y, en el perfil Enigma369, sus gráficos."""
+        enigma = list(messages.ENIGMA_COMMANDS) if self._strategy == "enigma369" else []
+        return [*enigma, *self.accounts.items()]
+
+    @property
+    def _strategy(self) -> str:
+        return str((self.services.app_cfg.get("app") or {}).get("strategy") or "")
 
     def _send(self, text: str) -> None:
         telegram.send_message(self.token, self.chat, text)
@@ -204,8 +215,51 @@ class TelegramSkill(Skill):
             self._capture_asked = time.monotonic()
             self.publish("telegram.capture.request", {"request_id": "tg"})
             return
+        if command in messages.ENIGMA_SHOTS and self._strategy == "enigma369":
+            self._enigma_shot(command, text.split()[1:])
+            return
         reply = None if command in ("ayuda", "start", "help") else messages.answer(command, self.board.snapshot())
-        self._send(reply if reply is not None else messages.help_text(tuple(self.accounts.items())))
+        self._send(reply if reply is not None else messages.help_text(tuple(self._extra_commands())))
+
+    def _enigma_shot(self, command: str, args: list[str]) -> None:
+        """/enigma369_1m (6 h, Día → Micro) y /enigma369_5m (24 h, Semana → Cuarto) del mercado del gráfico, o del que se nombre
+        (/enigma369_1m sp500). Las velas se piden a MT5 aquí; la imagen la dibuja la interfaz."""
+        tf, hours, mode = messages.ENIGMA_SHOTS[command]
+        symbol = self._enigma_symbol
+        if args:
+            word = args[0].lower()
+            names = list(self.services.source.symbols()) if self.services.source is not None else []
+            found = [s for s in names if word in s.lower()]
+            if not found:
+                self._send(f"No encuentro el mercado «{_e(word)}».")
+                return
+            symbol = min(found, key=len)
+        if not symbol:
+            self._send("Aún no sé qué mercado dibujar: espera a que cargue el gráfico.")
+            return
+        bars = hours * 60 // int(tf[:-1])
+        source = self.services.source
+        try:
+            recent = getattr(source, "load_recent", None)
+            df = recent(symbol, tf, bars + 10) if recent else source.load_candles(symbol, tf).tail(bars + 10).reset_index(drop=True)
+        except Exception as exc:  # noqa: BLE001 - un fallo de MT5 se contesta, no tumba la skill
+            self._send(f"No se pudieron cargar las velas de {_e(symbol)} {tf}: {_e(exc)}")
+            return
+        if df is None or not len(df):
+            self._send(f"Sin velas de {_e(symbol)} {tf}.")
+            return
+        ahead, _ = server_minus_ny(self._server_offset)
+        ts = df["ts"].to_numpy()
+        now = enigma_cuartos.last_zones(ts, ahead, mode)
+        result = enigma_cuartos.compute(ts, ahead, mode)
+        enigma = {"available": True, "mode": mode, "symbol": symbol, "timeframe": tf, "now": now,
+                  "alignments_now": enigma_cuartos.alignments(now), **result}
+        last, _ = ny_from_server(int(ts[-1]), self._server_offset)
+        title = f"{symbol} · {tf} · últimas {hours} h · hasta {last:%d/%m %H:%M} NY"
+        self._shots[command] = f"<b>Enigma369 · {_e(symbol)} {tf}</b> <i>últimas {hours} h · {last:%d/%m %H:%M} NY</i>"
+        self._capture_asked = time.monotonic()
+        self.publish("telegram.capture.request", {"request_id": command, "enigma": enigma, "df": df, "bars": bars,
+                                                  "symbol": symbol, "timeframe": tf, "title": title})
 
     def _draw(self, args: list[str]) -> None:
         """Dibuja los setups ejecutados HOY (día de trading) de este perfil: todos, el n-ésimo (/dibujar 2) o los de un mercado
@@ -293,7 +347,7 @@ class TelegramSkill(Skill):
             if self.telegram and self._capture_asked is not None:
                 self._capture_asked = None
                 if p.get("png"):
-                    self._photo(p["png"])
+                    self._photo(p["png"], self._shots.pop(p.get("request_id"), None))
                 else:
                     self._send("No se pudo capturar la ventana.")
             return
@@ -317,6 +371,8 @@ class TelegramSkill(Skill):
             if self.telegram and wanted in self.notify:
                 self._send(messages.decision(p, self.profile))
         elif topic == "enigma369.updated":                       # alineación 3-6-9 nueva: se avisa solo si empieza en directo
+            if p.get("symbol"):
+                self._enigma_symbol = p["symbol"]                # el mercado que dibujan /enigma369_1m y /enigma369_5m
             if p.get("available") and p.get("alignments_now") is not None:
                 runs = p["alignments_now"] or p.get("ref_alignments_now") or []
                 key = (p["symbol"], p["timeframe"], tuple((r["label"], p["now"][r["first"]]["text"]) for r in runs))

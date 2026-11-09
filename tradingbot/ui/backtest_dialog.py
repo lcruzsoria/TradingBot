@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabe
 from ..skills.stats.backtest import (BOT_FILTER, CRT_DEFAULT, CRT_ENTRIES, CRT_LTFS, CRT_NEAR, CRT_TARGETS, CRT_TBR,
                                      DAYS, MAIN_FILTERS, MONTHS, PATTERNS, Backtest, Group, Ops, summarize, verdict)
 from . import theme
+from .extremos_panel import ExtremosPanel
 from .fmt import miles
 from .stats_dialog import Book, Tile
 
@@ -396,6 +397,20 @@ class BacktestDialog(QDialog):
         for book in (self.by_year, self.by_month, self.by_weekday, self.by_hour, self.compare, self.by_market, self.by_zone, self.by_side, self.by_filter, self.by_near, self.by_round,
                      self.by_day, self.halves, self.sensitivity, self.outcomes, self.improvements, self.funnel, self.crt_funnel, self.data_book):
             lay.addWidget(book)
+        # Enigma369 (grupo de extremos): su propio panel; las piezas de operaciones y R se ocultan
+        self.extremos = ExtremosPanel(BarCard)
+        lay.insertWidget(0, self.extremos)
+        self.extremos.year_toggled.connect(self.toggle_year)
+        self.extremos.month_toggled.connect(self.toggle_month)
+        self.extremos.day_toggled.connect(self.toggle_day)
+        self.extremos.years_cleared.connect(lambda: self._set_selection(years=set()))
+        self.extremos.months_cleared.connect(lambda: self._set_selection(months=set()))
+        self.extremos.days_cleared.connect(lambda: self._set_selection(days=set()))
+        self._ops_widgets = (curve_card, self.by_year, self.by_month, self.by_weekday, self.by_hour, self.compare, self.by_market,
+                             self.by_zone, self.by_side, self.by_filter, self.by_near, self.by_round, self.by_day, self.halves,
+                             self.sensitivity, self.outcomes, self.improvements, self.funnel, self.crt_funnel)
+        self._always_ops = (curve_card, self.by_year, self.by_month, self.by_weekday, self.by_hour, self.by_market, self.by_side,
+                            self.by_filter, self.by_day, self.halves, self.sensitivity, self.outcomes)    # el resto lo decide refresh
         self.method = Book("Metodología", "cómo se hizo", ())
         self.method_text = QLabel()
         self.method_text.setObjectName("Tiny")
@@ -749,6 +764,22 @@ class BacktestDialog(QDialog):
         span = f"{_date(start)} – {_date(end)}" if start else g.period_of(self.crt_ltf)
         self.generated.setText(f"{span} · actualizado {g.updated}" if g.updated else span)
         self.periods.setText(self._periods_text())
+
+        ext = g.is_extremes
+        self.extremos.setVisible(ext)
+        for w in (self.verdict, self.summary, *self.blocks.values()):
+            w.setVisible(not ext)
+        if ext:                                          # Enigma369: zona del máximo y el mínimo, sin operaciones
+            for w in self._ops_widgets:
+                w.hide()
+            self._paint_selection(g)
+            self.extremos.show_group(g.extremes, self.pattern, self.filter, self.years, self.months, self.days)
+            self._fill_data(g)
+            self.data_book.note.setText("velas M15 de MT5 (el micro, de M3)")
+            self.method_text.setText("<br>".join(f"<b>{t}</b>: {e}" for t, e in g.table("metodologia")))
+            return
+        for w in self._always_ops:
+            w.show()
 
         view = g.view(self.pattern, self.filter, self.years, self.hours, self.days, self.months, crt=self.crt)
         self._paint_selection(g)

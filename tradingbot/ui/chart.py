@@ -213,11 +213,14 @@ class EnigmaAreas(pg.GraphicsObject):
         self._areas: list[dict] = []
         self._lines: list[dict] = []
         self._triples: list[dict] = []
+        self._windows: list[dict] = []
 
-    def set_data(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None) -> None:
+    def set_data(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None,
+                 windows: list[dict] | None = None) -> None:
         self._areas = list(areas)
         self._lines = list(lines or [])
         self._triples = list(triples or [])
+        self._windows = list(windows or [])
         self.prepareGeometryChange()
         self.update()
 
@@ -227,7 +230,7 @@ class EnigmaAreas(pg.GraphicsObject):
 
     def paint(self, p, *args) -> None:
         vb = self.getViewBox()
-        if vb is None or not (self._areas or self._lines or self._triples):
+        if vb is None or not (self._areas or self._lines or self._triples or self._windows):
             return
         (vx0, vx1), (y0, y1) = vb.viewRange()
         transform = p.transform()
@@ -250,7 +253,8 @@ class EnigmaAreas(pg.GraphicsObject):
                 p.setPen(pen)
                 p.drawLine(QPointF(ln["x"], y0), QPointF(ln["x"], y1))
         visible = [t for t in self._triples if t["x1"] >= vx0 and t["x0"] <= vx1]
-        if not visible:
+        windows = [w for w in self._windows if w["x1"] >= vx0 and w["x0"] <= vx1]
+        if not (visible or windows):
             return
         dash = pg.mkPen(QColor("#FFFFFF"), width=1)
         dash.setDashPattern([3, 8])                                       # línea fina, guiones cortos y muy separados
@@ -286,6 +290,23 @@ class EnigmaAreas(pg.GraphicsObject):
                 label = str(t["number"])
             if p.fontMetrics().horizontalAdvance(label) <= right - left - 6:
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+        bottom = transform.map(QPointF(0, y0)).y()                         # ventanas de reversión (Asia Q1, NY AM Q3, NY PM Q3): franja abajo
+        for w in windows:
+            left, right = transform.map(QPointF(max(w["x0"], vx0), 0)).x(), transform.map(QPointF(min(w["x1"], vx1), 0)).x()
+            rect = QRectF(left, bottom - 14, right - left, 14)
+            fill = QColor(w["color"])
+            fill.setAlphaF(1.0 if w["same"] else 0.55)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(fill)
+            p.drawRect(rect)
+            edge = pg.mkPen(QColor(w["color"]).darker(150), width=2)
+            edge.setCosmetic(True)
+            p.setPen(edge)
+            p.drawLine(QPointF(left, bottom - 14), QPointF(right, bottom - 14))
+            p.setPen(QColor("#2B2B2B"))
+            p.setFont(bold if w["same"] else font)
+            if p.fontMetrics().horizontalAdvance(w["label"]) <= right - left - 6:
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, w["label"])
 
 
 class ScaleAxis(pg.AxisItem):
@@ -1159,13 +1180,15 @@ class ChartView(pg.PlotWidget):
             self._bias_items += [box, label]
 
     # -- Enigma369: áreas de alineación de cuartos (3, 6, 9) ----------------------------------------------------
-    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None) -> None:
+    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None,
+                   windows: list[dict] | None = None) -> None:
         """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
 
         area = {x0, x1, color, opacity}. Con [] se quitan todas. `lines`: inicio y fin del cuarto en curso, punteadas.
         `triples`: combinaciones de 3 o más zonas del mismo color {x0, x1, color, label}, como franja con su código en el borde superior.
+        `windows`: ventanas de reversión {x0, x1, color, label, same}, como franja en el borde inferior (en negrita si `same`).
         """
-        self.enigma.set_data(areas, lines, triples)
+        self.enigma.set_data(areas, lines, triples, windows)
 
     @property
     def enigma_item_count(self) -> int:

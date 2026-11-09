@@ -23,6 +23,9 @@ Regla:
      Opacidad del área: 2 zonas 0,14 / 3 zonas 0,28 / 4 zonas 0,42.
   7. Combinación de color = 3 o más zonas seguidas del mismo color (crítico o no): se marca en el gráfico con una franja
      del color en el borde superior y su código.
+  8. Ventanas de reversión (de lunes a jueves): Asia Q1, NY AM Q3 y NY PM Q3, donde se concentran el máximo y el mínimo del día
+     (NAS100 5m, 2024-2026: 42-45 % de los extremos en el 19 % del tiempo). Se marcan con una franja en el borde inferior;
+     Asia Q1 (1-1) y NY AM Q3 (3-3), sesión y cuarto del mismo color, en negrita.
 """
 from __future__ import annotations
 
@@ -41,7 +44,8 @@ OPACITY = {2: 0.14, 3: 0.28, 4: 0.42}
 DEFAULT_COLORS = {0: "#EFD9A8", 1: "#B2B6C1", 2: "#E398A1", 3: "#A6CFA9", 4: "#98AEF8"}   # tonos pastel del indicador; 0 = Q0 (amarillo)
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 SESSION_LABELS = {1: "Asia", 2: "London", 3: "NY AM", 4: "NY PM"}
-MAX_BARS = 20000         # solo se calculan las zonas de las últimas velas (= FEED_MAX_BARS por defecto: unas 3 semanas en M1)
+REVERSAL_WINDOWS = {(1, 1): "Asia Q1", (3, 3): "NY AM Q3", (4, 3): "NY PM Q3"}   # (sesión, cuarto): ventanas donde suele hacerse el máximo o el mínimo del día
+MAX_BARS = 20000        # solo se calculan las zonas de las últimas velas (= FEED_MAX_BARS por defecto: unas 3 semanas en M1)
 
 
 def reduce_digit(total: int) -> int:
@@ -218,7 +222,29 @@ def compute(ts, ahead: int, mode: str = "semana", anchor_hour: int = DEFAULT_ANC
         t["active"] = True                                                    # la de la última vela: su fin se proyecta con una línea aparte
     lines = quarter_lines(ts, ahead, anchor_hour, colors, layers[-1])
     lines += [ln for ln in triple_lines(ts, ahead, anchor_hour, list(open_triples.values()), layers) if all(abs(ln["x"] - o["x"]) > 1e-6 for o in lines)]
-    return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": lines}
+    return {"layers": layers, "rows": rows, "areas": areas, "triples": triples, "quarter_lines": lines,
+            "windows": reversal_windows(dig, first, colors)}
+
+
+def reversal_windows(dig: dict[str, np.ndarray], first: int = 0, colors=None) -> list[dict]:
+    """Tramos de velas en Asia Q1, NY AM Q3 o NY PM Q3 de lunes a jueves: [{x0, x1, label, color, same}] en índices de vela.
+    `same`: sesión y cuarto del mismo color (1-1, 3-3); `color`: el del cuarto."""
+    colors = {**DEFAULT_COLORS, **(colors or {})}
+    ses, cua, day = dig["sesion"].astype(int), dig["cuarto"].astype(int), dig["dia"]
+    key = np.where((day > 0) & np.isin(ses * 10 + cua, [s * 10 + c for s, c in REVERSAL_WINDOWS]), ses * 10 + cua, 0)
+    out: list[dict] = []
+    k, n = 0, len(key)
+    while k < n:
+        if not key[k]:
+            k += 1
+            continue
+        j = k
+        while j + 1 < n and key[j + 1] == key[k] and dig["weekday"][j + 1] == dig["weekday"][k]:
+            j += 1
+        s, c = divmod(int(key[k]), 10)
+        out.append(dict(x0=first + k - 0.5, x1=first + j + 0.5, label=REVERSAL_WINDOWS[(s, c)], color=colors[c], same=s == c))
+        k = j + 1
+    return out
 
 
 def quarter_lines(ts, ahead: int, anchor_hour: int = DEFAULT_ANCHOR_HOUR, colors=None, layer: str = "cuarto") -> list[dict]:
