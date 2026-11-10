@@ -79,7 +79,7 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
         if hit_target:
             return done("objetivo", target, i)
         if be_ts is None and ((be_r is not None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r)
-                              or (be_price is not None and (high[i] >= be_price if long else low[i] <= be_price))):
+                              or (be_price is not None and i > start and (high[i] >= be_price if long else low[i] <= be_price))):      # la vela de entrada es anterior a la entrada: su extremo no cuenta como toque
             be_ts = int(ts[i])          # el precio tocó +be_r R (o el precio de breakeven de la orden): el stop pasa a la entrada desde la vela siguiente
         last = i
     if last is not None and now is not None and bar and now - (ts[last] + bar) > MARKET_CLOSED_SECONDS:

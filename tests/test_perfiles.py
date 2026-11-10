@@ -652,7 +652,10 @@ def test_barrido_rth_breakeven_al_tomar_el_low_de_ny_open_y_configurable():
     order = Order("NAS100", "5m", "short", "p", "barrido_rth", "RTH", date(1970, 1, 1), 100, 90, 95, 98.0, 128.0, 90.0, "No Bias", 0.0, "r",
                   entry_ts=int(ctx.ts[5]), close_ts=int(ctx.ts[-1]) + 3600, be_price=95.0)
     closed = resolve(order, ctx.ts, ctx.high, ctx.low, ctx.close)
-    assert closed.result == "breakeven" and closed.r == 0 and closed.be_ts == int(ctx.ts[5])   # al tocar el Low pasó a la entrada y volvió a ella
+    assert closed.result == "breakeven" and closed.r == 0 and closed.be_ts == int(ctx.ts[6])   # al tocar el Low pasó a la entrada y volvió a ella
+    # el extremo de la propia vela de entrada es anterior a la entrada: no arma el breakeven (la vela 5 toca 95 pero es la de entrada)
+    solo_entrada = resolve(order, ctx.ts[:6], ctx.high[:6], ctx.low[:6], ctx.close[:6])
+    assert solo_entrada is None
     sin_be = resolve(replace_order(order), ctx.ts, ctx.high, ctx.low, ctx.close)
     assert sin_be.result == "stop" and sin_be.r < 0                                   # sin breakeven por precio, la misma vela acaba en stop
 
