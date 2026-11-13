@@ -149,7 +149,7 @@ def cierre_del_dia(ts: int, ahead: int, end_minutes: int) -> int:
 
 
 def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: float, target: float, label: str,
-                     be_price: float | None = None) -> Figure:
+                     be_price: float | None = None, key: str = KEY) -> Figure:
     """Posición para el gráfico: de la vela de la entrada a la del cierre (o a la última vela si sigue abierta)."""
     close = int(ctx.ts[t]) + MAX_HOLD_SECONDS
     if ctx.day_end:
@@ -158,14 +158,14 @@ def _figura_posicion(ctx: Contexto, direction: str, t: int, entry: float, stop: 
     tf_sec = ctx.tf_minutes * 60
     kind, idx = None, min(limit, len(ctx.ts) - 1)
     if limit >= t:
-        order = SimpleNamespace(direction=direction, pattern_key=KEY, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, be_price=be_price)
+        order = SimpleNamespace(direction=direction, pattern_key=key, price=entry, stop=stop, target=target, entry_ts=int(ctx.ts[t]), close_ts=close, be_price=be_price)
         end = limit + 1
         done = resolve(order, ctx.ts[:end], ctx.high[:end], ctx.low[:end], ctx.close[:end], ctx.be_r, tf_sec)
         if done is not None:
             kind, idx = done.result, int(np.searchsorted(ctx.ts, done.exit_ts, "left"))
     state = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(
         kind, "abierta" if limit >= len(ctx.ts) - 1 else "tiempo")
-    return Figure("pos", KEY, ctx.tbr.zone, direction, int(ctx.ts[t]), int(ctx.ts[idx]) + tf_sec,
+    return Figure("pos", key, ctx.tbr.zone, direction, int(ctx.ts[t]), int(ctx.ts[idx]) + tf_sec,
                   {"entrada": float(entry), "stop": float(stop), "objetivo": float(target)}, state, label, ctx.tbr.day.isoformat())
 
 

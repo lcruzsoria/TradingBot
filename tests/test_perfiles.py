@@ -421,6 +421,27 @@ def test_barrido_rth_la_rotura_es_un_cierre_fuera_y_la_entrada_la_primera_vela_q
     assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 129.0
 
 
+def test_barrido_continuacion_toca_el_50_y_entra_a_favor_de_la_rotura_con_stop_40_y_2r():
+    from tradingbot.skills.barrido.continuacion import Ajustes, KEY, analizar
+    toca = (96, 98, 94, 97)                                              # toca el 50 % del RTH (95) con la mecha
+    sin_toque = (97, 99, 96, 98)
+    hits, _ = analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)]))     # 10:05 cierra por encima: largo a favor
+    assert [(h.key, h.direction, h.x, h.price, h.levels) for h in hits] == [(KEY, "long", 2, 103.0, {"stop": 63.0, "target": 183.0})]
+    hits, _ = analizar(_barrido_ctx([IN, toca, (92, 93, 86, 88)]))       # por debajo: corto (cualquier lado)
+    assert [(h.direction, h.levels) for h in hits] == [("short", {"stop": 128.0, "target": 8.0})]
+    assert analizar(_barrido_ctx([IN, sin_toque, (97, 104, 96, 103)]))[0] == []      # rompe sin haber tocado el 50 %
+    assert analizar(_barrido_ctx([IN, (97, 104, 94, 103)]))[0] == []                 # el toque de la propia vela que rompe no cuenta
+    assert analizar(_barrido_ctx([IN, toca, (97, 104, 96, 99)]))[0] == []            # una mecha fuera sin cierre fuera no es rotura
+    tarde = [IN] + [sin_toque] * 11 + [toca, (97, 104, 96, 103)]                       # la rotura es la vela de las 11:00: anulado
+    assert analizar(_barrido_ctx(tarde))[0] == []
+    assert analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"))[0] == []   # solo Nasdaq
+    a = Ajustes.desde(EnvConfig(parse("STOP_POINTS=10\nRR=3\nMARKETS=SP500\n")))
+    hits, _ = analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"), a)
+    assert hits[0].levels == {"stop": 93.0, "target": 133.0}
+    with pytest.raises(ValueError, match="BARRIDO_CONTINUACION_RR"):
+        Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
 def test_barrido_rth_casos_sin_setup():
     from tradingbot.skills.barrido.rth import analizar
     solo_mechas = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0]
@@ -570,7 +591,7 @@ def test_la_skill_barrido_es_independiente_de_pattern_y_ocupa_el_hexagono_grande
     skill = manager.skills["barrido"]
     skill.on_start()
     assert skill.slot == 4 and skill.error == ""
-    assert list(skill.setups) == ["rth", "asia", "pdh", "londres"]                       # BARRIDO_SETUPS=rth, asia, pdh, londres
+    assert list(skill.setups) == ["rth", "asia", "pdh", "londres", "continuacion"]      # BARRIDO_SETUPS de tradingbot.env
     r, asia = skill.setups["rth"][1], skill.setups["asia"][1]
     assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.be) == ("5m", 600, 660, 720, 30.0, True)        # BARRIDO_RTH_* de tradingbot.env
     assert (asia.start, asia.end, asia.entry_end, asia.stop_points) == (0, 60, 60, 30.0)                        # BARRIDO_ASIA_*
@@ -606,9 +627,10 @@ def test_la_skill_barrido_publica_el_setup_del_rth_del_3_de_noviembre_al_cerrar_
         time.sleep(0.02)
     time.sleep(0.1)
     manager.stop()
-    hit = found[0].payload["hit"]
+    rth_found = [e for e in found if e.payload["hit"].key == "barrido_rth"]          # la continuación también salta con estas velas (largo en 102): aquí solo el RTH
+    hit = rth_found[0].payload["hit"]
     assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 128.0, 90.0)
-    assert found[0].payload["tbr"].zone == "RTH" and found[0].payload["tbr"].day == day
+    assert rth_found[0].payload["tbr"].zone == "RTH" and rth_found[0].payload["tbr"].day == day
     assert updated[-1].payload["figures"][0].levels["entrada_ts"] == float(df["ts"][16])  # la vela cuyo cierre es la entrada
 
 
@@ -857,7 +879,7 @@ def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
         s = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(text))), [{"type": "barrido"}]).skills["barrido"]
         s.on_start()
         return s
-    assert list(skill("").setups) == ["rth", "asia", "pdh", "londres"]                    # por defecto, los cuatro
+    assert list(skill("").setups) == ["rth", "asia", "pdh", "londres", "continuacion"]   # por defecto, los cinco
     assert list(skill("BARRIDO_SETUPS=asia\n").setups) == ["asia"]
     assert skill("BARRIDO_ASIA_STOP_POINTS=40\n").setups["asia"][1].stop_points == 40.0   # cada setup, su bloque de ajustes
     with pytest.raises(ValueError, match="BARRIDO_SETUPS"):
