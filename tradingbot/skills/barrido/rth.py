@@ -11,7 +11,8 @@ Reglas (velas de `BARRIDO_RTH_TF`, M5 al inicio):
    Stop: fijo, a `BARRIDO_RTH_STOP_POINTS` (30) puntos de la entrada si con eso queda cubierto el swing; si no, el swing más
    `BARRIDO_RTH_STOP_BUFFER` (5) puntos (por encima en un corto, por debajo en un largo).
    Breakeven (`BARRIDO_RTH_BE`): cuando el precio toca el Low del TBR NY Open (10:00 en adelante) que había hasta la entrada (el High en un
-   largo), el stop pasa a la entrada. Sin él, la posición cierra solo en el objetivo 1 o en el stop.
+   largo), el stop pasa a la entrada. Ese nivel no puede quedar a menos de `BARRIDO_RTH_BE_MIN_R` (1) R de la entrada: si está más cerca, el breakeven
+   se arma a +1 R. Sin él, la posición cierra solo en el objetivo 1 o en el stop.
 4. Entrada: la primera vela POSTERIOR a la rotura que CIERRA de nuevo dentro del rango, a mercado a su cierre. Debe abrir antes de
    `BARRIDO_RTH_ENTRY_END` (12:00 NY, fin de NY Open). Si antes de volver el precio rompe también el otro lado, no hay setup.
 5. Romper por arriba da un corto y romper por abajo, un largo.
@@ -68,6 +69,7 @@ class Ajustes:
     stop_buffer: float = DEFAULT_STOP_BUFFER
     be: bool = True              # breakeven al tomar el Low (High) del TBR NY Open
     stop_mercado: tuple = ()     # stop propio de algunos mercados: ((MERCADO, puntos, buffer), ...)
+    be_min_r: float = 1.0        # el nivel del breakeven no puede estar a menos de estos R de la entrada (0 = sin mínimo)
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
@@ -84,6 +86,12 @@ class Ajustes:
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"),
                 minutos(get("ENTRY_END", DEFAULT_ENTRY_END), "ENTRY_END"), points, buffer, be,
                 stops.leer(settings, "BARRIDO_RTH", points, buffer))
+        try:
+            a = replace(a, be_min_r=float(get("BE_MIN_R", 1.0)))
+        except ValueError:
+            raise ValueError("BARRIDO_RTH_BE_MIN_R debe ser un número.") from None
+        if a.be_min_r < 0:
+            raise ValueError("BARRIDO_RTH_BE_MIN_R no puede ser negativo.")
         if a.end <= a.start:
             raise ValueError(f"BARRIDO_RTH_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         if a.entry_end < a.end:
@@ -227,7 +235,9 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     levels = {"stop": stop, "target": goal}
     if a.be:                                                                  # breakeven al tomar el Low (High) del TBR NY Open que había hasta la entrada
         ny_open = int(np.searchsorted(ctx.ts, midnight + a.start * 60, "left"))
-        levels["be"] = float(np.min(ctx.low[ny_open:t + 1]) if up else np.max(ctx.high[ny_open:t + 1]))
+        nivel = float(np.min(ctx.low[ny_open:t + 1]) if up else np.max(ctx.high[ny_open:t + 1]))
+        minimo = close - sign * a.be_min_r * abs(close - stop)                # a `be_min_r` R de la entrada: el nivel del NY Open no puede estar más cerca
+        levels["be"] = min(nivel, minimo) if up else max(nivel, minimo)
     second = _objetivo2(ctx, up, goal, midnight + a.start * 60)
     if second is not None:
         levels["target2"] = second[0]
