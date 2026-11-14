@@ -20,6 +20,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -98,7 +99,15 @@ def main() -> None:
         mt5.symbol_select(symbol, True)
         series = {}
         for m in engine.ZONE_TFS:                                                # velas de 3, 5 y 15 min de MT5 (las de 15 también se podrían agrupar desde las de 5)
-            raw = pd.DataFrame(mt5.copy_rates_from_pos(symbol, getattr(mt5, f"TIMEFRAME_M{m}"), 0, args.barras)).rename(columns={"time": "ts"})
+            rates = None
+            for _ in range(10):                                                  # MT5 devuelve None mientras sincroniza el historial del símbolo
+                rates = mt5.copy_rates_from_pos(symbol, getattr(mt5, f"TIMEFRAME_M{m}"), 0, args.barras)
+                if rates is not None and len(rates):
+                    break
+                time.sleep(2)
+            if rates is None or not len(rates):
+                sys.exit(f"MT5 no da velas de {symbol} M{m}: {mt5.last_error()}")
+            raw = pd.DataFrame(rates).rename(columns={"time": "ts"})
             series[m] = raw[["ts", "open", "high", "low", "close"]].iloc[:-1].reset_index(drop=True)      # sin la vela que se está formando
         df = series[5]
         bars[symbol] = df                                                       # con estas velas se sigue la posición (el TF del perfil)
