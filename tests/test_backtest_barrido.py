@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from tradingbot.skills.stats.backtest import Group, load  # noqa: E402
 
-PATTERNS = ["Todos", "Barrido RTH", "Continuación de Asia", "Barrido PDH/PDL Asia", "Barrido PDH/PDL Londres", "Continuación RTH"]      # los botones del fichero real
+PATTERNS = ["Todos", "Barrido RTH", "Continuación de Asia", "Barrido PDH/PDL Asia", "Barrido PDH/PDL Londres", "Continuación RTH", "Barrido PDH/PDL Pre-NY"]      # los botones del fichero real
 FIXTURE = ["Todos", "Barrido RTH", "Barrido de Asia", "Barrido PDH/PDL Asia", "Barrido PDH/PDL Londres"]        # los del grupo hecho a mano
 
 

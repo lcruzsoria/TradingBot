@@ -25,6 +25,7 @@ import backtest_barrido_asia_continuacion as b_asia      # noqa: E402
 import backtest_barrido_continuacion as b_con  # noqa: E402
 import backtest_barrido_londres as b_lon    # noqa: E402
 import backtest_barrido_pdh as b_pdh        # noqa: E402
+import backtest_barrido_preny as b_pre      # noqa: E402
 import backtest_barrido_rth as b_rth        # noqa: E402
 from tradingbot.envconfig import load      # noqa: E402
 from tradingbot.skills.tbr.zones import zones_from_settings  # noqa: E402
@@ -38,10 +39,11 @@ SETUPS = ((b_rth, "BARRIDO_RTH", ["PRE_NY", "ASIA", "LONDON"], "Barrido RTH", "R
           (b_asia, "BARRIDO_ASIA_CONTINUACION", ["ASIA"], "Continuación de Asia", "Asia"),
           (b_pdh, "BARRIDO_PDH", ["ASIA"], "Barrido PDH/PDL Asia", "Asia"),
           (b_lon, "BARRIDO_LONDRES", ["LONDON"], "Barrido PDH/PDL Londres", "London"),
-          (b_con, "BARRIDO_CONTINUACION", ["PRE_NY"], "Continuación RTH", "RTH"))
+          (b_con, "BARRIDO_CONTINUACION", ["PRE_NY"], "Continuación RTH", "RTH"),
+          (b_pre, "BARRIDO_PRENY", ["LONDON"], "Barrido PDH/PDL Pre-NY", "Pre-NY"))
 OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "breakeven": "breakeven", "tiempo": "tiempo"}
-ZONES = ["RTH", "Asia", "London"]
+ZONES = ["RTH", "Asia", "London", "Pre-NY"]
 FILTER = "sin filtro de sesgo"                       # el bloque de filtros de la ventana: aquí no hay sesgo, un solo filtro
 
 
@@ -80,7 +82,7 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
         "datos": [{"mercado": m, "velas M15": periods[m][0], "desde (NY)": str(periods[m][1]), "hasta (NY)": str(periods[m][2]), "TBR evaluadas": None}
                   for m in markets if m in periods],
         "metodologia": [
-            ["Qué es", "Los cinco setups de barrido del perfil Barrido_NYAM, simulados con el mismo código que la skill Barrido del bot (contextos + analizar) y la "
+            ["Qué es", "Los setups de barrido del perfil Barrido_NYAM, simulados con el mismo código que la skill Barrido del bot (contextos + analizar) y la "
                        "regla de cierre de Setup (stop, objetivo, breakeven del RTH o fin del día de trading / cierre de Londres). Los botones de Patrón eligen Todos o uno."],
             ["Barrido RTH", "Rotura del rango 09:00-10:00 con una vela M5 que cierra fuera entre las 10:00 y las 11:00; entrada en el primer cierre de vuelta dentro "
                             "antes de las 12:00; objetivo en el otro lado del RTH y breakeven al tomar el Low/High de NY Open."],
@@ -91,6 +93,8 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
                                      "sale por tiempo, al precio de mercado, cuando cierra Asia (00:00); el riesgo es variable."],
             ["Barrido PDH/PDL Londres", "Lo mismo con Londres: nivel sin tocar hasta las 02:00, barrido y entrada entre las 02:00 y las 03:00; objetivo en el extremo opuesto de Londres ya formado si "
                                         "el precio sigue dentro; si no hay (o no llega), sale por tiempo al precio de mercado cuando cierra Londres (05:00)."],
+            ["Barrido PDH/PDL Pre-NY", "Nivel del día anterior sin tocar desde las 18:00 hasta las 05:00; lo barre entre las 05:00 y las 09:00 y la primera vela que cierra de vuelta "
+                                       "(con cierre antes de las 09:00) da la entrada; stop fijo por mercado (30 NAS, 20 DJ30, 5 SP500, o el swing más buffer) y objetivo fijo 2R; sin objetivo cierra a final del día. Nota: el PDH/PDL de Asia está desactivado en el bot (se mantiene aquí su histórico)."],
             ["Continuación RTH", "Solo Nasdaq: entre las 10:00 y las 11:00 el precio toca el 50 % del RTH y después una vela M5 cierra fuera del rango por cualquier lado; entrada a ese cierre, "
                                  "a favor de la rotura, stop 40 puntos y objetivo 2R, sin breakeven. Sin rotura antes de las 11:00 no hay operación."],
             ["Stop", "Barridos y PDH/PDL: fijo a 30 puntos de la entrada si cubre el swing; si no, el swing más 5 puntos. Las continuaciones usan su stop fijo."],
@@ -118,7 +122,7 @@ def main() -> None:
         own = [t for t in trades if t["patron"] == name]
         print(f"{name}: {len(own)} operaciones, {sum(t['r'] for t in own):+.2f} R")
     rows, balance, dd = b_rth.account(trades, 10_000.0, risk)
-    print(f"Los cinco juntos ({len(rows)} operaciones): saldo {balance:,.2f} USD ({balance - 10_000:+,.2f}), drawdown máximo {dd:.2f} %")
+    print(f"Todos juntos ({len(rows)} operaciones): saldo {balance:,.2f} USD ({balance - 10_000:+,.2f}), drawdown máximo {dd:.2f} %")
     if not args.solo_mostrar:
         write(group_json(trades, periods, datetime.now(timezone.utc).strftime("%Y-%m-%d")))
 

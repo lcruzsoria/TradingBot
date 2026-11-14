@@ -591,12 +591,15 @@ def test_la_skill_barrido_es_independiente_de_pattern_y_ocupa_el_hexagono_grande
     skill = manager.skills["barrido"]
     skill.on_start()
     assert skill.slot == 4 and skill.error == ""
-    assert list(skill.setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion"]      # BARRIDO_SETUPS de tradingbot.env
+    assert list(skill.setups) == ["rth", "asia_continuacion", "londres", "continuacion", "preny"]      # BARRIDO_SETUPS de tradingbot.env: el PDH/PDL de Asia está desactivado
     r, asia = skill.setups["rth"][1], skill.setups["asia_continuacion"][1]
     assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.be) == ("5m", 600, 660, 720, 30.0, True)        # BARRIDO_RTH_* de tradingbot.env
     assert (asia.start, asia.end, asia.stop_points, asia.rr) == (0, 30, 30.0, 3.0)                              # BARRIDO_ASIA_CONTINUACION_*
-    pdh = skill.setups["pdh"][1]
+    from tradingbot.skills.barrido import pdh as _pdh
+    pdh = _pdh.Ajustes.desde(env.section("BARRIDO_PDH"))                                                        # sigue configurado aunque esté desactivado
     assert (pdh.start, pdh.end, pdh.stop_points, pdh.stop_buffer) == (1200, 1260, 30.0, 5.0)                    # BARRIDO_PDH_*
+    preny = skill.setups["preny"][1]
+    assert (preny.start, preny.end, preny.stop_points, preny.rr) == (300, 540, 30.0, 2.0)                       # BARRIDO_PRENY_*
     for path in (root / "tradingbot" / "skills" / "barrido").glob("*.py"):           # ni hereda ni importa código de la skill Pattern
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             module = getattr(node, "module", None) or ""
@@ -844,6 +847,23 @@ def test_barrido_pdh_de_londres_mismas_reglas_con_objetivo_en_londres_y_salida_a
         Ajustes.desde(EnvConfig(parse("START=03:30\nEND=03:00\n")))
 
 
+def test_barrido_pdh_pre_ny_entra_al_cierre_de_vuelta_con_objetivo_fijo_2r():
+    from tradingbot.skills.barrido.preny import Ajustes, KEY, analizar
+    relleno = [(95, 97, 94, 96)] * 36                                                                 # de las 02:00 a las 05:00 sin tocar el PDH (100)
+    hits, figs = analizar(_londres_ctx(relleno + [(96, 103, 95, 102), (102, 104, 98, 99), (99, 100, 97, 98)]))
+    assert [(h.key, h.direction, h.x, h.price) for h in hits] == [(KEY, "short", 133, 99.0)]           # 05:00 barre, 05:05 cierra de vuelta
+    assert hits[0].levels == {"stop": 129.0, "target": 39.0}                                           # stop fijo 30, objetivo 2R = 60 puntos
+    assert len(figs) == 1
+    assert analizar(_londres_ctx([(96, 101, 95, 96)] + [(95, 97, 94, 96)] * 35 + [(96, 103, 95, 102), (102, 104, 98, 99)]))[0] == []
+    tarde = [(95, 97, 94, 96)] * 36 + [(95, 97, 94, 96)] * 47 + [(96, 103, 95, 102), (102, 104, 98, 99)]       # barre a las 08:55 y cierra de vuelta a las 09:00: fuera de la ventana
+    # (la comprobación de frescura está en la línea anterior: un High de 101 a las 02:00 ya tocó el nivel)
+    assert analizar(_londres_ctx(tarde))[0] == []
+    a = Ajustes.desde(None)
+    assert (a.start, a.end, a.rr) == (5 * 60, 9 * 60, 2.0)
+    with pytest.raises(ValueError, match="BARRIDO_PRENY_RR"):
+        Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
 def test_la_skill_barrido_publica_tambien_la_continuacion_de_asia():
     import pandas as pd
     from tradingbot.core import EventBus, Services, SkillManager
@@ -880,7 +900,8 @@ def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
         s = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(text))), [{"type": "barrido"}]).skills["barrido"]
         s.on_start()
         return s
-    assert list(skill("").setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion"]   # por defecto, los cinco
+    assert list(skill("").setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion", "preny"]   # sin BARRIDO_SETUPS, todos los módulos
+    assert "pdh" in skill("BARRIDO_SETUPS=rth, pdh\n").setups                                          # el PDH/PDL de Asia se reactiva añadiéndolo
     assert list(skill("BARRIDO_SETUPS=asia_continuacion\n").setups) == ["asia_continuacion"]
     assert skill("BARRIDO_ASIA_CONTINUACION_STOP_POINTS=40\n").setups["asia_continuacion"][1].stop_points == 40.0   # cada setup, su bloque de ajustes
     with pytest.raises(ValueError, match="BARRIDO_SETUPS"):
