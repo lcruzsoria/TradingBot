@@ -118,3 +118,36 @@ def test_la_skill_publica_el_ssmt_cuando_llegan_los_tres_indices_y_valida_sus_aj
     assert skill("").ciclos == ("dia", "90m", "semana")
     with pytest.raises(ValueError, match="SMT_CICLOS"):
         skill("SMT_CICLOS=dia, luna\n")
+
+
+def _freedom(es_rompe=False):
+    """Tres activos con velas de 5 min desde las 07:30 (servidor = NY): Q2 plano 7:30-9:00, y desde las 9:00 un SSMT alcista del NQ con su tCISD."""
+    plano = (99.0, 100.0, 98.0, 99.0)
+    quieta = (99.0, 100.0, 98.5, 99.5)
+    nq = [plano] * 18 + [quieta] * 3 + [(99.0, 99.5, 96.0, 97.0), (97.0, 100.5, 96.5, 100.0), (100.0, 100.0, 98.5, 99.5)] + [(99.5, 112.0, 99.0, 111.0)]
+    es = [plano] * 18 + [quieta] * 3 + [(99.0, 99.5, 96.0 if es_rompe else 98.5, 97.0)] + [quieta] * 4
+    ts = np.array([5 * DAY + 7 * H + 1800 + 300 * i for i in range(len(nq))])
+    mk = lambda v: (ts, *(np.array([x[k] for x in v]) for k in range(4)))
+    return {"NQ": mk(nq), "ES": mk(es), "YM": mk(es)}
+
+
+def test_modelo_freedom_tcisd_alcista_entra_al_cierre_de_la_vela_que_rechaza_el_retest():
+    from tradingbot.skills.smt.freedom import modelo
+    trades = modelo(_freedom(), "NQ", 0, 5, "90m", 3.0)
+    assert len(trades) == 1
+    t = trades[0]
+    # la vela de las 9:15 rompe el mínimo de Q2 (98) solo en el NQ y cierra bajista: es la vela del tCISD (apertura 99); la siguiente cierra por encima (confirma);
+    # la tercera toca 99 y cierra por encima: entrada al cierre, stop en el mínimo del SSMT (96), objetivo a 3R
+    assert (t["direction"], t["entry"], t["stop"], round(t["target"], 6)) == ("long", 99.5, 96.0, 110.0)
+    nivel = modelo(_freedom(), "NQ", 0, 5, "90m", 2.0, "nivel")[0]
+    assert (nivel["entry"], nivel["stop"], nivel["target"]) == (99.0, 96.0, 105.0)                # orden en la apertura de la vela del tCISD
+    assert modelo(_freedom(), "NQ", 0, 5, "90m", 2.0, "nivel", holgura=1.0) == []                 # el precio no atraviesa el nivel (mínimo 98,5 frente a 99 - 1)
+    assert modelo(_freedom(es_rompe=True), "NQ", 0, 5, "90m", 3.0) == []                          # si todos rompen el extremo, el SSMT se invalida
+
+
+def test_agregar_junta_velas_finas_en_velas_mas_gruesas():
+    from tradingbot.skills.smt.freedom import agregar
+    ts = np.array([0, 300, 600, 900, 1200, 1500])
+    o, h, l, c = (np.array(x, dtype=float) for x in ([1, 2, 3, 4, 5, 6], [2, 5, 4, 5, 9, 7], [0, 1, 2, 3, 4, 5], [2, 3, 4, 5, 6, 7]))
+    t, o2, h2, l2, c2 = agregar((ts, o, h, l, c), 0, 15)
+    assert list(t) == [0, 900] and list(o2) == [1, 4] and list(h2) == [5, 9] and list(l2) == [0, 3] and list(c2) == [4, 7]
