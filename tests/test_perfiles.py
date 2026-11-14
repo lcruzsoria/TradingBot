@@ -385,7 +385,7 @@ def test_el_perfil_barrido_nyam_usa_la_cuenta_de_puprime_con_10000_y_solo_el_dob
                                                                                 "barrido_nyam", 10_000.0, "USD")
     assert "barrido_nyam" not in STRATEGY_PATTERNS                                   # no usa Pattern: tiene su propia skill
     kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "barrido_nyam")
-    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido", 4)]   # skill propia en un hexágono grande, sin Pattern ni Calendario
+    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido", 4), ("smt", "aux2")]   # skill propia en un hexágono grande, sin Pattern ni Calendario, y SMT en un auxiliar
 
 
 # -- perfil Barrido_NYAM: barrido del RTH --------------------------------------------------------------------------

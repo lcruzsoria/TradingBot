@@ -83,7 +83,7 @@ STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario
                        "crt": ("pattern", "tbr", "calendario", "bias")}   # skills que un perfil de estrategia no usa (solo opera la suya; CRT tiene su propio sesgo)
 
 STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},),
-                      "barrido_nyam": ({"type": "barrido", "slot": 4},)}      # en el hexágono grande que ocupa Pattern en los demás perfiles   # skills que solo existen en ese perfil de estrategia
+                      "barrido_nyam": ({"type": "barrido", "slot": 4}, {"type": "smt", "slot": "aux2"})}      # en el hexágono grande que ocupa Pattern en los demás perfiles   # skills que solo existen en ese perfil de estrategia
 
 STRATEGY_TIMEFRAMES = {"crt": "5m", "barrido_nyam": "5m"}              # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
