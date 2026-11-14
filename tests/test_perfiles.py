@@ -591,10 +591,10 @@ def test_la_skill_barrido_es_independiente_de_pattern_y_ocupa_el_hexagono_grande
     skill = manager.skills["barrido"]
     skill.on_start()
     assert skill.slot == 4 and skill.error == ""
-    assert list(skill.setups) == ["rth", "asia", "pdh", "londres", "continuacion"]      # BARRIDO_SETUPS de tradingbot.env
-    r, asia = skill.setups["rth"][1], skill.setups["asia"][1]
+    assert list(skill.setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion"]      # BARRIDO_SETUPS de tradingbot.env
+    r, asia = skill.setups["rth"][1], skill.setups["asia_continuacion"][1]
     assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.be) == ("5m", 600, 660, 720, 30.0, True)        # BARRIDO_RTH_* de tradingbot.env
-    assert (asia.start, asia.end, asia.entry_end, asia.stop_points) == (0, 60, 60, 30.0)                        # BARRIDO_ASIA_*
+    assert (asia.start, asia.end, asia.stop_points, asia.rr) == (0, 30, 30.0, 3.0)                              # BARRIDO_ASIA_CONTINUACION_*
     pdh = skill.setups["pdh"][1]
     assert (pdh.start, pdh.end, pdh.stop_points, pdh.stop_buffer) == (1200, 1260, 30.0, 5.0)                    # BARRIDO_PDH_*
     for path in (root / "tradingbot" / "skills" / "barrido").glob("*.py"):           # ni hereda ni importa código de la skill Pattern
@@ -844,7 +844,7 @@ def test_barrido_pdh_de_londres_mismas_reglas_con_objetivo_en_londres_y_salida_a
         Ajustes.desde(EnvConfig(parse("START=03:30\nEND=03:00\n")))
 
 
-def test_la_skill_barrido_publica_tambien_el_setup_de_asia():
+def test_la_skill_barrido_publica_tambien_la_continuacion_de_asia():
     import pandas as pd
     from tradingbot.core import EventBus, Services, SkillManager
     from tradingbot.skills.tbr.zones import Session, Zone
@@ -866,9 +866,10 @@ def test_la_skill_barrido_publica_tambien_el_setup_de_asia():
         time.sleep(0.02)
     time.sleep(0.1)
     manager.stop()
-    hit = found[0].payload["hit"]
-    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 128.0, 90.0)
-    assert found[0].payload["tbr"].zone == "Asia" and found[0].payload["tbr"].day == day
+    asia_found = [e for e in found if e.payload["hit"].key == "barrido_asia_continuacion"]
+    hit = asia_found[0].payload["hit"]                                                   # 00:10 cierra sobre el High (100): largo a favor, stop 30 y 3R
+    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("long", 102.0, 72.0, 192.0)
+    assert asia_found[0].payload["tbr"].zone == "Asia" and asia_found[0].payload["tbr"].day == day
 
 
 def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
@@ -879,9 +880,9 @@ def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
         s = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(text))), [{"type": "barrido"}]).skills["barrido"]
         s.on_start()
         return s
-    assert list(skill("").setups) == ["rth", "asia", "pdh", "londres", "continuacion"]   # por defecto, los cinco
-    assert list(skill("BARRIDO_SETUPS=asia\n").setups) == ["asia"]
-    assert skill("BARRIDO_ASIA_STOP_POINTS=40\n").setups["asia"][1].stop_points == 40.0   # cada setup, su bloque de ajustes
+    assert list(skill("").setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion"]   # por defecto, los cinco
+    assert list(skill("BARRIDO_SETUPS=asia_continuacion\n").setups) == ["asia_continuacion"]
+    assert skill("BARRIDO_ASIA_CONTINUACION_STOP_POINTS=40\n").setups["asia_continuacion"][1].stop_points == 40.0   # cada setup, su bloque de ajustes
     with pytest.raises(ValueError, match="BARRIDO_SETUPS"):
         skill("BARRIDO_SETUPS=rth, luna\n")
 
@@ -889,13 +890,13 @@ def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
 def test_barrido_stop_fijo_por_mercado():
     """El stop fijo es el general (Nasdaq) salvo que el bloque defina STOP_POINTS_<MERCADO> / STOP_BUFFER_<MERCADO> (casa con el comienzo del símbolo)."""
     from tradingbot.envconfig import EnvConfig
-    from tradingbot.skills.barrido import asia, pdh, rth
+    from tradingbot.skills.barrido import asia_continuacion, pdh, rth
     env = EnvConfig({"BARRIDO_RTH_STOP_POINTS": "30", "BARRIDO_RTH_STOP_BUFFER": "5", "BARRIDO_RTH_STOP_POINTS_DJ30": "75",
                      "BARRIDO_RTH_STOP_BUFFER_DJ30": "10", "BARRIDO_RTH_STOP_POINTS_SP500": "12"})
     a = rth.Ajustes.desde(env.section("BARRIDO_RTH"))
     assert a.stop_de("NAS100.s") == (30.0, 5.0) and a.stop_de("DJ30.s") == (75.0, 10.0)
     assert a.stop_de("SP500.s") == (12.0, 5.0)                                          # sin buffer propio, el general
-    assert asia.Ajustes.desde(None).stop_de("DJ30.s") == (30.0, 5.0) and pdh.Ajustes.desde(None).stop_de("SP500.s") == (30.0, 5.0)
+    assert asia_continuacion.Ajustes.desde(None).stop_de("DJ30.s") == (30.0, 0.0) and pdh.Ajustes.desde(None).stop_de("SP500.s") == (30.0, 5.0)
     bad = EnvConfig({"BARRIDO_PDH_STOP_POINTS_DJ30": "0"})
     try:
         pdh.Ajustes.desde(bad.section("BARRIDO_PDH"))

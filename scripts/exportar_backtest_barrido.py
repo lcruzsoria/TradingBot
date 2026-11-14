@@ -1,7 +1,7 @@
 """Backtest de los cuatro setups del perfil Barrido_NYAM para la ventana Backtest del bot.
 
 Simula con el mismo código del bot (`contextos` + `analizar` de skills/barrido y `resolve` de Setup, ver scripts/backtest_barrido_*.py) los setups
-RTH, Asia, PDH/PDL de Asia y PDH/PDL de Londres en NAS100.s, SP500.s y DJ30.s con las velas M5 de analisis/5m/puprime y SUSTITUYE el grupo del perfil
+RTH, Continuación de Asia, PDH/PDL de Asia y PDH/PDL de Londres en NAS100.s, SP500.s y DJ30.s con las velas M5 de analisis/5m/puprime y SUSTITUYE el grupo del perfil
 `barrido_nyam` de tradingbot/skills/stats/backtest.json.gz sin tocar el resto del fichero. En la ventana, el selector Patrón elige Todos o cada setup.
 
     uv run --with pyarrow python scripts/exportar_backtest_barrido.py [--velas RUTA] [--desde 2024-01-01]
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import backtest_barrido_asia as b_asia      # noqa: E402
+import backtest_barrido_asia_continuacion as b_asia      # noqa: E402
 import backtest_barrido_continuacion as b_con  # noqa: E402
 import backtest_barrido_londres as b_lon    # noqa: E402
 import backtest_barrido_pdh as b_pdh        # noqa: E402
@@ -35,7 +35,7 @@ AHEAD = 7 * 3600
 SYMBOLS = b_rth.SYMBOLS
 # (módulo del backtest, bloque de ajustes, zonas TBR necesarias, nombre en la ventana, TBR donde se da)
 SETUPS = ((b_rth, "BARRIDO_RTH", ["PRE_NY", "ASIA", "LONDON"], "Barrido RTH", "RTH"),
-          (b_asia, "BARRIDO_ASIA", ["ASIA"], "Barrido de Asia", "Asia"),
+          (b_asia, "BARRIDO_ASIA_CONTINUACION", ["ASIA"], "Continuación de Asia", "Asia"),
           (b_pdh, "BARRIDO_PDH", ["ASIA"], "Barrido PDH/PDL Asia", "Asia"),
           (b_lon, "BARRIDO_LONDRES", ["LONDON"], "Barrido PDH/PDL Londres", "London"),
           (b_con, "BARRIDO_CONTINUACION", ["PRE_NY"], "Continuación RTH", "RTH"))
@@ -75,7 +75,7 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
         "key": f"{PROFILE}:indices", "nombre": "Índices", "tipo": "barrido", "perfil": PROFILE, "perfil_nombre": PROFILE_NAME, "actualizado": updated,
         "cats": {"m": markets, "p": names, "z": ZONES, "o": OUTCOMES, "s": ["a favor", "en contra", "sin sesgo"]}, "ops": cols,
         "patrones": ["Todos"] + names, "filtros": {FILTER: "Todas las operaciones"}, "zonas": ZONES,
-        "descripcion": "Barrido RTH, Barrido de Asia, Barrido PDH/PDL (Asia y Londres) y Continuación RTH (solo Nasdaq) del modelo Greenbird en M5 · stop 30 puntos o swing + 5 (continuación: 40 puntos, 2R) · "
+        "descripcion": "Barrido RTH, Continuación de Asia, Barrido PDH/PDL (Asia y Londres) y Continuación RTH (solo Nasdaq) del modelo Greenbird en M5 · stop 30 puntos o swing + 5 (continuación: 40 puntos, 2R) · "
                        "sin costes (el spread no se simula) · una posición por setup y mercado",
         "datos": [{"mercado": m, "velas M15": periods[m][0], "desde (NY)": str(periods[m][1]), "hasta (NY)": str(periods[m][2]), "TBR evaluadas": None}
                   for m in markets if m in periods],
@@ -84,8 +84,8 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
                        "regla de cierre de Setup (stop, objetivo, breakeven del RTH o fin del día de trading / cierre de Londres). Los botones de Patrón eligen Todos o uno."],
             ["Barrido RTH", "Rotura del rango 09:00-10:00 con una vela M5 que cierra fuera entre las 10:00 y las 11:00; entrada en el primer cierre de vuelta dentro "
                             "antes de las 12:00; objetivo en el otro lado del RTH y breakeven al tomar el Low/High de NY Open."],
-            ["Barrido de Asia", "Rotura del rango de Asia entre las 00:00 y la 01:00 con una vela que cierra fuera; entrada en el primer cierre de vuelta dentro "
-                                "antes de la 01:00; objetivo en el otro lado de Asia."],
+            ["Continuación de Asia", "La primera vela M5 que cierra fuera del rango de Asia entre las 00:00 y las 00:30 da la entrada a ese cierre, a favor de la rotura; stop fijo "
+                                     "(30 puntos en el Nasdaq, 20 en el DJ30, 4,5 en el SP500) y objetivo 3R, sin breakeven. Sustituye al antiguo Barrido de Asia (reversión)."],
             ["Barrido PDH/PDL Asia", "PDH/PDL del día de trading 18:00-18:00 NY sin tocar hasta las 20:00; lo barre entre las 20:00 y las 21:00 y la primera vela que cierra de "
                                      "vuelta (con cierre antes de las 21:00) da la entrada; objetivo en el extremo opuesto de Asia ya formado si el precio sigue dentro del rango; si no hay (o no llega), "
                                      "sale por tiempo, al precio de mercado, cuando cierra Asia (00:00); el riesgo es variable."],
@@ -93,7 +93,7 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
                                         "el precio sigue dentro; si no hay (o no llega), sale por tiempo al precio de mercado cuando cierra Londres (05:00)."],
             ["Continuación RTH", "Solo Nasdaq: entre las 10:00 y las 11:00 el precio toca el 50 % del RTH y después una vela M5 cierra fuera del rango por cualquier lado; entrada a ese cierre, "
                                  "a favor de la rotura, stop 40 puntos y objetivo 2R, sin breakeven. Sin rotura antes de las 11:00 no hay operación."],
-            ["Stop", "Fijo a 30 puntos de la entrada si cubre el swing; si no, el swing más 5 puntos."],
+            ["Stop", "Barridos y PDH/PDL: fijo a 30 puntos de la entrada si cubre el swing; si no, el swing más 5 puntos. Las continuaciones usan su stop fijo."],
             ["Límites", "Sin costes ni deslizamiento. Cada setup se simula por separado: dos setups abiertos a la vez en el mismo mercado se cuentan los dos (el bot "
                         "solo deja una posición por mercado). Solo índices USA (NAS100, SP500, DJ30)."]]}
 
