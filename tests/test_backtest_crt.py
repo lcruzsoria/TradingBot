@@ -87,9 +87,9 @@ def test_el_grupo_crt_filtra_por_tbr_y_por_cercania_a_la_hora_en_punto():
 def test_zona_tbr_de_la_hora_de_entrada():
     import exportar_backtest_crt as ex
     hours = pd.to_datetime(["2025-03-03 21:00", "2025-03-03 00:00", "2025-03-03 03:30", "2025-03-03 04:59", "2025-03-03 05:00",
-                            "2025-03-03 10:00", "2025-03-03 11:59", "2025-03-03 12:00", "2025-03-03 19:59"])
+                            "2025-03-03 08:30", "2025-03-03 11:29", "2025-03-03 11:30", "2025-03-03 19:59"])
     got = ex.tbr_zone(pd.Series(hours)).tolist()
-    assert got == ["Asia", "Fuera de TBR", "London", "London", "Fuera de TBR", "NY Open", "NY Open", "Fuera de TBR", "Fuera de TBR"]
+    assert got == ["Asia", "Fuera de TBR", "London", "London", "Fuera de TBR", "NY Open", "NY Open", "Fuera de TBR", "Fuera de TBR"]   # NY Open de CRT: 08:30-11:30 (CRT_TBR_NY_AM_HOURS)
     near = ex.near_hour(pd.Series(pd.to_datetime(["2025-03-03 02:44", "2025-03-03 02:45", "2025-03-03 03:00", "2025-03-03 03:15",
                                                     "2025-03-03 03:16", "2025-03-03 23:50", "2025-03-03 00:10"])))
     assert near.tolist() == [-1, 3, 3, 3, -1, 0, 0]                              # 03:00 vale de 02:45 a 03:15; 23:50 es la hora 0
