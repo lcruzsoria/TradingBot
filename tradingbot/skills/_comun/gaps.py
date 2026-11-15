@@ -68,10 +68,11 @@ def opening_gaps(ts, open_, close, before_ts: int, ahead: int, hour: int = DEFAU
     return out
 
 
-def gap_lines(ts, open_, close, ahead: int, line_cls, hour: int = DEFAULT_HOUR, extend: float = 8.0) -> list:
+def gap_lines(ts, open_, close, ahead: int, line_cls, hour: int = DEFAULT_HOUR, extend: float = 8.0, mid: bool = True) -> list:
     """Líneas del gráfico de cada hueco: su borde alto (`ndog` / `nwog`, el único con texto), el bajo (`ndoglo` / `nwoglo`) y su 50 % (`ndog50` / `nwog50`).
 
     Cada hueco se dibuja desde su apertura hasta el siguiente de su tipo (el último, hasta el borde derecho). `line_cls`: la clase `Line` del gráfico.
+    `mid=False` omite la línea del 50 %.
     """
     ts = np.asarray(ts)
     gaps = gap_list(ts, np.asarray(open_), np.asarray(close), ahead, hour)
@@ -83,5 +84,7 @@ def gap_lines(ts, open_, close, ahead: int, line_cls, hour: int = DEFAULT_HOUR, 
             x0 = float(np.searchsorted(ts, gap.open_ts, "left")) - 0.5
             x1 = float(np.searchsorted(ts, own[k + 1].open_ts, "left")) - 0.5 if k + 1 < len(own) else last_x
             tag = kind.lower()
-            out += [line_cls(tag, gap.high, x0, x1), line_cls(tag + "lo", gap.low, x0, x1), line_cls(tag + "50", gap.mid, x0, x1)]
+            out += [line_cls(tag, gap.high, x0, x1), line_cls(tag + "lo", gap.low, x0, x1)]
+            if mid:
+                out.append(line_cls(tag + "50", gap.mid, x0, x1))
     return out

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsRectItem
 
 from ..clock import NY_CLOSE_SERVER_AHEAD_HOURS
@@ -17,6 +17,7 @@ from . import theme
 from .fmt import DIAS, fecha_hora
 
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
+GAP_FILL_ALPHA = 0.14     # relleno de los huecos NDOG / NWOG: muy suave, el precio se lee por encima
 NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
 LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL", "ndog": "NDOG", "nwog": "NWOG"}   # los huecos llevan el texto una vez (en el borde alto); el otro borde y el 50 % no
@@ -843,6 +844,7 @@ class ChartView(pg.PlotWidget):
             label.setPos(line.x1, line.price)
             pi.addItem(label, ignoreBounds=True)
             self._day_items.append(label)
+        self._draw_gap_fills()
         for kind, (xs, ys) in segments.items():
             color = self._day_colors.get(LEVEL_GROUP[kind], theme.MUTED)
             curve = pg.PlotCurveItem(x=np.array(xs), y=np.array(ys), connect="pairs",
@@ -850,6 +852,25 @@ class ChartView(pg.PlotWidget):
             curve.setZValue(-4)
             pi.addItem(curve, ignoreBounds=True)
             self._day_items.append(curve)
+
+    def _draw_gap_fills(self) -> None:
+        """Relleno muy suave de cada hueco NDOG / NWOG, entre su borde alto y el bajo (mismo tramo x0-x1)."""
+        pi = self.getPlotItem()
+        lows = {(line.kind, line.x0, line.x1): line.price for line in self._day_lines if line.kind in ("ndoglo", "nwoglo")}
+        for line in self._day_lines:
+            if line.kind not in ("ndog", "nwog") or LEVEL_GROUP[line.kind] not in self._level_groups:
+                continue
+            low = lows.get((line.kind + "lo", line.x0, line.x1))
+            if low is None or line.price <= low:
+                continue
+            color = QColor(self._day_colors.get(LEVEL_GROUP[line.kind], theme.MUTED))
+            color.setAlphaF(GAP_FILL_ALPHA)
+            rect = QGraphicsRectItem(QRectF(line.x0, low, line.x1 - line.x0, line.price - low))
+            rect.setPen(QPen(Qt.PenStyle.NoPen))
+            rect.setBrush(QBrush(color))
+            rect.setZValue(-6)
+            pi.addItem(rect, ignoreBounds=True)
+            self._day_items.append(rect)
 
     def set_marker(self, index: int | None) -> None:
         """Línea vertical sobre la vela marcada en el histograma del sesgo (None: sin marca)."""

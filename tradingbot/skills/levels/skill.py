@@ -16,6 +16,7 @@ from .daylevels import (DEFAULT_COLORS, DEFAULT_DAY_START, DEFAULT_DAYS, DEFAULT
 
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 GAP_STRATEGIES = ("barrido_nyam", "enigma369")     # perfiles de estrategia que dibujan y usan los huecos NDOG / NWOG
+GAP_NO_MID = ("enigma369",)                         # perfiles que no dibujan el 50 % del hueco (solo el hueco relleno)
 
 
 @register_skill("levels")
@@ -129,8 +130,8 @@ class LevelsSkill(Skill):
             lines = compute(ts, df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), ahead, start,
                             self.days)
             day_list = days(ts, ahead, start) if self.separators else []
-            if self.strategy in GAP_STRATEGIES:                  # NDOG / NWOG (con su 50 %): solo en los perfiles que los usan
-                lines += gap_lines(ts, df["open"].to_numpy(), df["close"].to_numpy(), ahead, Line)
+            if self.strategy in GAP_STRATEGIES:                  # NDOG / NWOG: solo en los perfiles que los usan (el 50 %, solo donde es objetivo)
+                lines += gap_lines(ts, df["open"].to_numpy(), df["close"].to_numpy(), ahead, Line, mid=self.strategy not in GAP_NO_MID)
         sma = df["close"].rolling(self.sma_period).mean().to_numpy()
         if available:                                        # el VWAP se reinicia cada día: con velas diarias no tiene sentido
             volume = df["tick_volume"].to_numpy() if "tick_volume" in df else np.zeros(len(df))
