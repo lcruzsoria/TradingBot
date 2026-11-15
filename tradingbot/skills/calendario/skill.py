@@ -1,7 +1,7 @@
 """Skill Calendario: largos a hora fija en los días de la semana configurados (por defecto, lunes de madrugada)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import numpy as np
 
@@ -10,7 +10,7 @@ from ...core import Event, Skill, register_skill
 from ...timeframes import minutes
 
 DAYS = {"lunes": 0, "martes": 1, "miercoles": 2, "miércoles": 2, "jueves": 3, "viernes": 4}
-MAX_LATE_BARS = 2                                  # una señal se da si la vela de entrada es una de las últimas 2
+MAX_LATE_BARS = 2                                  # sin STATS_FORWARD_START, una señal se da si la vela de entrada es una de las últimas 2
 
 
 def parse_hour(text: str, key: str) -> int:
@@ -74,6 +74,11 @@ class CalendarioSkill(Skill):
         if direction != "long":
             raise ValueError("CALENDARIO_DIRECTION=long: los cortos de lunes pierden en el backtest, solo se admiten largos")
         self.direction = direction
+        raw = self.services.env.section("STATS").get("FORWARD_START", "") if self.services.env is not None else ""
+        try:
+            self.since = date.fromisoformat(raw) if raw else None          # desde ese día (de NY) se avisa de todas las entradas, como Pattern con las TBR
+        except ValueError:
+            self.since = None
 
     def handle(self, event: Event) -> None:
         if self.error:
@@ -92,7 +97,11 @@ class CalendarioSkill(Skill):
             return
         ahead, _ = server_minus_ny(self._offset)
         ts = df["ts"].to_numpy().astype(np.int64)
-        for i in range(max(len(ts) - MAX_LATE_BARS, 0), len(ts)):
+        first = max(len(ts) - MAX_LATE_BARS, 0)
+        if self.since is not None:                                  # también lo que pasó con el bot cerrado: Cortex y Stats no repiten lo ya anotado
+            first = int(np.searchsorted(ts, int((datetime(self.since.year, self.since.month, self.since.day) - datetime(1970, 1, 1)).total_seconds()) + ahead, "left"))
+        signalled = False
+        for i in range(first, len(ts)):
             ny = datetime.fromtimestamp(int(ts[i]) - ahead, timezone.utc)                          # hora de Nueva York (ingenua)
             if ny.weekday() not in self.days or ny.hour * 60 + ny.minute != self.entry:
                 continue
@@ -107,6 +116,8 @@ class CalendarioSkill(Skill):
                 "target": price + self.rr * risk, "day": ny.date(), "entry_ts": int(ts[i]),
                 "close_ts": int(ts[i]) + (self.exit - self.entry) * 60,
                 "close_at": f"{self.exit // 60:02d}:{self.exit % 60:02d} NY ({ny:%d/%m/%Y})"})
+            signalled = True
+        if signalled:
             self.set_caption(f"señal {symbol}")
             return
         caption(f"{symbol}: esperando {self.entry // 60:02d}:{self.entry % 60:02d} NY")

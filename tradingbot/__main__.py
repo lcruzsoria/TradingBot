@@ -69,8 +69,26 @@ def relaunch_args(argv: list[str], profile: str) -> list[str]:
     return ["-m", "tradingbot", *out, "--profile", profile]
 
 
+def start_sync(minutes: float) -> None:
+    """Pone al día, sin ventana, el forwardtest de los perfiles cuyo bot no está abierto (tradingbot/sync.py): al poco de arrancar y cada `minutes`."""
+    from PySide6.QtCore import QProcess, QTimer
+
+    def launch() -> None:
+        pythonw = Path(sys.executable).with_name("pythonw.exe")                  # sin consola en Windows
+        QProcess.startDetached(str(pythonw if pythonw.exists() else sys.executable), ["-m", "tradingbot", "--sync-forwardtest"], str(PROJECT_ROOT))
+
+    QTimer.singleShot(120_000, launch)
+    timer = QTimer()
+    timer.timeout.connect(launch)
+    timer.start(int(minutes * 60_000))
+    return timer
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if "--sync-forwardtest" in argv:                          # sin ventana ni Qt: tradingbot/sync.py
+        from .sync import main as sync_main
+        return sync_main(argv)
     args = parse_args(argv)
 
     import pyqtgraph as pg
@@ -155,6 +173,12 @@ def main(argv=None) -> int:
 
     window = MainWindow(bus, manager, cfg, subtitle, demo=demo, theme_name=theme_name, switch_profile=switch_profile)
     window.show()
+    if not demo and cfg["app"]["profile_name"]:                # este bot está abierto: la sincronización no toca su perfil
+        from .sync import DEFAULT_SYNC_MINUTES, register_bot
+        register_bot(cfg["app"]["profile_name"])
+        minutes = env.section("SYNC").get_float("MINUTES", DEFAULT_SYNC_MINUTES)
+        if minutes and minutes > 0:
+            window.sync_timer = start_sync(minutes)           # se guarda para que el temporizador no se recoja
     if args.screenshot:
         def shoot():
             window.grab().save(str(args.screenshot))
