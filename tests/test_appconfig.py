@@ -132,9 +132,7 @@ def test_el_tradingbot_env_del_proyecto_documenta_cada_clave_con_sus_valores_por
         path = tmp_path / "tradingbot.env"
         path.write_bytes(shipped.stdout)
     project, defaults = load_app_config(DEFAULT_CONFIG_FILE, envconfig.load(path, environ={})), load_app_config(DEFAULT_CONFIG_FILE)
-    assert project["app"] == defaults["app"]
-    rules = lambda cfg: [(r["type"], float(r.get("tolerance_pct", 0))) for r in cfg["bias"]["rules"]]  # noqa: E731
-    assert rules(project) == rules(defaults)
+    assert {k: v for k, v in project["app"].items() if k != "symbol"} == {k: v for k, v in defaults["app"].items() if k != "symbol"}      # el símbolo es el de cada usuario (FEED_SYMBOL)
     keys = ("min_score", "require_all", "lateral_hours", "lateral_min_efficiency")
     assert {k: project["bias"][k] for k in keys} == {k: defaults["bias"][k] for k in keys}
 

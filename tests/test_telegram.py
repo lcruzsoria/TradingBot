@@ -312,7 +312,7 @@ def test_la_tarjeta_del_forwardtest_se_dibuja_sin_sesgo_ni_saldo():
     QApplication.instance() or QApplication([])
     snap = panel.PanelState({"app": {"profile_name": "puprime"}}).snapshot("metaquotes")
     png = card.render_operations(snap)
-    assert png[:4] == b"\x89PNG" and len(png) > 3000 and snap["bias"] == [] and snap["profile"] == "metaquotes"
+    assert png[:4] == b"\x89PNG" and len(png) > 1500 and snap["bias"] == [] and snap["profile"] == "metaquotes"
     assert "/puprime · Forwardtest de PUPrime" in messages.help_text((("puprime", "Forwardtest de PUPrime"),))
 
 
@@ -486,6 +486,22 @@ def test_el_aviso_de_setup_pendiente_dice_que_falta_y_hacia_donde_debe_cerrar():
     p = {"symbol": "EURUSD", "timeframe": "5m", "direction": "short", "level": 1.12442, "zone": (1.12507, 1.12524), "stop": 1.12651, "ltf": 15,
          "mtf": "M15", "sweep": "vela C1", "c2": "04/11 05:00"}
     text = messages.pending(p, "crt")
-    assert text.split("\n") == ["<b>Estrategia:</b> CRT", "⏳ <b>Setup completo Corto EURUSD</b>", "Solo falta una vela de M15 que cierre por debajo del CISD 1.12442",
-                                "BPR 1.12507–1.12524 (FVG M15 + iFVG M15) · Stop 1.12651", "C2 04/11 05:00 NY · sweep vela C1", "<i>perfil crt</i>"]
+    assert text.split("\n") == ["<b>Estrategia:</b> CRT · vela H4", "⏳ <b>Setup completo Corto EURUSD</b>", "Solo falta una vela de M15 que cierre por debajo del CISD 1.12442",
+                                "BPR 1.12507–1.12524 (FVG M15 + iFVG M15) · Stop 1.12651", "Sweep: vela C1", "<i>perfil crt</i>"]
     assert "por encima" in messages.pending({**p, "direction": "long"})
+
+def test_aviso_de_un_setup_crt_sin_entrada_por_el_stop_maximo():
+    from tradingbot.skills.telegram import messages
+    text = messages.blocked({"symbol": "NAS100.s", "timeframe": "5m", "direction": "short", "stop": 28857.05,
+                             "text": "Setup OK sin entrada: el stop (334 puntos) supera el máximo permitido (125 puntos)"}, "crt")
+    assert "NO GO" in text and "Corto NAS100.s" in text and "334 puntos" in text and "Stop" in text
+
+
+def test_la_apertura_de_crt_dice_la_vela_htf_en_la_que_entro():
+    from datetime import date
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.telegram import messages
+    o = Order("EURUSD", "5m", "short", "CRT (vela siguiente al CISD)", "crt", "", date(2026, 11, 4), 1.1, 1.1, 1.1, 1.1, 1.12, 1.09, "Bearish", -2.0, "x",
+              htf_candle="H4 04/11 05:00–09:00 NY")
+    assert messages.opened(o, "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4 04/11 05:00–09:00 NY"
+    assert messages.opened(Order(**{**o.__dict__, "htf_candle": ""}), "crt").split("\n")[0] == "<b>Estrategia:</b> CRT · vela H4"

@@ -42,7 +42,7 @@ def test_ya_no_hay_selector_ni_boton_cargar(make_window):
 
 def test_chips_de_timeframe(make_window):
     win, _ = make_window(["EURUSD"])
-    assert chips(win) == ["M1", "M3", "M5", "M15", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
+    assert chips(win) == ["M1", "M3", "M5", "M15", "M30", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
     assert win.current_tf() == "15m"
 
 
@@ -59,7 +59,7 @@ def test_mercado_inicial_fuera_del_panel_se_sustituye_por_el_primero(make_window
 
 def test_pinchar_una_tarjeta_carga_ese_mercado_con_el_timeframe_elegido(make_window):
     win, loads = make_window(["NAS100FT.r", "DJ30"])
-    win.tf_group.buttons()[6].setChecked(True)             # H4
+    win.tf_group.buttons()[7].setChecked(True)             # H4
     win._on_market_clicked("dj30")
     assert win.current_symbol == "DJ30"
     assert loads[-1].payload == {"symbol": "DJ30", "timeframe": "4h"}   # nombre exacto de la lista

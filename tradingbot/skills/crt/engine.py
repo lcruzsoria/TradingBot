@@ -259,12 +259,13 @@ def sweep_levels(s2: int, hv: dict, dv: dict, tv: dict, sv: dict, ahead: int, na
     return out
 
 
-def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None, hist: pd.DataFrame | None = None) -> tuple[list, dict]:
+def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: Cfg, fvg_series: dict | None = None, hist: pd.DataFrame | None = None,
+                     retest: bool = True) -> tuple[list, dict]:
     """Todos los setups de zona común de las velas dadas, con el índice de la vela que cierra bajo el CISD (`jc`); la entrada va aparte
     (`entry_point`, variante 1 = apertura de la vela siguiente). `base` da el HTF (y el FVG normal si no se pasan `fvg_series`) y `ltf` las velas del iFVG, del CISD
     y de la entrada (de `ltf_min` minutos). `fvg_series`: {TF en minutos: velas de ese TF} de los FVG normales (TF >= `ltf_min`); sin ella se agrupan desde `base`
     los múltiplos de `ltf_min`. `hist`: velas de largo recorrido (de un TF corto) de las que salen los niveles que C2 puede barrer (PDH/PDL, swings de
-    H4, H12); sin ellas se usan las de `base`."""
+    H4, H12); sin ellas se usan las de `base`. `retest=False` (experimento): el BPR no necesita retest, vale la vela que cierra más allá del CISD una vez invertido el iFVG."""
     htf = aggregate(base, cfg.htf_min, cfg, cfg.origin)
     src = base if hist is None else hist
     big = {"h": aggregate(src, cfg.htf_min, cfg, cfg.origin), "d": aggregate(src, 1440, cfg, cfg.origin), "t": aggregate(src, 720, cfg, cfg.origin),
@@ -296,8 +297,8 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
             return cisd_cache[k]
 
         def closes_beyond_cisd(p: tuple, j: int, after: int) -> bool:
-            """La vela `j` (del TF del iFVG, el menor de los dos) es posterior a la del retest `after` y cierra con cuerpo más allá del CISD de la pareja `p`."""
-            return j > after and float(cl_[j]) < cisd_of(p[0])[1]
+            """La vela `j` (del TF del iFVG, el menor de los dos) es la del retest `after` o posterior a ella y cierra con cuerpo más allá del CISD de la pareja `p`."""
+            return j >= after and float(cl_[j]) < cisd_of(p[0])[1]
 
         for i in range(1, len(H["ts"])):
             s2 = int(H["ts"][i])
@@ -363,7 +364,27 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                     break
                 if hi_[j] > hx:
                     hx, ih = float(hi_[j]), j
-                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] < j and closes_beyond_cisd(p, j, touched[pid(p)])     # tocada antes y una vela del TF menor cierra bajo el CISD
+                for k, z, common in pairs:
+                    key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
+                    if key in dead:
+                        continue
+                    if k not in inverted:                                       # el iFVG se invierte: una vela cierra bajo su base
+                        if k < j and cl_[j] < hi_[k - 2]:
+                            inverted[k] = j
+                    if not retest:                                              # sin retest: con el iFVG invertido y los dos FVG formados, la pareja ya vale
+                        if k in inverted and z[3] <= lts[j] and key not in touched:
+                            contact.setdefault(key, j)
+                            touched[key] = j
+                            seen_touch = True
+                    elif k in inverted and inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
+                        contact.setdefault(key, j)
+                        if cl_[j] > common[1]:                                  # y cierra con cuerpo al otro lado de ella: el retest la invalida
+                            dead.add(key)
+                            seen_touch = True
+                        elif key not in touched:
+                            touched[key] = j                                    # pullback a la zona común: tiene que rebotar y cerrar sobre el CISD
+                            seen_touch = True
+                done = [p for p in pairs if pid(p) in touched and pid(p) not in dead and touched[pid(p)] <= j and closes_beyond_cisd(p, j, touched[pid(p)])     # tocada (en esa misma vela o antes) y una vela del TF menor cierra bajo el CISD
                         and not any(lvl(q) < lvl(p) and contact.get(pid(q), j + 1) <= j for q in pairs)]                                       # y ningún BPR de un nivel anterior tuvo ya su retest: ese es el válido
                 if done:
                     k, z, common = max(done, key=lambda p: (-p[1][0], p[0], p[1][3]))             # a igual hora, la del FVG de menor TF (con el iFVG de M5: antes la de M5 que la mixta)
@@ -372,21 +393,6 @@ def find_zone_setups(base: pd.DataFrame, ltf: pd.DataFrame, ltf_min: int, cfg: C
                             "c2_end": s2 + cfg.htf_min * 60, "c1": (c1l, c1h), "sweep": swept_name, "sweep_level": float(swept_level), "kf": k, "jt": touched[(k, z[3], z[0])], "inv": inverted[k], "s0": s0,
                             "cisd": cisd_of(k), "ifvg": (float(hi_[k - 2]), float(lo_[k])), "zones": [z], "common": common}
                     break
-                for k, z, common in pairs:
-                    key = (k, z[3], z[0])                                       # cada pareja (iFVG, FVG) tiene su propio estado
-                    if key in dead:
-                        continue
-                    if k not in inverted:                                       # el iFVG se invierte: una vela cierra bajo su base
-                        if k < j and cl_[j] < hi_[k - 2]:
-                            inverted[k] = j
-                    elif inverted[k] < j and z[3] <= lts[j] and hi_[j] >= common[0]:        # la vela llega a la zona común, con los dos FVG ya formados
-                        contact.setdefault(key, j)
-                        if cl_[j] > common[1]:                                  # y cierra con cuerpo al otro lado de ella: el retest la invalida
-                            dead.add(key)
-                            seen_touch = True
-                        elif key not in touched:
-                            touched[key] = j                                    # pullback a la zona común: tiene que rebotar y cerrar sobre el CISD
-                            seen_touch = True
             for lv in {lvl(p) for p in pairs}:
                 hits = [contact[pid(p)] for p in pairs if lvl(p) == lv and pid(p) in contact]
                 if hits:

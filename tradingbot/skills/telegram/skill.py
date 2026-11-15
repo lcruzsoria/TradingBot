@@ -11,13 +11,14 @@ from datetime import datetime
 from ...clock import NY, ny_from_server, trading_day
 from ...core import Event, Skill, register_skill
 from ...envconfig import EnvConfig
+from ..enigma369 import cuartos as enigma_cuartos
 from ..setup import store
 from ..tbr.zones import zones_from_settings
 from . import card, messages, setup_chart, telegram
 from .panel import PanelServer, PanelState
 from .secrets import secret
 
-NOTIFY_ALL = ("abre", "cierra", "go", "nogo", "pendiente")
+NOTIFY_ALL = ("abre", "cierra", "go", "nogo", "pendiente", "enigma")
 DEFAULT_NOTIFY = ("abre", "cierra")
 DEFAULT_PORT = 8765
 CAPTURE_TIMEOUT = 15.0                                       # segundos que se espera a la ventana
@@ -54,7 +55,7 @@ class TelegramSkill(Skill):
                    "arrancar. Panel: una página web de solo lectura con las abiertas, los cierres, el sesgo y las decisiones, "
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
-                  "telegram.capture", "clock.offset", "crt.pending")
+                  "telegram.capture", "clock.offset", "crt.pending", "crt.blocked", "enigma369.updated")
     publishes = ("telegram.capture.request",)
     slot = "aux1"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
@@ -73,6 +74,10 @@ class TelegramSkill(Skill):
         except ValueError:
             self.zones = []
         self.sent = 0
+        self._enigma_checked = 0.0
+        self._enigma_sent: set = set()                       # avisos previos ya mandados
+        self._advance_hours = env.section("ENIGMA369").get_int("ADVANCE_HOURS", 24)
+        self._enigma: dict[str, tuple] = {}                  # mercado -> última alineación de Enigma369 vista
         self.server: PanelServer | None = None
         self.board = PanelState(self.services.app_cfg, env.section("STATS").get("FORWARD_DIR"))
         self.telegram = False
@@ -139,7 +144,30 @@ class TelegramSkill(Skill):
         except telegram.TelegramError:
             self._offset = None                              # sin red al arrancar: se reintenta en el primer tick
 
+    def _enigma_ahead(self) -> None:
+        """Avisos previos (ENIGMA369_ADVANCE_HOURS antes y 15 min antes) de las alineaciones de 3-4 niveles con semana y, si lo hay, mes."""
+        now = time.monotonic()
+        if now - self._enigma_checked < 60:
+            return
+        self._enigma_checked = now
+        hours = max(1, self._advance_hours)
+        wall = datetime.now(NY).replace(tzinfo=None)
+        for item in enigma_cuartos.upcoming_big(wall, hours):
+            left = int((item["start"] - wall).total_seconds() // 60)
+            for threshold in (hours * 60, 15):
+                key = (item["start"], item["label"], threshold)
+                if left <= threshold and left >= 0 and key not in self._enigma_sent and (threshold == hours * 60 or left <= 15):
+                    self._enigma_sent.add(key)
+                    if threshold == hours * 60 and left <= 15:
+                        continue                                  # ya queda poco: basta el aviso de los 15 min
+                    self._send(messages.enigma_ahead(item, left, self.profile))
+
     def tick(self) -> None:
+        if self.telegram and not self.error and "enigma" in self.notify:
+            try:
+                self._enigma_ahead()
+            except telegram.TelegramError:
+                pass
         if not self.telegram or not self.commands or self.error:
             return
         if self._capture_asked is not None and time.monotonic() - self._capture_asked > CAPTURE_TIMEOUT:
@@ -288,9 +316,20 @@ class TelegramSkill(Skill):
             wanted = "go" if p["decision"].allowed else "nogo"
             if self.telegram and wanted in self.notify:
                 self._send(messages.decision(p, self.profile))
+        elif topic == "enigma369.updated":                       # alineación 3-6-9 nueva: se avisa solo si empieza en directo
+            if p.get("available") and p.get("alignments_now") is not None:
+                runs = p["alignments_now"] or p.get("ref_alignments_now") or []
+                key = (p["symbol"], p["timeframe"], tuple((r["label"], p["now"][r["first"]]["text"]) for r in runs))
+                seen = self._enigma.get(p["symbol"])
+                self._enigma[p["symbol"]] = key
+                if self.telegram and "enigma" in self.notify and seen is not None and seen != key and runs:
+                    self._send(messages.enigma(p, self.profile))
         elif topic == "crt.pending" and self.telegram:                 # CRT: setup completo, solo falta el cierre más allá del CISD
             if "pendiente" in self.notify:
                 self._send(messages.pending(p, self.profile))
+        elif topic == "crt.blocked":                            # setup CRT que no entró porque el stop supera el máximo: se avisa como una apertura
+            if self.telegram and "abre" in self.notify and self._live(p["symbol"], p["entry_ts"]):
+                self._send(messages.blocked(p, self.profile))
         elif topic == "setup.executed" and self.telegram:
             order = p["order"]
             if self._live(order.symbol, order.entry_ts):

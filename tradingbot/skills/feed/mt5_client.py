@@ -12,7 +12,7 @@ import pandas as pd
 
 from ...config import Mt5Profile
 from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
-from ...timeframes import DERIVED, base_timeframe, minutes, mt5_constant
+from ...timeframes import DERIVED, SESSION_ANCHORED, base_timeframe, minutes, mt5_constant
 
 CHUNK = 50_000
 
@@ -203,7 +203,7 @@ class Mt5Source:
 
         df = normalize_candles(pd.concat(frames[::-1], ignore_index=True).rename(columns={"time": "ts"}))
         if timeframe in DERIVED:          # p. ej. 7h: MT5 no lo tiene, se agrupa desde 1h
-            df = aggregate_candles(df, minutes(timeframe) * 60)
+            df = aggregate_candles(df, minutes(timeframe) * 60, day_offset=SESSION_ANCHORED.get(timeframe))
         return df
 
     def last_bar_ts(self, symbol: str, timeframe: str) -> int | None:

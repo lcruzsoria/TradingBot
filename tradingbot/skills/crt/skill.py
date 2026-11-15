@@ -12,7 +12,7 @@ from ..calendario.skill import matches
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 from ..bias.models import Bias, BiasResult
 from . import bias as crt_bias, engine
-from .chart import complete_series as engine_complete
+from .chart import complete_series as engine_complete, sl_text
 
 STRATEGY = "crt"
 LTF_MINUTES = (3, 5)                           # el iFVG, el CISD y la entrada se buscan en las velas del gráfico
@@ -20,6 +20,14 @@ MAX_LATE_BARS = 2                                 # una señal se da si la vela 
 MIN_BARS = 200
 ENTRY_NAMES = {1: "vela siguiente al CISD", 4: "cierre del CISD"}
 DEFAULT_SYMBOLS = ["NAS100.s", "SP500.s", "DJ30.s", "EURUSD", "GBPUSD"]     # los del backtest (PUPrime): con su nombre exacto
+
+
+def htf_candle(symbol: str, c2: int, ahead: int, htf_min: int | None = None) -> str:
+    """La vela HTF de C2 (inicio de C2 en hora de servidor) con su día y su horario en NY: «H4 02/11 21:00–01:00 NY»."""
+    htf_min = htf_min or (engine.INDICES if is_us_index(symbol, DEFAULT_US_INDICES) else engine.FOREX).htf_min
+    a = datetime.fromtimestamp(int(c2) - ahead, timezone.utc)
+    b = datetime.fromtimestamp(int(c2) - ahead + htf_min * 60, timezone.utc)
+    return f"H{htf_min // 60} {a:%d/%m %H:%M}–{b:%H:%M} NY"
 
 
 def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule: engine.Rule, entry_model: int, points) -> dict:
@@ -31,7 +39,7 @@ def build_signal(symbol: str, tf: str, st: dict, ep: dict, ts, ahead: int, rule:
             "stop": sgn * st["stop"], "target": sgn * (entry - rule.rr * risk), "day": ny.date(),
             "entry_ts": int(ts[ep["start"]]), "close_ts": ep["end"],
             "close_at": f"{close_ny:%H:%M} NY ({close_ny:%d/%m/%Y})", "strategy": STRATEGY,
-            "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY,
+            "pattern": f"CRT ({ENTRY_NAMES[entry_model]})", "pattern_key": STRATEGY, "htf_candle": htf_candle(symbol, st["C2"], ahead),
             "bias_points": points, "bias_result": points.result(), "bias_enabled": points.enabled,
             "reason": f"CRT: sweep {st['dirección']} en C2 ({st.get('sweep', 'vela C1')}); el iFVG de M{st.get('ltf', tf)} y el FVG de {st['mtf']} (de sentido contrario) forman un BPR; con el iFVG invertido el "
                       f"precio vuelve a él y cierra con cuerpo más allá del CISD; entrada «{ENTRY_NAMES[entry_model]}». {points.summary()}"}
@@ -48,7 +56,7 @@ class CrtSkill(Skill):
                    "sin volver a ella, el gráfico lo marca «Setup OK sin Entrada». Avisa a Cortex, que le da la orden a Setup; solo simulación. "
                    "Solo actúa en el perfil CRT. Ojo: en el backtest (docs/estrategia_crt/RESULTADOS_zona.md) no hay ventaja.")
     subscribes = ("candles.loaded", "clock.offset")
-    publishes = ("crt.signal", "crt.pending", "bias.updated", "bias.history")
+    publishes = ("crt.signal", "crt.pending", "crt.blocked", "bias.updated", "bias.history")
     slot = "aux2"
 
     def on_start(self) -> None:
@@ -56,6 +64,7 @@ class CrtSkill(Skill):
         self._offset: int | None = None
         self._seen: set = set()
         self._pending_seen: set = set()                  # (símbolo, C2, lado, CISD) de los avisos «setup completo, falta cerrar más allá del CISD» ya dados
+        self._blocked_seen: set = set()                  # setups sin entrada por el stop máximo que ya se avisaron
         self._extra: dict[tuple, tuple] = {}             # (símbolo, TF) -> (última vela del perfil, velas que se pidieron a MT5)
         self._latest: dict[str, tuple] = {}              # símbolo -> (velas, cfg, último setup reciente o None): para la tarjeta del sesgo
         self._hist_key: dict[str, tuple] = {}            # símbolo -> clave del último histograma publicado
@@ -232,7 +241,7 @@ class CrtSkill(Skill):
             series[m] = extra
         return engine_complete(series, cfg)
 
-    def _announce_pending(self, symbol: str, tf: str, waiting: list, ahead: int) -> None:
+    def _announce_pending(self, symbol: str, tf: str, waiting: list, ahead: int, htf_min: int) -> None:
         """Avisa (una vez por setup) de que el BPR, el iFVG invertido y el retest ya están y solo falta que una vela del TF menor cierre con cuerpo más allá del CISD."""
         for w in waiting:
             sign = w["sign"]
@@ -243,7 +252,8 @@ class CrtSkill(Skill):
             c2 = datetime.fromtimestamp(int(w["C2"]) - ahead, timezone.utc)
             self.publish("crt.pending", {"symbol": symbol, "timeframe": tf, "direction": w["dirección"], "level": sign * float(w["level"]),
                                          "zone": tuple(sorted((sign * float(w["z_bottom"]), sign * float(w["z_top"])))), "stop": sign * float(w["stop"]),
-                                         "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}"})
+                                         "ltf": w["ltf"], "mtf": w["mtf"], "sweep": w["sweep"], "c2": f"{c2:%d/%m %H:%M}",
+                                         "htf": htf_candle(symbol, w["C2"], ahead, htf_min)})
 
     def scan(self, symbol: str, tf: str, df) -> dict | None:
         """La señal de entrada de las últimas velas (o None), con todas las combinaciones de TF del FVG y del iFVG (15 y 5 min, TF del FVG >= TF del iFVG). Cada
@@ -259,8 +269,22 @@ class CrtSkill(Skill):
         setups, _ = engine.find_multi_setups({m: d.iloc[:closed[m]] for m, d in series.items()}, cfg, full)
         ts = {m: d["ts"].to_numpy().astype(np.int64) for m, d in series.items()}
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
+        for st in setups:                                                  # un setup con entrada que el stop máximo cancela: se avisa (no hay señal)
+            m = st["ltf"]
+            key = (symbol, st["C2"], st["sign"])
+            if key in self._blocked_seen or st["jc"] + 1 < len(series[m]) - MAX_LATE_BARS:
+                continue
+            if engine.entry_point(views[m][st["sign"]], st, self.entry, m, self.rule, cfg, closed[m]) is not None:
+                continue
+            risk = engine.sl_blocked(views[m][st["sign"]], st, self.entry, m, self.rule, cfg, closed[m])
+            if risk is None:
+                continue
+            self._blocked_seen.add(key)
+            self.publish("crt.blocked", {"symbol": symbol, "timeframe": tf, "direction": st["dirección"], "stop": st["sign"] * st["stop"],
+                                         "entry_ts": int(ts[m][st["jc"]]) + m * 60, "text": sl_text(risk, cfg, long=True), "strategy": STRATEGY,
+                                         "htf": htf_candle(symbol, st["C2"], ahead, cfg.htf_min)})
         recent = [x for x in setups if x["jc"] >= len(series[x["ltf"]]) - 1 - 36 * 60 // x["ltf"]]
-        self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead)
+        self._announce_pending(symbol, tf, getattr(setups, "waiting", []), ahead, cfg.htf_min)
         self._latest[symbol] = (full, cfg, recent[-1] if recent else None, ahead)
         for st in reversed(setups):
             m = st["ltf"]

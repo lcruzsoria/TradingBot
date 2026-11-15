@@ -203,6 +203,45 @@ class DaySeparators(pg.GraphicsObject):
             p.drawText(QPointF(pt.x() - metrics.horizontalAdvance(label) / 2, pt.y() - 6), label)
 
 
+class EnigmaAreas(pg.GraphicsObject):
+    """Franjas verticales traslúcidas de las alineaciones de Enigma369, de arriba a abajo de la vista (solo pinta lo visible)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._areas: list[dict] = []
+        self._lines: list[dict] = []
+
+    def set_data(self, areas: list[dict], lines: list[dict] | None = None) -> None:
+        self._areas = list(areas)
+        self._lines = list(lines or [])
+        self.prepareGeometryChange()
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        vb = self.getViewBox()
+        return vb.viewRect() if vb is not None else QRectF()
+
+    def paint(self, p, *args) -> None:
+        vb = self.getViewBox()
+        if vb is None or not (self._areas or self._lines):
+            return
+        (vx0, vx1), (y0, y1) = vb.viewRange()
+        p.setPen(Qt.PenStyle.NoPen)
+        for a in self._areas:
+            if a["x1"] < vx0 or a["x0"] > vx1:
+                continue
+            fill = QColor(a["color"])
+            fill.setAlphaF(float(a["opacity"]))
+            p.setBrush(fill)
+            p.drawRect(QRectF(a["x0"], y0, a["x1"] - a["x0"], y1 - y0))
+        for ln in self._lines:                                            # inicio y fin del cuarto en curso: punteadas
+            if vx0 <= ln["x"] <= vx1:
+                pen = pg.mkPen(QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
+                pen.setCosmetic(True)
+                p.setPen(pen)
+                p.drawLine(QPointF(ln["x"], y0), QPointF(ln["x"], y1))
+
+
 class ScaleAxis(pg.AxisItem):
     """Eje que se redimensiona al arrastrarlo, como en TradingView. Doble clic: vuelve a la escala automática.
 
@@ -393,6 +432,10 @@ class ChartView(pg.PlotWidget):
         self._tbr_opacity = 0.12
         self._tbr_line_opacity = 0.6
         self._tbr_visible = False
+        self.enigma = EnigmaAreas()               # áreas de alineación de la skill Enigma369
+        self.enigma.setZValue(-9)                 # detrás de las velas
+        pi.addItem(self.enigma, ignoreBounds=True)
+        vb.sigRangeChanged.connect(lambda *_: (self.enigma.prepareGeometryChange(), self.enigma.update()))
         self._day_items: list = []
         self._day_lines: list = []
         self._day_colors: dict[str, str] = {}
@@ -466,6 +509,7 @@ class ChartView(pg.PlotWidget):
         self.clear_levels()
         self._levels = {}
         self.set_tbr([])                    # las zonas van por índice de vela: se recalculan con las velas nuevas
+        self.set_enigma([])
         self.set_day_levels([], [], self._day_colors)
         self.set_sma(None)
         self.set_vwap(None)
@@ -1066,6 +1110,18 @@ class ChartView(pg.PlotWidget):
             pi.addItem(label, ignoreBounds=True)
             self._bias_items += [box, label]
 
+    # -- Enigma369: áreas de alineación de cuartos (3, 6, 9) ----------------------------------------------------
+    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None) -> None:
+        """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
+
+        area = {x0, x1, color, opacity}. Con [] se quitan todas. `lines`: inicio y fin del cuarto en curso, punteadas.
+        """
+        self.enigma.set_data(areas, lines)
+
+    @property
+    def enigma_item_count(self) -> int:
+        return len(self.enigma._areas)
+
     # -- CRT del backtest (botón CRT del perfil CRT) --------------------------------------------------------
     def set_crts(self, crts: list[dict]) -> None:
         """crts: {x0, x1 (C2), xc1 (inicio de C1), c1 y c2 (mín., máx.), direction, state, mtf, ltf, entry, entry_name, others}."""
@@ -1149,13 +1205,13 @@ class ChartView(pg.PlotWidget):
             label.setPos(right, (common["bottom"] + common["top"]) / 2)
             add(label, 7)
         if cisd and cisd.get("label") == "CISD":                 # el CISD: el extremo de la vela que creó el iFVG; el cierre con cuerpo más allá da la entrada
-            pink = "#EC407A"
+            yellow = "#FFD600"
             left, right = float(cisd["x0"]), float(cisd["x1"]) + 1
             add(pg.PlotCurveItem(x=np.array([left, right]), y=np.array([cisd["level"], cisd["level"]]),
-                                 pen=pg.mkPen(pink, width=1.6, style=Qt.PenStyle.DashLine)), -1)
-            label = pg.TextItem(anchor=(1, 0.5))
-            label.setHtml(f'<span style="font-size:7pt; color:{pink}">CISD {fmt_price(cisd["level"])}</span>')
-            label.setPos(left, cisd["level"])
+                                 pen=pg.mkPen(yellow, width=1.6, style=Qt.PenStyle.DashLine)), -1)
+            label = pg.TextItem(anchor=(1, 0))
+            label.setHtml(f'<span style="font-size:7pt; color:{yellow}">CISD {fmt_price(cisd["level"])}</span>')
+            label.setPos(right, cisd["level"])
             add(label, 7)
         touch = crt.get("touch")
         if touch:                                               # la vela que toca la zona común

@@ -5,20 +5,24 @@ import pytest
 import tradingbot.skills  # noqa: F401
 from tradingbot.skills.feed.datasource import aggregate_candles, normalize_candles
 from tradingbot.skills.feed.demo_data import DemoSource
-from tradingbot.timeframes import DERIVED, NATIVE, TIMEFRAMES, base_timeframe, display_label, minutes, mt5_constant
+from tradingbot.timeframes import (DERIVED, NATIVE, TIMEFRAMES, base_timeframe, display_label, minutes, mt5_constant,
+                                   selector_timeframes)
 
 
 def test_lista_de_timeframes_y_nombres_en_pantalla():
-    assert list(TIMEFRAMES) == ["1m", "3m", "5m", "15m", "30m", "1h", "3h", "4h", "7h", "12h", "1d", "1w"]
-    assert [display_label(k) for k in TIMEFRAMES] == ["M1", "M3", "M5", "M15", "M30", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
+    assert list(TIMEFRAMES) == ["1m", "3m", "5m", "15m", "30m", "1h", "90m", "3h", "4h", "6h", "7h", "12h", "1d", "1w"]
+    assert [display_label(k) for k in TIMEFRAMES] == ["M1", "M3", "M5", "M15", "M30", "H1", "M90", "H3", "H4", "H6", "H7", "H12", "1D", "1W"]
+    assert [display_label(k) for k in selector_timeframes()] == ["M1", "M3", "M5", "M15", "M30", "H1", "H3", "H4", "H7", "H12", "1D", "1W"]
+    assert [display_label(k) for k in selector_timeframes("enigma369")] == ["M1", "M3", "M5", "M15", "M30", "H1", "M90", "H3", "H4", "H6", "H12", "1D", "1W"]
     assert minutes("7h") == 420 and minutes("1w") == 10080
     with pytest.raises(ValueError):
         minutes("2h")
 
 
 def test_h7_es_derivado_y_el_resto_son_nativos_de_mt5():
-    assert DERIVED == {"7h": "1h"} and base_timeframe("7h") == "1h" and base_timeframe("4h") == "4h"
-    assert set(TIMEFRAMES) - set(NATIVE) == {"7h"}
+    assert DERIVED == {"7h": "1h", "90m": "15m", "6h": "1h"} and base_timeframe("7h") == "1h" and base_timeframe("90m") == "15m"
+    assert base_timeframe("4h") == "4h"
+    assert set(TIMEFRAMES) - set(NATIVE) == {"7h", "90m", "6h"}
     fake = type("M", (), {n: i for i, n in enumerate(NATIVE.values())})
     assert mt5_constant(fake, "1d") == list(NATIVE).index("1d")
     with pytest.raises(ValueError, match="no es un timeframe nativo"):

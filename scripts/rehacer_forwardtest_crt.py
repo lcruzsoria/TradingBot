@@ -20,6 +20,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -40,7 +41,9 @@ from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index  
 from tradingbot.skills.setup import store                                               # noqa: E402
 from tradingbot.skills.setup.account import Schedule, VirtualAccount                    # noqa: E402
 from tradingbot.skills.setup.positions import resolve                                   # noqa: E402
+from tradingbot.skills.crt.chart import sl_text                                         # noqa: E402
 from tradingbot.skills.stats.journal import Journal                                     # noqa: E402
+from tradingbot.skills.stats.session import Signal                                      # noqa: E402
 
 AHEAD = 7 * 3600                                       # servidor = NY + 7 h
 STEP = 300
@@ -89,14 +92,22 @@ def main() -> None:
     profiles, default = load_profiles()
     source = Mt5Source(select_profile(profiles, default, args.perfil), 2_000_000)
     print("conectado:", source.connect(), flush=True)
-    orders, bars = [], {}
+    orders, bars, blocked = [], {}, []                                           # blocked: setups sin entrada por el stop máximo (NO GO «SL»)
     for want in symbols:
         symbol = source.resolve_symbol(want)
         mt5 = source._mt5
         mt5.symbol_select(symbol, True)
         series = {}
         for m in engine.ZONE_TFS:                                                # velas de 3, 5 y 15 min de MT5 (las de 15 también se podrían agrupar desde las de 5)
-            raw = pd.DataFrame(mt5.copy_rates_from_pos(symbol, getattr(mt5, f"TIMEFRAME_M{m}"), 0, args.barras)).rename(columns={"time": "ts"})
+            rates = None
+            for _ in range(10):                                                  # MT5 devuelve None mientras sincroniza el historial del símbolo
+                rates = mt5.copy_rates_from_pos(symbol, getattr(mt5, f"TIMEFRAME_M{m}"), 0, args.barras)
+                if rates is not None and len(rates):
+                    break
+                time.sleep(2)
+            if rates is None or not len(rates):
+                sys.exit(f"MT5 no da velas de {symbol} M{m}: {mt5.last_error()}")
+            raw = pd.DataFrame(rates).rename(columns={"time": "ts"})
             series[m] = raw[["ts", "open", "high", "low", "close"]].iloc[:-1].reset_index(drop=True)      # sin la vela que se está formando
         df = series[5]
         bars[symbol] = df                                                       # con estas velas se sigue la posición (el TF del perfil)
@@ -106,10 +117,17 @@ def main() -> None:
         zones = crt_bias.zone_cache(df, cfg, bias_cfg)
         views = {m: {1: engine.view(d, 1), -1: engine.view(d, -1)} for m, d in series.items()}
         seen = set()
+        blocked_keys = set()
         for st in setups:                                                       # por la hora del cierre sobre el CISD: el primero de cada C2 y lado
             m = st["ltf"]
             key = (st["C2"], st["sign"])
             ep = engine.entry_point(views[m][st["sign"]], st, entry_model, m, rule, cfg)
+            if ep is None and key not in seen and key not in blocked_keys:
+                risk = engine.sl_blocked(views[m][st["sign"]], st, entry_model, m, rule, cfg)
+                at = int(series[m]["ts"].to_numpy()[st["jc"]]) + m * 60
+                if risk is not None and at >= since:
+                    blocked_keys.add(key)
+                    blocked.append((at, Signal(False, symbol, "5m", "CRT", st["dirección"], "SL: " + sl_text(risk, cfg, long=True), at)))
             if ep is None or key in seen:
                 continue
             ts = series[m]["ts"].to_numpy().astype(np.int64)
@@ -162,6 +180,9 @@ def main() -> None:
         events.append((order.entry_ts + STEP, 0, order, None))
         if closed is not None:
             events.append((closed.exit_ts + STEP, 1, order, closed))
+    for at, signal in blocked:
+        stamp = local_naive(at)
+        Journal(journal_dir, now=lambda stamp=stamp: stamp).signal(signal)
     for ts, kind, order, closed in sorted(events, key=lambda e: e[:2]):
         stamp = local_naive(ts)
         journal = Journal(journal_dir, now=lambda stamp=stamp: stamp)

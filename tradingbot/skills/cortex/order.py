@@ -31,6 +31,7 @@ class Order:
     caso: str = ""                 # caso del patrón («A. Ideal» / «B. Flexible» en Continuación), para el diario del forwardtest
     lateral: bool = False          # el filtro de lateralidad dejó el sesgo en No Bias (la puntuación es la de las reglas)
     efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia) al dar la orden
+    htf_candle: str = ""           # CRT: la vela HTF del sweep (C2) en la que entró, p. ej. «H4 02/11 21:00–01:00 NY»
 
     @property
     def label(self) -> str:
@@ -70,4 +71,4 @@ def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:
     return Order(payload["symbol"], payload["timeframe"], payload["direction"], payload.get("pattern", "Calendario (largo a hora fija)"),
                  payload.get("pattern_key", "calendario"),
                  "", payload["day"], price, price, price, price, payload["stop"], payload["target"], bias, score, reason,
-                 payload["close_at"], payload["entry_ts"], payload["close_ts"], **_lateral(bias_result))
+                 payload["close_at"], payload["entry_ts"], payload["close_ts"], htf_candle=payload.get("htf_candle", ""), **_lateral(bias_result))
