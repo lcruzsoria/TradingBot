@@ -29,7 +29,8 @@ from .config import (DEFAULT_CONFIG_FILE, DEFAULT_ENV_FILE, PROFILES_DIR, PROJEC
                      profile_dir, strategy_skills)
 
 NO_SYNC_SKILLS = ("telegram",)                  # nada de avisos por Telegram de lo que se repasa: ya pasó
-QUIET_SECONDS = 30                               # sin novedades de Pattern, Cortex o Setup durante ese tiempo: el repaso ha terminado
+QUIET_SECONDS = 75                               # sin novedades de Pattern, Cortex o Setup durante ese tiempo: el repaso ha terminado (Cortex decide a los 60 s
+                                                 # de acabar el barrido si no le llega Pattern, como en los perfiles sin patrones)
 MAX_SECONDS = 20 * 60                            # y lo que se espera como máximo a un perfil
 BUSY_TOPICS = ("candles.loaded", "pattern.", "bias.", "cortex.", "setup.", "stats.", "calendar.", "feed.")
 LOCK_STALE_MINUTES = 40
