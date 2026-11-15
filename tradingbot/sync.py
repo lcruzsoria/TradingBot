@@ -177,11 +177,11 @@ def catch_up(name: str, folder: Path | None = None, log=print) -> bool:
         cfg["skills"] = strategy_skills(cfg["skills"], strategy)
         own = env.section(strategy).get_list("SYMBOLS", []) or cfg["app"]["watchlist"]
         cfg["app"]["watchlist"] = settings.load_watchlist(own, profile=profile.name, common=False)
-        cfg["app"]["symbol"] = next((s for s in cfg["app"]["watchlist"] if s.lower().startswith(cfg["app"]["symbol"].lower())), cfg["app"]["watchlist"][0])
         if strategy in STRATEGY_TIMEFRAMES:
             cfg["app"]["timeframe"] = STRATEGY_TIMEFRAMES[strategy]
     else:
         cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=profile.name)
+    cfg["app"]["symbol"] = next((s for s in cfg["app"]["watchlist"] if s.lower().startswith(cfg["app"]["symbol"].lower())), cfg["app"]["watchlist"][0])   # uno que el broker tenga
     cfg["skills"] = [s for s in cfg["skills"] if s.get("type") not in NO_SYNC_SKILLS]
     bus = EventBus()
     manager = SkillManager(bus, Services(source, BiasEngine.from_config(cfg["bias"]), cfg, env), cfg["skills"])
@@ -190,7 +190,7 @@ def catch_up(name: str, folder: Path | None = None, log=print) -> bool:
     def tap(event, _names) -> None:
         if event.topic == "feed.sweep" and event.payload.get("stage") == "end":
             seen["end"] = True
-        if event.topic == "feed.failed":
+        if event.topic == "feed.failed" and event.payload.get("stage") == "connect":      # un mercado que no carga no para el barrido de los demás
             seen["failed"] = event.payload.get("error", "")
         if event.topic.startswith(BUSY_TOPICS):
             seen["last"] = time.monotonic()
