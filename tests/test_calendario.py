@@ -114,3 +114,23 @@ def test_las_entradas_del_backtest_se_dibujan_solo_donde_hay_velas():
     assert pos["entry"] == 104.0 and pos["stop"] == pytest.approx(104 * 0.99) and pos["target"] == pytest.approx(104 * 1.02)
     assert pos["state"] == "objetivo" and pos["x1"] > pos["x0"] and pos["direction"] == "long"
     assert market_key("NAS100.r") == market_key("USTEC.s") == "nas100" and market_key("DJ30.r") == market_key("US30")
+
+
+def test_con_inicio_del_forwardtest_avisa_de_todos_los_lunes_desde_esa_fecha():
+    """Con STATS_FORWARD_START se repasa también lo que pasó con el bot cerrado: una señal por cada lunes desde el inicio."""
+    manager, bus, out = run("STATS_FORWARD_START=2026-10-12\n", skills=("calendario",))
+    df = pd.concat([candles("2026-10-05 01:00", n=8), candles("2026-10-12 01:00", n=8), candles("2026-10-19 01:00", n=8), candles("2026-11-02 01:00", n=8)],
+                   ignore_index=True)
+    loaded(bus, df)
+    loaded(bus, df)                                                     # recargar las mismas velas no repite las señales
+    manager.stop()
+    days = sorted(s.payload["day"].isoformat() for s in out["signal"])
+    assert days == ["2026-10-12", "2026-10-19", "2026-11-02"]           # el lunes 05/10 es anterior al inicio
+
+
+def test_sin_inicio_del_forwardtest_solo_mira_las_ultimas_velas():
+    manager, bus, out = run(skills=("calendario",))
+    df = pd.concat([candles("2026-10-05 01:00", n=8), candles("2026-10-12 01:00", n=8)], ignore_index=True)
+    loaded(bus, df)
+    manager.stop()
+    assert out["signal"] == []                                          # la vela de las 02:00 del lunes 12 no es de las 2 últimas
