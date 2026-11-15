@@ -18,6 +18,7 @@ from ..skills.bias.rules import fmt_price
 from ..clock import format_offset, ny_from_server, server_minus_ny, trading_day
 from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
+from ..skills.levels.skill import GAP_STRATEGIES
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes, selector_timeframes
 from . import theme
@@ -310,7 +311,11 @@ class MainWindow(QMainWindow):
         for group, text, tip, key in (
                 ("tdo", "TDO", "Apertura del mercado: precio de apertura de la primera vela del día", "SHOW_TDO"),
                 ("midnight", "Midnight", "Precio de apertura a las 00:00 de Nueva York", "SHOW_MIDNIGHT"),
-                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL")):
+                ("pdhl", "PDH/PDL", "Máximo y mínimo del día anterior (Previous Day High / Low)", "SHOW_PDHL"),
+                ("ndog", "NDOG", "Hueco de apertura diario (cierre de las 17:00 frente a la reapertura) con su 50 %", "SHOW_NDOG"),
+                ("nwog", "NWOG", "Hueco de apertura semanal (cierre del viernes frente a la apertura del domingo) con su 50 %", "SHOW_NWOG")):
+            if group in ("ndog", "nwog") and app_cfg["app"].get("strategy") not in GAP_STRATEGIES:
+                continue                                    # los huecos solo se ven en los perfiles que los usan
             btn = QPushButton(text)
             btn.setProperty("chip", "true")
             btn.setCheckable(True)
@@ -422,6 +427,13 @@ class MainWindow(QMainWindow):
             grid.addWidget(sma_cell, 0, 3)                   # y la SMA pasa al hueco de Fibo, que este perfil no usa
         else:
             grid.addWidget(sma_cell, 0, 0)               # a la izquierda de TDO (así el panel no crece en altura)
+        gap_btns = [self.level_btns[g] for g in ("ndog", "nwog") if g in self.level_btns]
+        if gap_btns:                                         # NDOG y NWOG (solo en los perfiles con huecos): en columna, a la izquierda de SMA y Sesgo
+            gaps_col = QVBoxLayout()
+            gaps_col.setSpacing(6)
+            for btn in gap_btns:
+                gaps_col.addWidget(btn)
+            top.addLayout(gaps_col)
         top.addLayout(grid)
         self.bias_card = BiasCard()
         top.addWidget(self.bias_card)
@@ -480,6 +492,7 @@ class MainWindow(QMainWindow):
         self.log_view.setFixedHeight(110)
         self._logged: dict[str, object] = {}       # última traza de cada tipo: no se repite si no cambia
         log.body.addWidget(self.log_view)
+        log.setVisible(self.strategy != "enigma369")     # en Enigma369 el gráfico ocupa también esa zona
         left.addWidget(log)
         return left
 
@@ -680,7 +693,8 @@ class MainWindow(QMainWindow):
     def _on_enigma(self, p: dict) -> None:
         if p["symbol"] != self.charted_symbol or p["timeframe"] != self.current_tf():
             return                                      # llega tarde: ya se está viendo otro gráfico
-        self.chart.set_enigma(p.get("areas", []) if p.get("available") else [], p.get("quarter_lines") if p.get("available") else None)
+        self.chart.set_enigma(p.get("areas", []) if p.get("available") else [], p.get("quarter_lines") if p.get("available") else None,
+                             p.get("triples") if p.get("available") else None, p.get("windows") if p.get("available") else None)
         self.enigma.set_data(p, self.ENIGMA_NAMES)
 
     def current_tf(self) -> str:
@@ -862,6 +876,8 @@ class MainWindow(QMainWindow):
             self.backtest_dialog = BacktestDialog(self, self.backtest, self.backtest_error)
             self.backtest_dialog.hidden.connect(lambda: self.backtest_btn.setChecked(False))
             self.backtest_dialog.reload_requested.connect(lambda: self.bus.publish("stats.reload", {}, source="ui"))
+            if self.backtest is not None and self.backtest.groups_of(self.strategy):     # un perfil con backtest propio (Enigma369) abre el suyo
+                self.backtest_dialog.set_profile(self.strategy)
         self.backtest_dialog.popup_at(self.backtest_btn)
 
     # -- tema -------------------------------------------------------------------------------------
@@ -890,6 +906,15 @@ class MainWindow(QMainWindow):
     # -- eventos que llegan de las skills (hilo de la interfaz) -----------------------------------
     def _on_capture_request(self, p: dict) -> None:
         """La skill Telegram pide una captura de la ventana (/captura por Telegram): se dibuja aquí, en el hilo de la interfaz."""
+        if p.get("enigma"):                          # /enigma369_1m y /enigma369_5m: gráfico propio con sus zonas, no la ventana
+            from .enigma_shot import render
+            try:
+                png = render(p)
+            except Exception as exc:  # noqa: BLE001 - la imagen no puede tumbar la interfaz
+                self.log(f"telegram: no se pudo dibujar Enigma369 ({exc})", tone="warn")
+                png = b""
+            self.bus.publish("telegram.capture", {"request_id": p.get("request_id"), "png": png}, source="ui")
+            return
         from PySide6.QtCore import QBuffer, QByteArray, QIODevice
         data = QByteArray()
         buffer = QBuffer(data)

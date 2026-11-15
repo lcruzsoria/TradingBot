@@ -265,6 +265,16 @@ class Group:
     def is_crt(self) -> bool:
         return self.raw.get("tipo") == "crt"
 
+    @property
+    def is_extremes(self) -> bool:
+        """Enigma369: no son operaciones sino la zona del máximo y el mínimo de cada día (ver extremos.py)."""
+        return self.raw.get("tipo") == "extremos"
+
+    @cached_property
+    def extremes(self):
+        from .extremos import Extremes
+        return Extremes(self.raw)
+
     # -- selección ---------------------------------------------------------------------------
     @staticmethod
     def _in(values: np.ndarray, chosen) -> np.ndarray:
@@ -462,7 +472,7 @@ class Backtest:
         año, la hora, el día y el mes elegidos."""
         out = []
         for g in self.groups:
-            if g.is_calendar or g.is_crt or (profile is not None and g.profile != profile):
+            if g.is_calendar or g.is_crt or g.is_extremes or (profile is not None and g.profile != profile):
                 continue
             ops = g.ops
             sel = (g.filter_mask("Ambos", filt) & g._in(ops.year, years) & g._in(ops.hour, hours)

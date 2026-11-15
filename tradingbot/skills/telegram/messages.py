@@ -132,6 +132,10 @@ COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana de
             ("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
             ("hoy", "Cierres y resultado de hoy"), ("sesgo", "Sesgo de cada mercado"),
             ("decisiones", "Últimos GO / NO GO de Cortex"), ("ayuda", "Lista de comandos"))
+# perfil Enigma369: gráfico con las zonas -> (timeframe, horas que se ven, modo de las franjas)
+ENIGMA_SHOTS = {"enigma369_1m": ("1m", 6, "dia"), "enigma369_5m": ("5m", 24, "semana")}
+ENIGMA_COMMANDS = (("enigma369_1m", "Últimas 6 h en 1m con las zonas de Enigma369 (Día → Micro)"),
+                   ("enigma369_5m", "Últimas 24 h en 5m con las zonas de Enigma369 (Semana → Cuarto)"))
 
 
 def _r(value) -> str:

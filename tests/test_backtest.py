@@ -118,8 +118,8 @@ def test_ventana_backtest_con_el_resumen_real():
     QApplication.instance() or QApplication([])
     bt = load()
     assert [g.key for g in bt.groups] == ["puprime:indices", "puprime:forex", "puprime:oro", "puprime:cripto", "metaquotes:indices",
-                                          "metaquotes:forex", "metaquotes:oro", "calendario", "crt:indices", "crt:forex"]
-    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "crt"]
+                                          "metaquotes:forex", "metaquotes:oro", "calendario", "crt:indices", "crt:forex", "enigma369:indices"]
+    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "crt", "enigma369"]
     dlg = BacktestDialog(None, bt)
     assert dlg.group_key == "puprime:indices" and dlg.profile_key == "puprime" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values
@@ -129,7 +129,7 @@ def test_ventana_backtest_con_el_resumen_real():
     assert dlg.periods.text().count("<b>") == 1 and "Índices americanos desde 08/04/2020" in dlg.periods.text()
     assert "–" in dlg.generated.text()
     for g in bt.groups:                                                            # todas las combinaciones se pintan
-        if g.is_crt:                                                               # CRT tiene sus propios botones (test_ventana_backtest_crt...)
+        if g.is_crt or g.is_extremes:                                              # CRT y Enigma369 tienen sus propios tests
             continue
         dlg.set_group(g.key)
         assert list(dlg.pattern_btns) == g.patterns and list(dlg.filter_btns) == list(g.filters)

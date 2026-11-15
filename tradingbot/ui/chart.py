@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsRectItem
 
 from ..clock import NY_CLOSE_SERVER_AHEAD_HOURS
@@ -19,10 +19,12 @@ from .fmt import DIAS, fecha_hora
 MAX_CANDLES_DRAWN = 2500   # por encima de esto se dibuja una línea de cierres
 NO_GO_OPACITY = 0.5        # fibos y posiciones de las entradas que Cortex no opera (NO GO)
 NO_GO_PILL_OPACITY = 0.7   # su etiqueta, algo menos difuminada para que se lea
-LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL"}
-LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl"}   # botón que muestra cada nivel
+LEVEL_LABELS = {"tdo": "TDO", "midnight": "Midnight", "pdh": "PDH", "pdl": "PDL", "ndog": "NDOG", "nwog": "NWOG"}   # los huecos llevan el texto una vez (en el borde alto); el otro borde y el 50 % no
+LEVEL_GROUP = {"tdo": "tdo", "midnight": "midnight", "pdh": "pdhl", "pdl": "pdhl", "ndog": "ndog", "ndoglo": "ndog", "ndog50": "ndog",
+               "nwog": "nwog", "nwoglo": "nwog", "nwog50": "nwog"}   # botón que muestra cada nivel
 LEVEL_STYLE = {"tdo": Qt.PenStyle.DashLine, "midnight": Qt.PenStyle.DotLine,
-               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine}
+               "pdh": Qt.PenStyle.DashLine, "pdl": Qt.PenStyle.DashLine, "ndog": Qt.PenStyle.DotLine, "ndoglo": Qt.PenStyle.DotLine, "ndog50": Qt.PenStyle.DashLine,
+               "nwog": Qt.PenStyle.DotLine, "nwoglo": Qt.PenStyle.DotLine, "nwog50": Qt.PenStyle.DashLine}
 
 
 def _alpha(color: str, alpha: int) -> QColor:
@@ -210,10 +212,15 @@ class EnigmaAreas(pg.GraphicsObject):
         super().__init__()
         self._areas: list[dict] = []
         self._lines: list[dict] = []
+        self._triples: list[dict] = []
+        self._windows: list[dict] = []
 
-    def set_data(self, areas: list[dict], lines: list[dict] | None = None) -> None:
+    def set_data(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None,
+                 windows: list[dict] | None = None) -> None:
         self._areas = list(areas)
         self._lines = list(lines or [])
+        self._triples = list(triples or [])
+        self._windows = list(windows or [])
         self.prepareGeometryChange()
         self.update()
 
@@ -223,9 +230,10 @@ class EnigmaAreas(pg.GraphicsObject):
 
     def paint(self, p, *args) -> None:
         vb = self.getViewBox()
-        if vb is None or not (self._areas or self._lines):
+        if vb is None or not (self._areas or self._lines or self._triples or self._windows):
             return
         (vx0, vx1), (y0, y1) = vb.viewRange()
+        transform = p.transform()
         p.setPen(Qt.PenStyle.NoPen)
         for a in self._areas:
             if a["x1"] < vx0 or a["x0"] > vx1:
@@ -236,10 +244,69 @@ class EnigmaAreas(pg.GraphicsObject):
             p.drawRect(QRectF(a["x0"], y0, a["x1"] - a["x0"], y1 - y0))
         for ln in self._lines:                                            # inicio y fin del cuarto en curso: punteadas
             if vx0 <= ln["x"] <= vx1:
-                pen = pg.mkPen(QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
+                if ln.get("bright"):                                      # fin y inicio de una combinación: finas y con pocos guiones
+                    pen = pg.mkPen(QColor(ln["color"]), width=1)
+                    pen.setDashPattern([3, 8])
+                else:
+                    pen = pg.mkPen(QColor(ln["color"]).darker(150), width=1.5, style=Qt.PenStyle.DotLine)
                 pen.setCosmetic(True)
                 p.setPen(pen)
                 p.drawLine(QPointF(ln["x"], y0), QPointF(ln["x"], y1))
+        visible = [t for t in self._triples if t["x1"] >= vx0 and t["x0"] <= vx1]
+        windows = [w for w in self._windows if w["x1"] >= vx0 and w["x0"] <= vx1]
+        if not (visible or windows):
+            return
+        dash = pg.mkPen(QColor("#FFFFFF"), width=1)
+        dash.setDashPattern([3, 8])                                       # línea fina, guiones cortos y muy separados
+        for t in visible:                                                 # cada combinación queda delimitada por líneas verticales discontinuas de su color
+            dash.setColor(QColor(t["color"]))
+            dash.setCosmetic(True)
+            p.setPen(dash)
+            for x in (t["x0"],) if t.get("active") else (t["x0"], t["x1"]):
+                if vx0 <= x <= vx1:
+                    p.drawLine(QPointF(x, y0), QPointF(x, y1))
+        p.resetTransform()                                                # combinaciones de 3 zonas del mismo color: franja arriba, en píxeles
+        font = p.font()
+        font.setPointSize(8)
+        font.setWeight(QFont.Weight.Normal)
+        bold = QFont(font)
+        bold.setWeight(QFont.Weight.Bold)
+        top = transform.map(QPointF(0, y1)).y()
+        for t in visible:
+            left, right = transform.map(QPointF(max(t["x0"], vx0), 0)).x(), transform.map(QPointF(min(t["x1"], vx1), 0)).x()
+            rect = QRectF(left, top, right - left, 16)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(t["color"]))
+            p.drawRect(rect)
+            edge = pg.mkPen(QColor(t["color"]).darker(150), width=2)
+            edge.setCosmetic(True)
+            p.setPen(edge)
+            p.drawLine(QPointF(left, top + 16), QPointF(right, top + 16))
+            p.setPen(QColor("#2B2B2B"))
+            four = t["n"] >= 4 and t.get("number")                         # 4 colores iguales: el código con su número, en negrita
+            p.setFont(bold if four else font)
+            label = f'{t["label"]} · {t["number"]}' if four else t["label"]
+            if four and p.fontMetrics().horizontalAdvance(label) > right - left - 6:
+                label = str(t["number"])
+            if p.fontMetrics().horizontalAdvance(label) <= right - left - 6:
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+        bottom = transform.map(QPointF(0, y0)).y()                         # ventanas de reversión (Asia Q1, NY AM Q3, NY PM Q3): franja abajo
+        for w in windows:
+            left, right = transform.map(QPointF(max(w["x0"], vx0), 0)).x(), transform.map(QPointF(min(w["x1"], vx1), 0)).x()
+            rect = QRectF(left, bottom - 14, right - left, 14)
+            fill = QColor(w["color"])
+            fill.setAlphaF(1.0 if w["same"] else 0.55)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(fill)
+            p.drawRect(rect)
+            edge = pg.mkPen(QColor(w["color"]).darker(150), width=2)
+            edge.setCosmetic(True)
+            p.setPen(edge)
+            p.drawLine(QPointF(left, bottom - 14), QPointF(right, bottom - 14))
+            p.setPen(QColor("#2B2B2B"))
+            p.setFont(bold if w["same"] else font)
+            if p.fontMetrics().horizontalAdvance(w["label"]) <= right - left - 6:
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, w["label"])
 
 
 class ScaleAxis(pg.AxisItem):
@@ -770,6 +837,8 @@ class ChartView(pg.PlotWidget):
             xs += [line.x0, line.x1]
             ys += [line.price, line.price]
             color = self._day_colors.get(LEVEL_GROUP[line.kind], theme.MUTED)
+            if line.kind not in LEVEL_LABELS:
+                continue
             label = pg.TextItem(LEVEL_LABELS[line.kind], color=color, anchor=(0, 0.5))
             label.setPos(line.x1, line.price)
             pi.addItem(label, ignoreBounds=True)
@@ -1111,12 +1180,15 @@ class ChartView(pg.PlotWidget):
             self._bias_items += [box, label]
 
     # -- Enigma369: áreas de alineación de cuartos (3, 6, 9) ----------------------------------------------------
-    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None) -> None:
+    def set_enigma(self, areas: list[dict], lines: list[dict] | None = None, triples: list[dict] | None = None,
+                   windows: list[dict] | None = None) -> None:
         """Pinta cada alineación como una franja vertical traslúcida del color de las zonas alineadas; más intensa cuantas más zonas.
 
         area = {x0, x1, color, opacity}. Con [] se quitan todas. `lines`: inicio y fin del cuarto en curso, punteadas.
+        `triples`: combinaciones de 3 o más zonas del mismo color {x0, x1, color, label}, como franja con su código en el borde superior.
+        `windows`: ventanas de reversión {x0, x1, color, label, same}, como franja en el borde inferior (en negrita si `same`).
         """
-        self.enigma.set_data(areas, lines)
+        self.enigma.set_data(areas, lines, triples, windows)
 
     @property
     def enigma_item_count(self) -> int:
