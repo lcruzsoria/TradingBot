@@ -55,7 +55,8 @@ class TelegramSkill(Skill):
                    "arrancar. Panel: una página web de solo lectura con las abiertas, los cierres, el sesgo y las decisiones, "
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
-                  "telegram.capture", "clock.offset", "crt.pending", "crt.blocked", "enigma369.updated")
+                  "telegram.capture", "clock.offset", "crt.pending", "crt.blocked", "enigma369.updated",
+                  "setup.challenge")
     publishes = ("telegram.capture.request",)
     slot = "aux1"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
@@ -386,6 +387,8 @@ class TelegramSkill(Skill):
         elif topic == "crt.blocked":                            # setup CRT que no entró porque el stop supera el máximo: se avisa como una apertura
             if self.telegram and "abre" in self.notify and self._live(p["symbol"], p["entry_ts"]):
                 self._send(messages.blocked(p, self.profile))
+        elif topic == "setup.challenge" and self.telegram:          # challenge simulado: siempre se avisa
+            self._send(messages.challenge(p, self.profile))
         elif topic == "setup.executed" and self.telegram:
             order = p["order"]
             if self._live(order.symbol, order.entry_ts):

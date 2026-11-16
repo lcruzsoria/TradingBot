@@ -1,18 +1,16 @@
 """Skill Setup: el ejecutor. Solo actúa cuando Cortex le da la orden de operar en la cuenta del broker."""
 from __future__ import annotations
 
-import time
 from dataclasses import replace
-from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 
-from ...clock import NY, server_minus_ny
 from ...core import Event, Skill, register_skill
 from ...timeframes import TIMEFRAMES
 from ..levels.daylevels import DEFAULT_US_INDICES
 from ..stats.journal import Journal, folder_for
-from . import account, store
+from . import account, challenge, live, store
 from .positions import resolve, trackable
 
 DEFAULT_RISK_PCT = 1.0            # SETUP_RISK_PCT: riesgo de cada operación, % del saldo virtual
@@ -27,15 +25,17 @@ class SetupSkill(Skill):
                    "quien reúne el activo, la temporalidad, el sesgo, la TBR y el patrón válido; Setup no decide nada. "
                    "En casi todos los perfiles funciona en modo simulación: prepara la orden y la anota, pero no la envía a "
                    "MT5. Los perfiles con MT5_<PERFIL>_SEND_ORDERS=true (solo cuentas demo) la envían de verdad, con los lotes "
-                   "que arriesgan SETUP_RISK_PCT del saldo real de la cuenta, y mueven el stop y cierran la posición de MT5 "
-                   "cuando lo hace la simulada. Sigue las "
+                   "que arriesgan SETUP_RISK_PCT del saldo real de la cuenta, solo si la señal es nueva; mueven el stop a "
+                   "breakeven, cierran por tiempo y su Forwardtest es la imagen de la cuenta: entrada, salida y resultado "
+                   "los de MT5. Sigue las "
                    "posiciones simuladas (stop, objetivo, stop a breakeven y cierre por tiempo) con las velas que le reenvía "
                    "Cortex, y lleva la cuenta virtual del perfil: el saldo de la cuenta al empezar más lo ganado o perdido en "
                    "cada operación (R x riesgo). Las cerradas del forwardtest pasan a la cuenta al consolidar: al cierre de la "
                    "vela de 3 h (índices) o de 4 h (resto) en la que cerraron. Las abiertas y la cuenta se guardan en "
                    "data/perfiles/<perfil>/: se pueden consultar y siguen ahí al reiniciar el bot.")
     subscribes = ("setup.order", "setup.candles", "feed.connected", "clock.offset")
-    publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated")
+    publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated", "setup.skipped",
+                 "setup.challenge")
     slot = "aux4"
     interval = CONSOLIDATE_CHECK_SECONDS
 
@@ -73,6 +73,19 @@ class SetupSkill(Skill):
         app = (self.services.app_cfg or {}).get("app", {})
         self.live = bool(app.get("send_orders"))       # MT5_<PERFIL>_SEND_ORDERS: opera de verdad en la cuenta (demo)
         self._real: tuple[float, str] | None = None    # último saldo real de la cuenta (perfiles que operan de verdad)
+        self.since = live.since(self.services.app_cfg) if self.live else None   # desde cuándo opera de verdad (UTC)
+        self._candles: dict[str, tuple] = {}            # últimas velas de cada mercado con posición real (máximo y mínimo en R)
+        self.challenge = None                           # challenge simulado sobre la cuenta real (SETUP_CHALLENGE_*)
+        target = self.settings.get_float("CHALLENGE_TARGET_PCT", challenge.DEFAULT_TARGET_PCT)
+        if self.live and target and target > 0:
+            try:
+                self.challenge = challenge.Challenge(
+                    Path(app["data_dir"]) / challenge.FILE if app.get("data_dir") else challenge.FILE, target,
+                    self.settings.get_float("CHALLENGE_MAX_DD_PCT", challenge.DEFAULT_MAX_DD_PCT),
+                    self.settings.get_int("CHALLENGE_PHASES", challenge.DEFAULT_PHASES))
+            except ValueError as exc:
+                self.error = f"SETUP_CHALLENGE_*: {exc}"
+                raise
         if app.get("capital"):                          # perfil con capital simulado propio (MT5_<PERFIL>_CAPITAL): no depende del saldo de MT5
             self.account.start(float(app["capital"]), app.get("currency") or "USD")
         self.set_caption(f"{len(self.positions)} posición(es) abierta(s)" if self.positions else "esperando a Cortex")
@@ -85,6 +98,7 @@ class SetupSkill(Skill):
         if event.topic == "feed.connected":
             self._start_account()
             if self.live:
+                self._check_challenge()
                 self._publish_account()
             return
         if event.topic == "clock.offset":
@@ -99,20 +113,45 @@ class SetupSkill(Skill):
             return
         order = event.payload["order"]
         self.executed += 1
-        sent, risk, note = False, (self.account.risk_amount(self.risk_pct) if self.account.started else None), ""
-        if self.live and trackable(order):
-            order, sent, risk, note = self._send(order)
+        if self.live:
+            self._live_order(order)
+            return
         if trackable(order):
             self.positions.append(order)
             store.save(self.positions, self.file)
             self._publish_account()
-        self.set_caption(f"{'enviada' if sent else 'simulada'}: {order.direction.capitalize()} {order.symbol}")
-        if not self.live:
-            note = "Modo simulación: la orden está lista pero no se ha enviado a MT5."
+        self.set_caption(f"simulada: {order.direction.capitalize()} {order.symbol}")
+        note = "Modo simulación: la orden está lista pero no se ha enviado a MT5."
         if trackable(order):
             note += (" El resultado se anotará en el Registro y en el Forwardtest cuando la posición cierre (stop, objetivo, "
                      "breakeven o tiempo), y pasará al saldo virtual del perfil al consolidar.")
-        self.publish("setup.executed", {"order": order, "sent": sent, "note": note, "risk_amount": risk})
+        self.publish("setup.executed", {"order": order, "sent": False, "note": note,
+                                        "risk_amount": self.account.risk_amount(self.risk_pct) if self.account.started else None})
+
+    def _live_order(self, order) -> None:
+        """Perfil que opera de verdad: solo abre en MT5 las señales nuevas; lo que no llega a la cuenta no cuenta (no entra
+        en el Forwardtest: este es la imagen de la cuenta) y Cortex libera el mercado."""
+        bar = TIMEFRAMES.get(order.timeframe)
+        now = self.server_now()
+        if self.challenge is not None and self.challenge.failed:
+            reason = "challenge suspendido (drawdown máximo alcanzado): el bot ya no abre operaciones"
+        elif not trackable(order):
+            reason = "la orden no trae stop, objetivo y horas de entrada y de cierre"
+        elif not live.fresh(order, now, live.to_server(self.since, self.offset) if self.since else None,
+                            bar * 60 if bar else None):
+            reason = "la señal es de antes de que el perfil empezara a operar, o ya es vieja: no se abre tarde"
+        else:
+            order, sent, risk, note = self._send(order)
+            if sent:
+                self.positions.append(order)
+                store.save(self.positions, self.file)
+                self._publish_account()
+                self.set_caption(f"enviada: {order.direction.capitalize()} {order.symbol}")
+                self.publish("setup.executed", {"order": order, "sent": True, "note": note, "risk_amount": risk})
+                return
+            reason = note
+        self.set_caption(f"no enviada: {order.direction.capitalize()} {order.symbol}")
+        self.publish("setup.skipped", {"order": order, "note": reason})
 
     # -- operativa real (MT5_<PERFIL>_SEND_ORDERS=true) -----------------------------------------
     def _real_balance(self) -> tuple[float, str] | None:
@@ -130,15 +169,16 @@ class SetupSkill(Skill):
         operación sigue como simulada (el Forwardtest no cambia) y la nota dice por qué."""
         real = self._real_balance()
         if real is None:
-            return order, False, None, "No enviada a MT5: no hay datos de la cuenta. Se sigue como simulada."
+            return order, False, None, "no hay datos de la cuenta de MT5"
         balance, currency = real
         risk = round(balance * self.risk_pct / 100, 2)
         try:
             fill = self.services.source.open_market(order.symbol, order.direction, risk, order.stop, order.target,
                                                     f"TB {order.pattern_key}"[:31])
-        except Exception as exc:  # noqa: BLE001 - lo que diga MT5 va a la nota; la simulada sigue
-            return order, False, risk, f"No enviada a MT5: {exc}. Se sigue como simulada."
-        order = replace(order, ticket=fill.ticket, volume=fill.volume, fill_price=fill.price)
+        except Exception as exc:  # noqa: BLE001 - lo que diga MT5 va a la nota
+            return order, False, risk, str(exc)
+        order = replace(order, ticket=fill.ticket, volume=fill.volume, signal_price=order.price, price=fill.price,
+                        risk_money=fill.risk)
         note = (f"Enviada a MT5: posición {fill.ticket}, {fill.volume:g} lotes de {fill.symbol} a {fill.price:g}, stop "
                 f"{order.stop:g} y objetivo {order.target:g}; arriesga {fill.risk:,.2f} {currency} ({self.risk_pct:g} % del saldo "
                 f"real, {balance:,.2f}).")
@@ -157,28 +197,42 @@ class SetupSkill(Skill):
         if best / risk < self.be_r:
             return order
         try:
-            moved = self.services.source.set_stop(order.ticket, order.fill_price or order.price)
+            moved = self.services.source.set_stop(order.ticket, order.price)       # el precio real de entrada
         except Exception as exc:  # noqa: BLE001 - se reintenta con las próximas velas
             self.set_caption(f"{order.symbol}: no se pudo mover el stop ({exc})")
             return order
-        return replace(order, be_sent=True) if moved else order
+        return replace(order, be_sent=True, be_at=self.server_now()) if moved else order
 
-    def _close_real(self, order) -> dict | None:
-        """Cierra en MT5 la posición de una operación que la simulada da por cerrada (si MT5 no la cerró ya con su stop u
-        objetivo) y devuelve lo que pasó en la cuenta."""
-        if not order.ticket:
-            return None
-        src, out = self.services.source, {"ticket": order.ticket, "volume": order.volume}
-        try:
-            out["closed_by_bot"] = src.close_position(order.ticket)
-        except Exception as exc:  # noqa: BLE001 - queda abierta en MT5: se dice en el Registro
-            out["error"] = str(exc)
-            return out
-        try:
-            out["profit"] = src.realized(order.ticket)
-        except Exception:  # noqa: BLE001
-            out["profit"] = None
-        return out
+    def _sync_real(self) -> None:
+        """Las posiciones reales: cierra por tiempo las que llegan a su hora y apunta las que MT5 ya ha cerrado (stop,
+        objetivo, breakeven, el bot o a mano), con su precio, su hora y su resultado de la cuenta."""
+        if not self.positions:
+            return
+        src, now, still = self.services.source, self.server_now(), []
+        for order in self.positions:
+            try:
+                if order.close_ts and now >= order.close_ts:
+                    src.close_position(order.ticket)
+                deal = src.closing(order.ticket)
+            except Exception as exc:  # noqa: BLE001 - sin conexión: se mira en la próxima vuelta
+                self.set_caption(f"{order.symbol}: sin datos de MT5 ({exc})")
+                still.append(order)
+                continue
+            if deal is None:
+                still.append(order)
+                continue
+            ts, high, low = self._candles.get(order.symbol, (None, None, None))
+            closed = live.closed_from_broker(order, deal, ts, high, low)
+            self.publish("setup.closed", {"order": order, "closed": closed, "sent": True,
+                                          "real": {"ticket": order.ticket, "volume": order.volume, "profit": deal["profit"],
+                                                   "closed_by_bot": deal.get("reason") == "bot"},
+                                          "consolidate_at": self.schedule.due(order.symbol, closed.exit_ts),
+                                          "consolidate_hours": self.schedule.hours(order.symbol)})
+            self.set_caption(f"cerrada en MT5: {closed.result} {deal['profit']:+,.2f}")
+        if len(still) != len(self.positions):
+            store.save(still, self.file)
+            self.positions = still
+            self._publish_account()
 
     def _start_account(self) -> None:
         """La primera conexión del perfil fija su capital inicial: el saldo de la cuenta de MT5 en ese momento."""
@@ -194,17 +248,36 @@ class SetupSkill(Skill):
 
     def tick(self) -> None:
         self._consolidate()
-        if self.live:                                   # el saldo real cambia con cada cierre en MT5
+        if self.live:                                   # cierres en MT5 y el saldo real, que cambia con cada uno
+            self._sync_real()
+            self._check_challenge()
             self._publish_account()
+
+    def _check_challenge(self) -> None:
+        """Challenge simulado: pasa de fase al llegar al objetivo y, si el equity toca el drawdown máximo, cierra lo abierto
+        y deja de operar. Cada cambio sale en setup.challenge (Registro y Telegram)."""
+        if self.challenge is None:
+            return
+        try:
+            snap = self.services.source.account()
+        except Exception:  # noqa: BLE001 - sin conexión: en la próxima vuelta
+            return
+        if snap is None:
+            return
+        for event in self.challenge.update(snap.balance, snap.equity, snap.currency):
+            if event["kind"] == "suspendido":
+                for order in self.positions:
+                    try:
+                        self.services.source.close_position(order.ticket)
+                    except Exception as exc:  # noqa: BLE001 - se dice en el Registro
+                        event.setdefault("errors", []).append(f"{order.symbol} ({order.ticket}): {exc}")
+                self._sync_real()
+            self.publish("setup.challenge", event)
 
     def server_now(self) -> int:
         """Hora del servidor (como si fuera UTC). Hasta que Quotes mida el desfase (con mercados abiertos), la estimada
         de los brokers con cierre en Nueva York: servidor = NY + 7 h, como la del gráfico."""
-        if self.offset is not None:
-            return int(time.time()) + int(self.offset)
-        shift, _ = server_minus_ny(None)
-        ny = datetime.now(NY).utcoffset() if NY is not None else timedelta(hours=-5)
-        return int(time.time() + ny.total_seconds()) + shift
+        return live.server_now(self.offset)
 
     def _consolidate(self) -> None:
         """Pasa a la cuenta las cerradas del forwardtest cuya vela de consolidación (3 h índices, 4 h resto) ya terminó."""
@@ -221,6 +294,8 @@ class SetupSkill(Skill):
 
     def _publish_account(self) -> None:
         summary = self.account.summary(self.risk_pct, self.positions)
+        if self.challenge is not None and self.challenge.started:
+            summary["challenge"] = self.challenge.summary()
         if self.live and (real := self._real_balance()) is not None:     # la cabecera muestra el saldo real de la cuenta
             balance, currency = real
             summary.update(balance=balance, currency=currency, risk_amount=balance * self.risk_pct / 100, live=True)
@@ -230,26 +305,28 @@ class SetupSkill(Skill):
         """Comprueba stop, objetivo, breakeven y cierre por tiempo de las posiciones abiertas del mercado cuyas velas llegan."""
         df = payload["df"]
         ts, high, low, close = (df[k].to_numpy() for k in ("ts", "high", "low", "close"))
+        if self.live:                                   # la posición la cierra MT5 (o el bot por tiempo): aquí solo el breakeven
+            self._candles[payload["symbol"]] = (ts, high, low)
+            moved = [self._breakeven(o, ts, high, low) if o.symbol == payload["symbol"] else o for o in self.positions]
+            if any(a is not b for a, b in zip(moved, self.positions)):
+                self.positions = moved
+                store.save(moved, self.file)
+            self._sync_real()
+            return
         minutes = TIMEFRAMES.get(payload.get("timeframe") or "")
         now = self.server_now()
         still = []
-        changed = False
         for order in self.positions:
             closed = (resolve(order, ts, high, low, close, self.be_r, minutes * 60 if minutes else None, now)
                       if order.symbol == payload["symbol"] else None)
             if closed is None:
-                if order.ticket and order.symbol == payload["symbol"]:
-                    moved = self._breakeven(order, ts, high, low)
-                    changed |= moved is not order
-                    order = moved
                 still.append(order)
                 continue
-            real = self._close_real(order)
-            self.publish("setup.closed", {"order": order, "closed": closed, "sent": real is not None, "real": real,
+            self.publish("setup.closed", {"order": order, "closed": closed, "sent": False,
                                           "consolidate_at": self.schedule.due(order.symbol, closed.exit_ts),
                                           "consolidate_hours": self.schedule.hours(order.symbol)})
             self.set_caption(f"cerrada: {closed.result} {closed.r:+.2f} R")
-        if len(still) != len(self.positions) or changed:
+        if len(still) != len(self.positions):
             store.save(still, self.file)
             self.positions = still
             self._publish_account()

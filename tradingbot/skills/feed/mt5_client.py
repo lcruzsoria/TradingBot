@@ -334,6 +334,27 @@ class Mt5Source:
             self._check(mt5, result, f"cerrar la posición {ticket} de {pos.symbol}")
             return True
 
+    DEAL_REASONS = {4: "sl", 5: "tp", 6: "stopout", 3: "bot"}     # DEAL_REASON_SL, _TP, _SO, _EXPERT; el resto: a mano
+
+    def closing(self, ticket: int) -> dict | None:
+        """Cierre de la posición según MT5: precio medio y hora (servidor) de las operaciones de salida, resultado total en
+        dinero (beneficio + comisión + swap) y motivo ("sl", "tp", "bot", "stopout" o "manual"). None si sigue abierta o
+        aún no consta."""
+        with self._lock:
+            mt5 = self._require()
+            if mt5.positions_get(ticket=int(ticket)):
+                return None
+            deals = mt5.history_deals_get(position=int(ticket)) or ()
+            outs = [d for d in deals if int(d.entry) in (1, 3)]          # DEAL_ENTRY_OUT, DEAL_ENTRY_OUT_BY
+            if not outs:
+                return None
+            volume = sum(float(d.volume) for d in outs) or 1.0
+            last = max(outs, key=lambda d: int(d.time_msc or d.time * 1000))
+            return {"price": sum(float(d.price) * float(d.volume) for d in outs) / volume, "ts": int(last.time),
+                    "profit": round(sum(float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
+                                        for d in deals), 2),
+                    "reason": self.DEAL_REASONS.get(int(last.reason), "manual")}
+
     def realized(self, ticket: int) -> float | None:
         """Resultado de la posición ya cerrada, en la moneda de la cuenta (beneficio + comisión + swap). None si no consta."""
         with self._lock:

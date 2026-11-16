@@ -31,7 +31,7 @@ class CortexSkill(Skill):
                    "del barrido de la watchlist retiene los patrones y los decide al final, todos los mercados juntos y en "
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
     subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "pattern.discarded",
-                  "calendar.signal", "crt.signal", "setup.closed", "feed.sweep", "pattern.swept")
+                  "calendar.signal", "crt.signal", "setup.closed", "setup.skipped", "feed.sweep", "pattern.swept")
     publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
     slot = "center"
     interval = 5.0                   # para no esperar para siempre a una vuelta del barrido que no se completa
@@ -99,6 +99,9 @@ class CortexSkill(Skill):
             self._sweep(p)
         elif event.topic == "pattern.swept":
             self._round_seen("swept", p)
+        elif event.topic == "setup.skipped":                         # no llegó a la cuenta (operativa real): mercado libre
+            if self._open.get(event.payload["order"].symbol) == event.payload["order"]:
+                self._open.pop(event.payload["order"].symbol, None)
         elif event.topic == "setup.closed":
             self._open.pop(event.payload["order"].symbol, None)
             self.set_caption(f"{event.payload['order'].symbol}: posición cerrada")

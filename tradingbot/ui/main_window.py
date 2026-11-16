@@ -152,7 +152,8 @@ class MainWindow(QMainWindow):
             "feed.failed": self._on_failed, "candles.loaded": self._on_candles,
             "quotes.updated": self._on_quotes, "bias.updated": self._on_bias, "tbr.updated": self._on_tbr, "enigma369.updated": self._on_enigma,
             "levels.updated": self._on_day_levels, "market.closed": self._on_market_closed, "market.day": self._on_market_day, "cortex.decision": self._on_cortex_decision, "setup.executed": self._on_setup_executed, "setup.closed": self._on_setup_closed, "setup.account": self._on_setup_account,
-            "setup.consolidated": self._on_setup_consolidated,
+            "setup.consolidated": self._on_setup_consolidated, "setup.skipped": self._on_setup_skipped,
+            "setup.challenge": self._on_setup_challenge,
             "stats.session": self._on_stats_session, "stats.backtest": self._on_stats_backtest, "pattern.updated": self._on_pattern_updated,
             "pattern.detected": self._on_pattern_detected, "pattern.discarded": self._on_pattern_discarded,
             "pattern.session": self._on_pattern_session,
@@ -1540,6 +1541,21 @@ class MainWindow(QMainWindow):
         lines += ["", f"Motivo:   {o.reason}", p["note"]]
         self.log(f"setup: orden {'enviada' if p['sent'] else 'preparada (simulación)'} - {o.label}", "\n".join(lines),
                  "info")
+
+    def _on_setup_challenge(self, p: dict) -> None:
+        """Challenge simulado: inicio, paso de fase, superado o suspendido (lo mismo que avisa Telegram)."""
+        title = {"inicio": f"empieza la fase {p['phase']} de {p['phases']}", "fase": f"fase {p['phase']} superada",
+                 "superado": "SUPERADO", "suspendido": "SUSPENDIDO por drawdown máximo"}.get(p["kind"], p["kind"])
+        cur = p.get("currency") or ""
+        detail = (f"Saldo {p['balance']:,.2f} {cur}, equity {p['equity']:,.2f}. Inicio de la fase {p['start']:,.2f}: objetivo "
+                  f"{p['target']:,.2f} (+{p['target_pct']:g} %), equity mínimo {p['floor']:,.2f} (-{p['max_dd_pct']:g} %).")
+        self.log(f"setup: challenge {title}", detail, "nogo" if p["kind"] == "suspendido" else "go" if p["kind"] != "inicio"
+                 else "info")
+
+    def _on_setup_skipped(self, p: dict) -> None:
+        """Operativa real: una orden de Cortex que no llega a la cuenta de MT5 (ni al Forwardtest)."""
+        o = p["order"]
+        self.log(f"setup: orden NO enviada a MT5 - {o.label}", f"Orden:    {o.label}\nMotivo:   {p['note']}", "nogo")
 
     def _on_setup_closed(self, p: dict) -> None:
         o, c = p["order"], p["closed"]

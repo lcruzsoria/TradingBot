@@ -368,14 +368,20 @@ Si el terminal está en otra cuenta, el bot entra en la del perfil con la contra
 «Guardar contraseña» al entrar a mano una vez en cada cuenta): así varios perfiles comparten un terminal.
 
 **Perfiles que operan de verdad** (`MT5_<PERFIL>_SEND_ORDERS=true`, p. ej. `puprime_live`, que se ve como «puprime-live»):
-la cuenta (con `_BASE`, la de otro perfil) recibe órdenes reales. Setup abre cada orden de Cortex a mercado con su stop y su
-objetivo y con los lotes que arriesgan `SETUP_RISK_PCT` del **saldo real** de la cuenta (redondeados hacia abajo al paso de
-lote; si no llega al lote mínimo, o el precio ya pasó el stop o el objetivo, no la envía y la sigue como simulada). La
-operación se sigue igual que en los demás perfiles (Forwardtest con las mismas reglas que el backtest) y la posición de MT5
-la acompaña: al tocar +1 R el stop real pasa al precio de entrada, y cuando la simulada cierra (stop, objetivo, breakeven o
-tiempo) el bot cierra la real si MT5 no la había cerrado ya; el Registro anota el ticket, los lotes y el resultado en dinero.
-La cabecera muestra el saldo real de la cuenta. No admite `_CAPITAL` y **solo funciona en cuentas demo**: en una real MT5
-no recibe nada. Mientras no se le cambien los mercados en el panel Quotes, opera los mismos que su perfil base.
+la cuenta (con `_BASE`, la de otro perfil) recibe órdenes reales y su **Forwardtest es la imagen de la cuenta demo**.
+- Empieza el primer arranque del perfil (`operativa_real.json` en su carpeta): lo que Pattern y Cortex repasan al arrancar
+  no cuenta ni se abre. Solo se abren señales nuevas (de hace como mucho 30 min o dos velas).
+- Setup abre a mercado con el stop y el objetivo de la señal y con los lotes que arriesgan `SETUP_RISK_PCT` del **saldo real**
+  (hacia abajo al paso de lote). Si no llega al lote mínimo, el símbolo no se puede operar, el precio ya pasó el stop o el
+  objetivo, o MT5 la rechaza, no se abre y no cuenta (el Registro dice por qué).
+- La entrada es el precio de ejecución; al tocar +1 R el bot pasa el stop real a la entrada; a la hora de cierre por tiempo
+  la cierra el bot. El cierre, su precio, su hora y el resultado son los de MT5; el R es el dinero (con comisión y swap)
+  entre el riesgo al abrir.
+- La cabecera muestra el saldo real. No admite `_CAPITAL` y **solo funciona en cuentas demo**. Mientras no se le cambien los
+  mercados en Quotes, opera los mismos que su perfil base; `_SYMBOLS` fija los que el broker no deja operar sin sufijo.
+- **Challenge simulado** (`SETUP_CHALLENGE_*`): cada fase empieza con el saldo real; con +8 % de saldo pasa a la fase 2 y,
+  superada, el challenge queda superado; si el equity cae a -6 % del inicio de la fase queda suspendido: el bot cierra lo
+  abierto y no abre más. Cada cambio se avisa por Telegram y en el Registro (`challenge.json` en la carpeta del perfil).
 
 Protecciones al conectar:
 - Si el terminal está en una cuenta distinta a la del perfil, se cancela.

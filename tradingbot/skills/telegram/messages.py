@@ -94,6 +94,38 @@ def decision(payload: dict, profile: str | None = None) -> str:
             f"{_e(payload['timeframe'])}\n{zone}{_e(dec.reason)}{_footer(profile)}")
 
 
+def challenge(p: dict, profile: str | None = None) -> str:
+    """Aviso del challenge simulado: inicio, paso de fase, superado o suspendido por drawdown."""
+    cur = f" {_e(p.get('currency') or '')}" if p.get("currency") else ""
+
+    def money(v) -> str:
+        return f"{float(v):,.2f}{cur}"
+    start, bal, eq = float(p["start"]), float(p["balance"]), float(p["equity"])
+    pct = (bal - start) / start * 100 if start else 0.0
+    kind = p["kind"]
+    if kind == "inicio":
+        head = f"🏁 <b>Challenge: empieza la fase {p['phase']} de {p['phases']}</b>"
+        body = (f"Saldo inicial {money(start)}\nObjetivo +{p['target_pct']:g} %: {money(p['target'])}\n"
+                f"Drawdown máximo -{p['max_dd_pct']:g} %: equity mínimo {money(p['floor'])}")
+    elif kind == "fase":
+        new = p.get("new") or {}
+        head = f"✅ <b>Challenge: fase {p['phase']} superada (+{pct:.2f} %)</b>"
+        body = (f"Saldo {money(bal)} (inicio de la fase {money(start)})\n\n"
+                f"<b>Empieza la fase {new.get('phase')} de {new.get('phases')}</b>\n"
+                f"Objetivo +{p['target_pct']:g} %: {money(new.get('target'))}\n"
+                f"Equity mínimo (-{p['max_dd_pct']:g} %): {money(new.get('floor'))}")
+    elif kind == "superado":
+        head = f"🏆 <b>Challenge superado: fase {p['phase']} de {p['phases']} (+{pct:.2f} %)</b>"
+        body = f"Saldo {money(bal)} (inicio de la fase {money(start)}). El bot sigue operando."
+    else:
+        head = f"⛔ <b>Challenge suspendido: drawdown máximo (-{p['max_dd_pct']:g} %) en la fase {p['phase']}</b>"
+        body = (f"Equity {money(eq)} (mínimo {money(p['floor'])}), saldo {money(bal)}\n"
+                "El bot cierra lo abierto y no abre más operaciones en este perfil.")
+        if p.get("errors"):
+            body += "\nNo se pudieron cerrar: " + _e(", ".join(p["errors"]))
+    return f"{head}\n{body}{_footer(profile)}"
+
+
 def started(profile: str | None = None) -> str:
     return f"🤖 <b>TradingBot en marcha</b>{_footer(profile)}"
 

@@ -35,6 +35,9 @@ class StatsSkill(Skill):
         except ValueError:
             raise ValueError(f"STATS_FORWARD_START={raw!r}: usa AAAA-MM-DD (por ejemplo 2026-10-19).") from None
         self._offset: int | None = None                # desfase del servidor respecto a UTC (clock.offset)
+        from ..setup import live
+        app = (self.services.app_cfg or {}).get("app") or {}
+        self._live_since = live.since(self.services.app_cfg) if app.get("send_orders") else None   # operativa real: desde ahí
         try:
             self.stats = self.journal.load_recent(f"{self.start:%Y-%m}" if self.start else None)
         except OSError as exc:
@@ -90,6 +93,10 @@ class StatsSkill(Skill):
         """Si la vela (hora del servidor) es del inicio del forwardtest en adelante: las 00:00 de Nueva York del día
         STATS_FORWARD_START. Cuenta también lo que Pattern y Cortex repasan al arrancar, así no se pierde lo que pasó con
         el bot cerrado o con otro perfil (lo repetido no se anota dos veces). Sin inicio, o sin hora, se anota."""
+        if self._live_since is not None and ts is not None:       # operativa real: solo lo de después de empezar
+            from ..setup import live
+            if int(ts) < live.to_server(self._live_since, self._offset):
+                return False
         return self.start is None or ts is None or int(ts) >= server_from_ny_day(self.start, self._offset)
 
     def _save(self, write, *args):

@@ -169,10 +169,30 @@ def test_mueve_el_stop_y_cierra(fake):
     assert src.realized(555) == -415.5
 
 
+def test_el_cierre_se_lee_de_las_operaciones_de_mt5(fake):
+    mt5, src = fake()
+    src.open_market("NAS100", "long", 500.0, 95.0, 110.0)
+    assert src.closing(555) is None                                                 # sigue abierta
+    mt5.positions.clear()
+    mt5.history_deals_get = lambda position=None: (
+        types.SimpleNamespace(entry=0, volume=90.9, price=100.5, time=1000, time_msc=1_000_000, reason=3, profit=0.0,
+                              commission=-3.0, swap=0.0, fee=0.0),
+        types.SimpleNamespace(entry=1, volume=90.9, price=110.0, time=5000, time_msc=5_000_000, reason=5, profit=863.55,
+                              commission=-3.0, swap=-1.5, fee=0.0))
+    assert src.closing(555) == {"price": 110.0, "ts": 5000, "profit": 856.05, "reason": "tp"}
+
+
 # -- Setup en un perfil que opera de verdad -------------------------------------------------------------------------
+def fresh_order(**kw):
+    from dataclasses import replace
+    from tradingbot.skills.setup import live
+    now = live.server_now(None)
+    return replace(ORDER, entry_ts=now - 60, close_ts=now + 3600, **kw)
+
+
 class FakeSource:
     def __init__(self, fail=None):
-        self.fail, self.calls = fail, []
+        self.fail, self.calls, self.deal = fail, [], None
 
     def account(self):
         return AccountSnapshot(50_000.0, 50_000.0, 0.0, "USD")
@@ -191,14 +211,14 @@ class FakeSource:
         self.calls.append(("close", ticket))
         return True
 
-    def realized(self, ticket):
-        return 1000.0
+    def closing(self, ticket):
+        return self.deal
 
 
 def run_live(source, tmp_path):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
-    bus, got = EventBus(), {"executed": [], "closed": [], "account": []}
+    bus, got = EventBus(), {"executed": [], "closed": [], "account": [], "skipped": []}
     for topic in got:
         bus.subscribe("t", f"setup.{topic}", got[topic].append)
     cfg = {"app": {"send_orders": True, "data_dir": str(tmp_path)}}
@@ -217,44 +237,123 @@ def wait(items, n=1):
 def test_setup_envia_la_orden_con_el_1_por_ciento_del_saldo_real(tmp_path):
     source = FakeSource()
     manager, bus, got = run_live(source, tmp_path)
-    bus.publish("setup.order", {"order": ORDER}, source="cortex")
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
     wait(got["executed"])
     setup = manager.skills["setup"]
     manager.stop()
     p = got["executed"][0].payload
     assert source.calls == [("open", "NAS100", "long", 500.0, 95.0, 110.0)]         # 1 % de 50.000
     assert p["sent"] is True and "posición 555" in p["note"] and p["risk_amount"] == 499.95
-    assert setup.positions[0].ticket == 555 and setup.positions[0].volume == 90.9
+    o = setup.positions[0]
+    assert (o.ticket, o.volume, o.price, o.signal_price, o.risk_money) == (555, 90.9, 100.5, 100.0, 499.95)   # entrada: la de MT5
     assert any(e.payload.get("live") and e.payload["balance"] == 50_000.0 for e in got["account"])   # saldo real en la cabecera
+    assert (tmp_path / "operativa_real.json").exists()                              # desde cuándo cuenta el Forwardtest
 
 
-def test_si_mt5_no_la_acepta_sigue_como_simulada(tmp_path):
-    manager, bus, got = run_live(FakeSource(fail="mercado cerrado"), tmp_path)
-    bus.publish("setup.order", {"order": ORDER}, source="cortex")
-    wait(got["executed"])
-    setup = manager.skills["setup"]
-    manager.stop()
-    p = got["executed"][0].payload
-    assert p["sent"] is False and "mercado cerrado" in p["note"] and setup.positions[0].ticket is None
-
-
-def test_breakeven_y_cierre_se_hacen_tambien_en_mt5(tmp_path):
+def test_las_senales_de_antes_del_arranque_no_se_abren_ni_cuentan(tmp_path):
     source = FakeSource()
     manager, bus, got = run_live(source, tmp_path)
-    manager.skills["setup"].server_now = lambda: 3700          # hora del servidor de las velas: el mercado sigue abierto
-    bus.publish("setup.order", {"order": ORDER}, source="cortex")
+    bus.publish("setup.order", {"order": ORDER}, source="cortex")                  # repaso al arrancar: entrada de hace años
+    wait(got["skipped"])
+    manager.stop()
+    assert source.calls == [] and got["executed"] == [] and "antes" in got["skipped"][0].payload["note"]
+
+
+def test_si_mt5_no_la_acepta_no_cuenta(tmp_path):
+    manager, bus, got = run_live(FakeSource(fail="mercado cerrado"), tmp_path)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["skipped"])
+    setup = manager.skills["setup"]
+    manager.stop()
+    assert got["executed"] == [] and got["skipped"][0].payload["note"] == "mercado cerrado" and setup.positions == []
+
+
+def test_breakeven_en_mt5_y_el_cierre_es_el_de_la_cuenta(tmp_path):
+    source = FakeSource()
+    manager, bus, got = run_live(source, tmp_path)
+    order = fresh_order()
+    bus.publish("setup.order", {"order": order}, source="cortex")
     wait(got["executed"])
-    # +1 R (105) sin tocar el objetivo: el stop real pasa a la entrada real
-    df = pd.DataFrame({"ts": [1000, 1900], "high": [101.0, 105.5], "low": [99.0, 101.0], "close": [100.5, 105.0]})
+    t0 = order.entry_ts
+    # +1 R desde la entrada real (100,5 con stop 95: 5,5 puntos) sin tocar el objetivo: el stop real pasa a 100,5
+    df = pd.DataFrame({"ts": [t0, t0 + 900], "high": [101.0, 106.1], "low": [99.0, 101.0], "close": [100.5, 105.0]})
     bus.publish("setup.candles", {"symbol": "NAS100", "timeframe": "15m", "df": df}, source="cortex")
     time.sleep(0.3)
     assert ("stop", 555, 100.5) in source.calls and manager.skills["setup"].positions[0].be_sent
-    df = pd.DataFrame({"ts": [1000, 1900, 2800], "high": [101.0, 105.5, 111.0], "low": [99.0, 101.0, 104.0],
-                       "close": [100.5, 105.0, 110.0]})
+    assert got["closed"] == []                                                      # la simulada ya no cierra nada
+    source.deal = {"price": 100.5, "ts": t0 + 1800, "profit": -6.0, "reason": "sl"}  # MT5 la cierra en el stop movido
     bus.publish("setup.candles", {"symbol": "NAS100", "timeframe": "15m", "df": df}, source="cortex")
     wait(got["closed"])
     manager.stop()
     p = got["closed"][0].payload
-    assert p["closed"].result == "objetivo" and p["sent"] is True
-    assert p["real"] == {"ticket": 555, "volume": 90.9, "closed_by_bot": True, "profit": 1000.0}
-    assert [c for c in source.calls if c[0] == "stop"] == [("stop", 555, 100.5)]       # el stop se mueve una sola vez
+    c = p["closed"]
+    assert (c.result, c.exit_price, c.exit_ts, c.r) == ("breakeven", 100.5, t0 + 1800, round(-6.0 / 499.95, 4))
+    assert c.max_r == round(5.6 / 5.5, 4) and p["sent"] is True and p["real"]["profit"] == -6.0
+    assert manager.skills["setup"].positions == [] and [c for c in source.calls if c[0] == "stop"] == [("stop", 555, 100.5)]
+
+
+def test_cierre_por_tiempo_lo_hace_el_bot(tmp_path):
+    from dataclasses import replace
+    source = FakeSource()
+    manager, bus, got = run_live(source, tmp_path)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["executed"])
+    setup = manager.skills["setup"]
+    setup.positions = [replace(setup.positions[0], close_ts=setup.server_now() - 1)]     # ya es la hora de cierre
+    source.deal = {"price": 103.0, "ts": setup.server_now(), "profit": 227.25, "reason": "bot"}
+    setup.tick()
+    wait(got["closed"])
+    manager.stop()
+    assert ("close", 555) in source.calls and got["closed"][0].payload["closed"].result == "tiempo"
+    assert got["closed"][0].payload["closed"].r == round(227.25 / 499.95, 4)
+
+
+# -- challenge simulado: +8 % pasa de fase, -6 % de equity lo suspende ---------------------------------------------
+def test_challenge_pasa_a_la_fase_2_con_el_8_por_ciento(tmp_path):
+    from tradingbot.skills.setup.challenge import Challenge
+    ch = Challenge(tmp_path / "challenge.json")
+    assert [e["kind"] for e in ch.update(100_000, 100_000, "USD")] == ["inicio"]
+    assert ch.levels() == (108_000.0, 94_000.0)
+    assert ch.update(107_999, 108_500) == []                                       # el objetivo es de saldo, no de equity
+    event = ch.update(108_100, 108_100)[0]
+    assert event["kind"] == "fase" and event["phase"] == 1 and event["new"]["phase"] == 2
+    assert ch.phase == 2 and ch.levels() == (116_748.0, 101_614.0)                 # la fase 2 empieza con el saldo de ese momento
+    assert Challenge(tmp_path / "challenge.json").phase == 2                       # sigue al reiniciar
+    assert ch.update(116_748, 116_748)[0]["kind"] == "superado" and ch.update(130_000, 130_000) == []
+
+
+def test_challenge_se_suspende_con_el_6_por_ciento_de_drawdown(tmp_path):
+    from tradingbot.skills.setup.challenge import Challenge
+    ch = Challenge(tmp_path / "challenge.json")
+    ch.update(100_000, 100_000)
+    assert ch.update(99_000, 94_001) == []
+    assert ch.update(99_000, 94_000)[0]["kind"] == "suspendido" and ch.failed
+    assert ch.update(120_000, 120_000) == [] and ch.failed                          # suspendido: ya no cambia
+
+
+def test_setup_avisa_del_challenge_y_al_suspender_cierra_y_no_abre_mas(tmp_path):
+    source = FakeSource()
+    manager, bus, got = run_live(source, tmp_path)
+    events = []
+    bus.subscribe("t", "setup.challenge", events.append)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["executed"])
+    setup = manager.skills["setup"]
+    setup.tick()                                                                    # 50.000: empieza la fase 1
+    source.account = lambda: AccountSnapshot(50_000.0, 46_900.0, -3_100.0, "USD")   # equity -6,2 %
+    setup.tick()
+    wait(events, 2)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["skipped"])
+    manager.stop()
+    assert [e.payload["kind"] for e in events] == ["inicio", "suspendido"]
+    assert ("close", 555) in source.calls and "suspendido" in got["skipped"][0].payload["note"]
+    assert len([c for c in source.calls if c[0] == "open"]) == 1
+
+
+def test_el_aviso_de_telegram_del_challenge():
+    from tradingbot.skills.telegram import messages
+    p = {"kind": "suspendido", "phase": 2, "phases": 2, "start": 108_100.0, "balance": 103_000.0, "equity": 101_600.0,
+         "target": 116_748.0, "floor": 101_614.0, "target_pct": 8.0, "max_dd_pct": 6.0, "currency": "USD"}
+    text = messages.challenge(p, "puprime_live")
+    assert "suspendido" in text and "101,600.00 USD" in text and "puprime_live" in text

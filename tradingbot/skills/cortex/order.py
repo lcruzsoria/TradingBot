@@ -32,10 +32,12 @@ class Order:
     lateral: bool = False          # el filtro de lateralidad dejó el sesgo en No Bias (la puntuación es la de las reglas)
     efficiency: float | None = None   # eficiencia del precio en las últimas horas (0 lateral, 1 tendencia) al dar la orden
     htf_candle: str = ""           # CRT: la vela HTF del sweep (C2) en la que entró, p. ej. «H4 02/11 21:00–01:00 NY»
-    ticket: int | None = None      # perfiles que operan de verdad (MT5_<PERFIL>_SEND_ORDERS): la posición en MT5, sus lotes,
-    volume: float | None = None    # el precio al que entró y si su stop ya está en breakeven (lo pone Setup)
-    fill_price: float | None = None
+    ticket: int | None = None      # perfiles que operan de verdad (MT5_<PERFIL>_SEND_ORDERS), lo pone Setup: la posición en
+    volume: float | None = None    # MT5, sus lotes, el precio de la señal (`price` pasa a ser el de ejecución), el riesgo en
+    signal_price: float | None = None   # dinero al abrir y si el stop ya está en breakeven (y desde cuándo, hora del servidor)
+    risk_money: float | None = None
     be_sent: bool = False
+    be_at: int | None = None
 
     @property
     def label(self) -> str:
