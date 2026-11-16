@@ -144,6 +144,15 @@ def test_no_abre_si_no_llega_al_lote_minimo_o_el_precio_ya_paso(fake):
     assert mt5.sent == []
 
 
+def test_no_abre_en_un_simbolo_que_el_broker_no_deja_operar(fake):
+    mt5, src = fake()
+    base = mt5.symbol_info
+    mt5.symbol_info = lambda s: types.SimpleNamespace(**{**vars(base(s)), "trade_mode": 0})
+    with pytest.raises(TradeError, match="no se puede operar"):
+        src.open_market("NAS100", "long", 500.0, 95.0, 110.0)
+    assert mt5.sent == []
+
+
 def test_solo_opera_en_cuentas_demo(fake):
     mt5, src = fake(trade_mode=2)
     with pytest.raises(TradeError, match="NO es demo"):

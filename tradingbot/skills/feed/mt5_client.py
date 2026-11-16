@@ -271,6 +271,9 @@ class Mt5Source:
             info, tick = mt5.symbol_info(exact), mt5.symbol_info_tick(exact)
             if info is None or tick is None or not tick.bid or not tick.ask:
                 raise TradeError(f"{exact} sin cotización (¿mercado cerrado?)")
+            if int(getattr(info, "trade_mode", 4)) == 0:          # SYMBOL_TRADE_MODE_DISABLED: se ve pero no se opera
+                raise TradeError(f"{exact} no se puede operar en este broker (fija otro con MT5_<PERFIL>_SYMBOLS, p. ej. "
+                                 f"{symbol}={exact}.s)")
             long = direction == "long"
             kind = mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL
             price = float(tick.ask if long else tick.bid)
