@@ -4,7 +4,7 @@ Solo LEE velas de MT5 (el bot no envía órdenes). Para cada índice, cada día 
 del bot (tradingbot.skills.pattern) con las mismas reglas que en vivo, y simula la operación de cada entrada:
 
 - Entrada: orden límite en el 0,5 del fibonacci (se llena en la vela en que el precio lo toca), stop en el nivel 1 (el swing en
-  Continuación, la mecha pivote en Reversión) y objetivo en el -0,5 (2R).
+  Continuación, la mecha pivote en Reversión) y objetivo del bot (-0,2 por defecto, RR 1,4).
 - Breakeven como el bot: un cierre M15 a +1 R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT) pasa el stop a la entrada; si lo toca, 0 R.
 - Si en una misma vela caben el stop y el objetivo, cuenta el stop. La vela de la entrada ya cuenta para el stop y el objetivo.
 - Costes: el spread real que registra MT5 en la vela de la entrada, una vez por operación (R neto = R bruto - spread / riesgo).
@@ -37,6 +37,7 @@ from tradingbot.skills.bias.history import block_ids, lateral_flags, score_histo
 from tradingbot.skills.feed.mt5_client import Mt5Source                              # noqa: E402
 from tradingbot.skills.pattern import continuacion, reversion                        # noqa: E402
 from tradingbot.skills.pattern.patterns import (ActiveTbr, DETECTED, EXPIRED, PatternContext, window_for)   # noqa: E402
+from tradingbot.skills.pattern.fibo import level_settings                             # noqa: E402
 from tradingbot.skills.levels.daylevels import DEFAULT_US_INDICES, is_us_index          # noqa: E402
 from tradingbot.skills.tbr.zones import compute, zones_from_settings                 # noqa: E402
 
@@ -57,6 +58,8 @@ CONFIRM = "none"                              # confirmación de Reversión: non
 LTF_TF = "5m"
 FIBO = "swing"                                   # fibo de Reversión: swing (por defecto) o mecha (el 1 es la mecha de la toma, modo anterior)
 ONLY_REVERSION = False
+SL_LEVEL, TP_LEVEL = 1.0, -0.2                  # niveles del fibo del stop y el objetivo; main() los lee del .env
+ENTRY_M5 = False                              # la entrada se busca en velas M5 una vez definido el fibo (el resto sigue en M15)
 BE_R = None                                   # breakeven en R (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT); lo fija main()
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]
 BIAS_MIN = 3.0
@@ -99,6 +102,32 @@ def simulate(h, l, c, t, direction, entry, stop, target, max_hold, be_r=None):
     last = c[end]
     r = (last - entry) / risk if direction == "long" else (entry - last) / risk
     return "tiempo", end - t, r, mae / risk, mfe / risk
+
+
+def excursion(h, l, c, t, direction, entry, stop, max_hold):
+    """Recorrido de una posición sin objetivo ni breakeven, hasta que toca el stop o pasan `max_hold` velas: (RR máximo, drawdown máximo antes de
+    ese pico en R, velas hasta el pico, si salió por el stop, R al final si no salió por el stop).
+
+    En la vela de la entrada solo cuenta su cierre a favor (no se sabe si el máximo fue antes o después de entrar); el stop va primero si
+    caben los dos en una vela, como en `simulate`."""
+    risk = abs(entry - stop)
+    end = min(len(h) - 1, t + max_hold)
+    mfe = dd_peak = mae = 0.0
+    peak_bar = 0
+    for i in range(t, end + 1):
+        if direction == "long":
+            adverse, favorable = entry - l[i], ((c[i] if i == t else h[i]) - entry)
+            stopped = l[i] <= stop
+        else:
+            adverse, favorable = h[i] - entry, (entry - (c[i] if i == t else l[i]))
+            stopped = h[i] >= stop
+        mae = max(mae, adverse)
+        if stopped:
+            return mfe / risk, min(dd_peak, risk) / risk, peak_bar, True, -1.0
+        if favorable > mfe:
+            mfe, dd_peak, peak_bar = favorable, mae, i - t
+    last = (c[end] - entry) if direction == "long" else (entry - c[end])
+    return mfe / risk, min(dd_peak, risk) / risk, peak_bar, False, last / risk
 
 
 def stats(r: pd.Series, exit_time: pd.Series | None = None) -> dict:
@@ -153,6 +182,14 @@ def run_symbol(source, sym: str, order, zones):
     ts = df["ts"].to_numpy().astype(np.int64)
     o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
     n = len(ts)
+    m5 = None
+    mult = 1                                                  # velas de la simulación por vela M15
+    if ENTRY_M5:
+        source.connect()
+        d5 = source.load_candles(sym, "5m").reset_index(drop=True).iloc[:-1]
+        m5 = {"ts": d5["ts"].to_numpy().astype(np.int64), **{k: d5[k].to_numpy().astype(float) for k in ("open", "high", "low", "close")}}
+        mult = 3
+        print(f"    velas 5m: {len(d5)} (desde {pd.Timestamp(int(d5['ts'].iloc[0]) - AHEAD, unit='s'):%Y-%m-%d})", flush=True)
     # sesgo del bot en cada vela (congelado al abrirse cada bloque de 3 h)
     # el sesgo se calcula como en el bot: índices USA con día de trading desde las 18:00 NY y recálculo cada 3 h; el resto (forex, oro...) desde
     # las 17:00 y cada 4 h
@@ -180,7 +217,12 @@ def run_symbol(source, sym: str, order, zones):
         for name, mod in PATTERNS.items():
             if ONLY_REVERSION and mod is not reversion:
                 continue
-            hits, _figs = mod.analyze(ctx, 1, **({"confirm": CONFIRM, "ltf": ltf, "mode": FIBO} if mod is reversion else {}))
+            kw = {"sl": SL_LEVEL, "tp": TP_LEVEL}                # stop y objetivo del bot (PATTERN_STOP_LEVEL / PATTERN_TARGET_LEVEL)
+            if mod is reversion:
+                kw.update({"confirm": CONFIRM, "ltf": ltf, "mode": FIBO})
+            if m5 is not None:
+                kw["entry_ltf"] = m5
+            hits, _figs = mod.analyze(ctx, 1, **kw)
             hit = hits[0] if hits else None
             status = "ignorada (otro patrón)" if hit is None else hit.status
             detail = "" if hit is None else hit.detail
@@ -194,31 +236,39 @@ def run_symbol(source, sym: str, order, zones):
             risk = abs(entry - stop)
             if risk <= 0:
                 continue
-            res, bars, r_gross, mae, mfe = simulate(h, l, c, t, direction, entry, stop, target, MAX_HOLD, BE_R)
+            if m5 is not None:                                # entrada en M5: la posición se simula en velas M5 desde la de la entrada
+                sh, sl_, sc, sts = m5["high"], m5["low"], m5["close"], m5["ts"]
+                st = int(np.searchsorted(sts, hit.ts, "left"))
+            else:
+                sh, sl_, sc, sts, st = h, l, c, ts, t
+            res, bars, r_gross, mae, mfe = simulate(sh, sl_, sc, st, direction, entry, stop, target, MAX_HOLD * mult, BE_R)
             cost = float(spread[t]) / risk
-            row = {"mercado": sym, "patrón": name, "zona": tbr.zone, "dirección": direction, "entrada (NY)": pd.Timestamp(int(ts[t]) - AHEAD, unit="s"),
+            row = {"mercado": sym, "patrón": name, "zona": tbr.zone, "caso": hit.variant or "sin caso", "dirección": direction, "entrada (NY)": pd.Timestamp(int(sts[st]) - AHEAD, unit="s"),
                    "día": tbr.day, "entrada": entry, "stop": stop, "objetivo": target, "riesgo (precio)": risk, "riesgo %": 100 * risk / entry,
                    "spread (precio)": float(spread[t]), "resultado": res, "velas": bars, "R bruto": r_gross, "coste (R)": cost,
                    "R neto": r_gross - cost, "MAE (R)": mae, "MFE (R)": mfe, "puntuación sesgo": float(score[t]),
                    "sesgo": {1: "Bullish", -1: "Bearish", 0: "Sin sesgo"}[int(bias[t])], "lateral": bool(lateral[t]),
-                   "cierre (NY)": pd.Timestamp(int(ts[min(t + bars, n - 1)]) - AHEAD, unit="s")}
+                   "cierre (NY)": pd.Timestamp(int(sts[min(st + bars, len(sts) - 1)]) - AHEAD, unit="s")}
             want = 1 if direction == "long" else -1
             row["sesgo vs operación"] = "a favor" if bias[t] == want else "en contra" if bias[t] == -want else "sin sesgo"
+            rr_max, dd_peak, peak_bar, by_stop, r_time = excursion(sh, sl_, sc, st, direction, entry, stop, MAX_HOLD * mult)
+            row.update({"RR máx. (hasta stop)": rr_max, "drawdown máx. antes del pico (R)": dd_peak, "velas hasta el pico": peak_bar / mult,
+                        "salió por stop": by_stop, "R al cierre por tiempo": r_time})
             for m in TP_MULTS:                           # sensibilidad al objetivo (en R)
                 tgt = entry + m * risk if direction == "long" else entry - m * risk
-                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, tgt, MAX_HOLD, BE_R)
+                _, _, rg, _, _ = simulate(sh, sl_, sc, st, direction, entry, stop, tgt, MAX_HOLD * mult, BE_R)
                 row[f"R neto TP {m:g}R"] = rg - cost
-            for hold in HOLDS:                           # sensibilidad al tiempo máximo (objetivo 2R)
-                _, _, rg, _, _ = simulate(h, l, c, t, direction, entry, stop, target, hold, BE_R)
+            for hold in HOLDS:                           # sensibilidad al tiempo máximo (objetivo del bot)
+                _, _, rg, _, _ = simulate(sh, sl_, sc, st, direction, entry, stop, target, hold * mult, BE_R)
                 row[f"R neto {hold // 4} h"] = rg - cost
             for k in STOP_MULTS:                         # mejoras: stop ampliado y RR reducido (misma entrada en el 0,5)
                 stp = entry - k * risk if direction == "long" else entry + k * risk
                 for rr in IMPROVE_RRS:
                     tgt = entry + rr * k * risk if direction == "long" else entry - rr * k * risk
-                    _, bars_k, rg, _, _ = simulate(h, l, c, t, direction, entry, stp, tgt, MAX_HOLD, BE_R)
+                    _, bars_k, rg, _, _ = simulate(sh, sl_, sc, st, direction, entry, stp, tgt, MAX_HOLD * mult, BE_R)
                     row[f"R bruto k{k:g} RR{rr:g}"] = rg
                     row[f"R neto k{k:g} RR{rr:g}"] = rg - float(spread[t]) / (k * risk)
-                    row[f"cierre k{k:g} RR{rr:g}"] = pd.Timestamp(int(ts[min(t + bars_k, n - 1)]) - AHEAD, unit="s")
+                    row[f"cierre k{k:g} RR{rr:g}"] = pd.Timestamp(int(sts[min(st + bars_k, len(sts) - 1)]) - AHEAD, unit="s")
             trades.append(row)
     info = {"mercado": sym, "velas M15": n, "desde (NY)": pd.Timestamp(int(ts[0]) - AHEAD, unit="s"),
             "hasta (NY)": pd.Timestamp(int(ts[-1]) - AHEAD, unit="s"), "spread medio (precio)": float(np.mean(spread)),
@@ -299,6 +349,43 @@ def improvements_sheet(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+RR_GRID = np.round(np.arange(0.2, 5.01, 0.1), 1)
+
+
+def rr_net(g: pd.DataFrame, rr: float) -> pd.Series:
+    """R neto de cada operación con el objetivo en `rr` R (stop en el 1, sin breakeven): gana rr si el pico llegó a ese RR antes del stop; si no,
+    pierde 1 R o, si el stop no llegó a tocarse, lo que valga al cierre por tiempo."""
+    gross = np.where(g["RR máx. (hasta stop)"] >= rr, rr, np.where(g["salió por stop"], -1.0, g["R al cierre por tiempo"]))
+    return pd.Series(gross - g["coste (R)"].to_numpy(), index=g.index)
+
+
+def rr_sheet(f: pd.DataFrame) -> pd.DataFrame:
+    """Para cada objetivo en R (0,2 a 5): win rate, R medio, R total, t y máximo drawdown de la curva (ordenada por la hora de entrada)."""
+    rows = []
+    for (pat, flt), g in f[f["filtro"].isin(MAIN_FILTERS)].groupby(["patrón", "filtro"]):
+        for rr in RR_GRID:
+            net = rr_net(g, rr)
+            s = stats(net, g["entrada (NY)"])
+            rows.append({"patrón": pat, "filtro": flt, "RR objetivo": rr, "win rate %": 100 * (g["RR máx. (hasta stop)"] >= rr).mean(),
+                         "R medio": s.get("R medio"), "R total": s.get("R total"), "estadístico t": s.get("estadístico t"),
+                         "máx. drawdown (R)": s.get("máx. drawdown (R)"), "racha perdedora máx.": s.get("racha perdedora máx."),
+                         "operaciones": s.get("operaciones")})
+    return pd.DataFrame(rows)
+
+
+def rr_distribution(f: pd.DataFrame) -> pd.DataFrame:
+    """Cuartiles y percentiles del RR máximo alcanzado antes del stop y del drawdown previo al pico (en R), por patrón."""
+    rows = []
+    for (pat, flt), g in f[f["filtro"].isin(MAIN_FILTERS)].groupby(["patrón", "filtro"]):
+        q = [0.1, 0.25, 0.5, 0.75, 0.9]
+        rows.append({"patrón": pat, "filtro": flt, "operaciones": len(g), "% que sale por stop sin pasar de 0,2 R": 100 * (g["RR máx. (hasta stop)"] < 0.2).mean(),
+                     **{f"RR máx. p{int(x * 100)}": g["RR máx. (hasta stop)"].quantile(x) for x in q},
+                     "RR máx. medio": g["RR máx. (hasta stop)"].mean(),
+                     **{f"drawdown previo al pico p{int(x * 100)}": g["drawdown máx. antes del pico (R)"].quantile(x) for x in q},
+                     "velas M15 hasta el pico (mediana)": g["velas hasta el pico"].median()})
+    return pd.DataFrame(rows)
+
+
 def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame) -> dict[str, pd.DataFrame]:
     trades = trades.copy()
     trades["solapada (todas)"] = overlap_flags(trades)
@@ -321,6 +408,11 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
     sheets["Por mercado"] = table(f, ["mercado", "patrón", "filtro"])
     sheets["Por zona"] = table(f[f["patrón"] != "Ambos"], ["patrón", "zona", "filtro"])
     sheets["Por dirección"] = table(f[f["patrón"] != "Ambos"], ["patrón", "dirección", "filtro"])
+    cont = f[(f["patrón"] == "Continuación") & f["filtro"].isin(MAIN_FILTERS)]
+    if len(cont):                                      # Continuación: A. Ideal (el 1 dentro del rango de la TBR) frente a B. Flexible (fuera)
+        sheets["Por caso"] = table(cont, ["caso", "filtro"])
+        sheets["Por caso y año"] = table(cont, ["caso", "filtro", "año"])
+        sheets["Por caso y zona"] = table(cont, ["caso", "zona", "filtro"])
     sheets["Por año"] = table(f[f["filtro"].isin(MAIN_FILTERS)], ["patrón", "filtro", "año"])
     base = f[(f["patrón"] != "Ambos") & (f["filtro"] == "sin filtro de sesgo")]
     sheets["Por hora"] = table(base, ["patrón", "hora (NY)"])
@@ -336,11 +428,13 @@ def build_sheets(trades: pd.DataFrame, funnel: pd.DataFrame, infos: pd.DataFrame
             sens.append({"patrón": pat, "filtro": flt, "variante": f"objetivo {m:g}R", **s})
         for hold in HOLDS:
             s = stats(g[f"R neto {hold // 4} h"], g["cierre (NY)"])
-            sens.append({"patrón": pat, "filtro": flt, "variante": f"objetivo 2R, máx. {hold // 4} h", **s})
+            sens.append({"patrón": pat, "filtro": flt, "variante": f"objetivo del bot, máx. {hold // 4} h", **s})
         s = stats(g["R bruto"], g["cierre (NY)"])
-        sens.append({"patrón": pat, "filtro": flt, "variante": "2R sin costes (R bruto)", **s})
+        sens.append({"patrón": pat, "filtro": flt, "variante": "objetivo del bot sin costes (R bruto)", **s})
     sheets["Sensibilidad"] = pd.DataFrame(sens)
     sheets["Mejoras (stop y RR)"] = improvements_sheet(trades)
+    sheets["Optimización RR"] = rr_sheet(f)
+    sheets["Distribución RR máx."] = rr_distribution(f)
     out = trades.groupby(["patrón", "resultado"]).size().unstack(fill_value=0)
     out["operaciones"] = out.sum(axis=1)
     out["MAE medio (R)"] = trades.groupby("patrón")["MAE (R)"].mean()
@@ -375,7 +469,7 @@ NOTES = [
     ("Qué es", "Backtest de los patrones Continuación y Reversión del bot (con sus fibonacci) en M15 sobre los índices americanos."),
     ("Datos", "Velas M15 de MT5 (bid) con todo el histórico intradía que tiene el broker (se descartan los tramos en que solo hay velas "
               "diarias o de varias horas). Ver la hoja Datos."),
-    ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo en el -0,5 (2R). Stop primero si caben los dos en una vela."),
+    ("Operación", "Entrada límite en el 0,5; stop en el nivel 1; objetivo del bot (-0,2 por defecto, RR 1,4). Stop primero si caben los dos en una vela."),
     ("Breakeven", "Como el bot (SETUP_BE_TRIGGER_PCT / SETUP_RISK_PCT, +1 R por defecto): si una vela M15 cierra con la posición a favor en esos R, el stop pasa a la entrada desde la vela siguiente; si lo toca, cierra a 0 R (resultado «breakeven»; solo queda el coste del spread). Con --be-r 0 se desactiva."),
     ("Costes", "Spread real de MT5 en la vela de la entrada, una vez por operación. No incluye comisiones ni deslizamiento."),
     ("Una posición a la vez", "Filtros «una posición a la vez»: una misma sesión (TBR) no da dos trades y no se abre otra operación (en toda la cuenta con BT_ALCANCE=global, el valor por defecto, o por mercado) hasta que la anterior haya cerrado (stop, objetivo o 24 h). «(todas)» recorre todas las entradas en orden; «(GO de Cortex)» solo las que Cortex dejaría pasar (no van contra el sesgo, con CORTEX_ALLOW_NO_BIAS=true), que es lo que hace el bot."),
@@ -388,8 +482,10 @@ NOTES = [
     ("Sin gestión de riesgo", "Cada operación vale 1R y se cuenta por separado: no hay límite de operaciones simultáneas, tamaño ni apalancamiento."),
     ("R", "R = distancia entre la entrada y el stop. R bruto = resultado sin costes; R neto = R bruto - spread / riesgo."),
     ("Estadístico t", "R medio / (desviación típica / raíz de n): por debajo de 2 la ventaja no es estadísticamente distinguible de cero."),
+    ("Optimización RR", "Hojas «Optimización RR» y «Distribución RR máx.»: de cada operación se guarda el RR máximo alcanzado antes de tocar el stop (sin objetivo ni breakeven, hasta 24 h) y el drawdown que sufrió antes de ese pico; con eso se recalcula el resultado para cualquier objetivo de 0,2 a 5 R (gana el objetivo si el pico lo alcanzó, si no pierde 1 R, o lo que valga al cierre por tiempo) con el spread real. En la vela de la entrada solo cuenta su cierre a favor. No incluye breakeven; el máx. drawdown de esa hoja es el de la curva de R acumulado ordenada por la hora de entrada."),
     ("Drawdown", "Máxima caída de la curva de R acumulado, con las operaciones ordenadas por su hora de cierre."),
     ("Mitades", "Se parte el histórico por la mediana de las fechas: si una mitad gana y la otra pierde, el resultado es poco fiable."),
+    ("Casos de Continuación", "Hojas «Por caso», «Por caso y año» y «Por caso y zona»: A. Ideal = el swing que marca el stop (el 1) queda dentro del rango de la TBR; B. Flexible = queda fuera (el primer swing tras la rotura). Es el mismo criterio que anota el bot."),
     ("Límites", "Datos de demo de un solo broker; con muchas variantes probadas parte de lo que gana puede ser azar."),
 ]
 
@@ -444,10 +540,16 @@ def main() -> None:
     ap.add_argument("--confirmacion", choices=("none", "cisd", "bpr5", "bpr3"), default="none",
                     help="confirmación de Reversión antes de la entrada: CISD en M15, o BPR + retest + cierre bajo el CISD en velas de 5m o 3m")
     ap.add_argument("--solo-reversion", action="store_true")
+    ap.add_argument("--entrada-m5", action="store_true",
+                    help="con el fibo ya definido en M15, busca la entrada en el 0,5 en velas M5 (y simula la posición en M5)")
     ap.add_argument("--fibo-reversion", choices=("swing", "mecha"), default="swing",
                     help="fibo de Reversión: del swing posterior a la toma al swing opuesto (por defecto) o con la mecha de la toma como 1 (anterior)")
     args = ap.parse_args()
-    global BE_R, CONFIRM, LTF_TF, ONLY_REVERSION, FIBO
+    global BE_R, CONFIRM, LTF_TF, ONLY_REVERSION, FIBO, ENTRY_M5
+    ENTRY_M5 = args.entrada_m5
+    global SL_LEVEL, TP_LEVEL
+    SL_LEVEL, TP_LEVEL = level_settings(EnvConfig().section("PATTERN").get)
+    print(f"stop en el {SL_LEVEL:g}, objetivo en el {TP_LEVEL:g} (RR {(0.5 - TP_LEVEL) / (SL_LEVEL - 0.5):.2g})")
     FIBO = args.fibo_reversion
     CONFIRM = "bpr" if args.confirmacion.startswith("bpr") else args.confirmacion
     LTF_TF = "3m" if args.confirmacion == "bpr3" else "5m"

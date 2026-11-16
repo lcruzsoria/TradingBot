@@ -43,6 +43,21 @@ ZONE_ORDER = ["ASIA", "LONDON", "NY_AM", "NY_PM"]
 UNTIL = {"LONDON": "NY_AM:FIN", "NY_AM": "@18:00"}      # plazos del bot (los de skills/pattern/skill.py)
 BIAS_RULES = [("prev_day_break", 2.0), ("tdo", 2.0), ("midnight", 1.0), ("htf_break", 2.0)]     # el sesgo del bot (como backtest_patrones.py)
 BIAS_MIN = 3.0
+# Variantes: qué TBR barre y qué niveles barre. «PDHL» = High/Low del día de trading que acaba de cerrar (PDH/PDL).
+VARIANTS = {
+    "asia-london": {"sweeper": "NY_AM", "keys": ("ASIA", "LONDON"), "until": UNTIL, "target": None},
+    "pdhl-nyam": {"sweeper": "ASIA", "keys": ("PDHL", "NY_AM"), "until": {**UNTIL, "ASIA": "@18:00"},
+                  "target": "NY_AM"},   # Asia barre PDH/PDL y NY Open; objetivo: el lado contrario de NY Open
+}
+# Combinaciones vecinas para ver si la señal se repite: (TBR que barre, niveles barridos, TBR cuyo lado contrario es el objetivo)
+for _sweeper, _keys, _target in [("ASIA", ("PDHL", "LONDON"), "LONDON"), ("ASIA", ("NY_AM", "LONDON"), "LONDON"),
+                                 ("LONDON", ("PDHL", "ASIA"), "ASIA"), ("NY_AM", ("PDHL", "ASIA"), "ASIA"),
+                                 ("NY_AM", ("PDHL", "LONDON"), "LONDON"), ("NY_PM", ("PDHL", "NY_AM"), "NY_AM"),
+                                 ("NY_PM", ("LONDON", "NY_AM"), "NY_AM")]:
+    for _tgt in (_target, None):
+        VARIANTS[f"{_sweeper.lower()}-{'+'.join(k.lower() for k in _keys)}" + ("" if _tgt else "-tmin")] = {
+            "sweeper": _sweeper, "keys": _keys, "until": {**UNTIL, _sweeper: "@18:00"}, "target": _tgt}
+OPEN_CLOSE: dict[int, tuple[float, float]] = {}      # cierre del día de trading (servidor) -> (apertura, cierre) de ese día
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
@@ -85,9 +100,28 @@ def bias_m15(ts, o, h, l, c, us_index: bool):
     return t15, bias, lateral
 
 
+def pd_peers(ts, h, l, day_end: int, o=None, c=None) -> list[PeerTbr]:
+    """High y Low de cada día de trading completo (de `day_end` NY a `day_end` NY del día siguiente): el PDH/PDL de las TBR siguientes."""
+    day_sec = day_end * 60
+    k = (ts - AHEAD - day_sec) // 86400
+    g = pd.DataFrame({"k": k, "h": h, "l": l, "o": o if o is not None else h, "c": c if c is not None else l}).groupby("k").agg(
+        h=("h", "max"), l=("l", "min"), o=("o", "first"), c=("c", "last"))
+    out = []
+    for kk, row in list(g.iterrows())[1:]:                                    # el primer día puede estar incompleto
+        close = int((kk + 1) * 86400 + day_sec + AHEAD)
+        if close > ts[-1]:
+            continue
+        out.append(PeerTbr("PDHL", "PDH/PDL", pd.Timestamp(close - AHEAD, unit="s").date(), float(row["h"]), float(row["l"]),
+                           close - 86400, close))
+        OPEN_CLOSE[close] = (float(row["o"]), float(row["c"]))                    # apertura y cierre de ese día (variable del análisis)
+    return out
+
+
 def run_symbol(df: pd.DataFrame, sym: str, order, zones, stop_fib: float, be_r: float | None, entry_mode: str = ENTRIES[0],
-               target_r: float | None = None):
+               target_r: float | None = None, variant: str = "asia-london"):
     """(operaciones, embudo) de un mercado con una variante de stop."""
+    cfg = VARIANTS[variant]
+    until = cfg["until"]
     ts = df["ts"].to_numpy().astype(np.int64)
     o, h, l, c = (df[k].to_numpy().astype(float) for k in ("open", "high", "low", "close"))
     n = len(ts)
@@ -97,16 +131,19 @@ def run_symbol(df: pd.DataFrame, sym: str, order, zones, stop_fib: float, be_r: 
     sessions = compute(ts, h, l, zones, AHEAD, TF_MIN, days=int((ts[-1] - ts[0]) // 86400) + 3)
     peers = []
     for item in history_tbrs(sessions, None, set(), 100_000):
-        w = window_for(item, order, AHEAD, (), UNTIL)
+        w = window_for(item, order, AHEAD, (), until)
         if w is not None:
             peers.append(PeerTbr(item.key, item.zone, item.day, item.high, item.low, w.start_ts, w.close_ts))
+    pdl = pd_peers(ts, h, l, day_end, o, c)                                   # PDH/PDL: niveles de la variante o variables del análisis
+    if "PDHL" in cfg["keys"]:
+        peers += pdl
     peers = tuple(peers)
     trades, funnel = [], []
     for s in sessions:
-        if s.zone.key != "NY_AM" or not (s.complete and s.high > s.low):
+        if s.zone.key != cfg["sweeper"] or not (s.complete and s.high > s.low):
             continue
         tbr = ActiveTbr(s.zone.key, s.zone.name, s.day, s.high, s.low, s.x0, s.x1)
-        window = window_for(tbr, order, AHEAD, (), UNTIL)
+        window = window_for(tbr, order, AHEAD, (), until)
         if window is None or window.end_ts is None or window.end_ts > ts[-1] + TF_MIN * 60:
             continue                                              # plazo todavía abierto: no se evalúa
         first = int(np.searchsorted(ts, window.close_ts, "left"))
@@ -116,7 +153,7 @@ def run_symbol(df: pd.DataFrame, sym: str, order, zones, stop_fib: float, be_r: 
             continue
         ctx = PatternContext(sym, "5m", TF_MIN, ts, o, h, l, c, tbr, first, end, True, window.next_zone, window.next_hours, AHEAD,
                              start, window.limit_verb, day_end, be_r, peers)
-        hits, _figs = analyze(ctx, stop_fib, entry_mode)
+        hits, _figs = analyze(ctx, stop_fib, entry_mode, cfg["keys"], cfg["sweeper"], cfg["target"])
         for hit in hits:
             funnel.append({"mercado": sym, "día": tbr.day, "dirección": hit.direction, "estado": hit.status, "motivo": hit.detail})
             if hit.status != DETECTED:
@@ -129,7 +166,10 @@ def run_symbol(df: pd.DataFrame, sym: str, order, zones, stop_fib: float, be_r: 
             if target_r is not None:                                  # variante: objetivo fijo en R en vez del extremo de Asia/London
                 target = entry - target_r * risk if hit.direction == "short" else entry + target_r * risk
             close_ts = min(int(ts[t]) + MAX_HOLD_SECONDS, day_close(int(ts[t]), AHEAD, day_end))
-            (asia, london), _ = _earlier(ctx)
+            (asia, london), _ = _earlier(ctx, cfg["keys"])
+            prev = [p for p in pdl if p.close_ts <= window.start_ts and window.start_ts - p.close_ts <= 36 * 3600]
+            prev = max(prev, key=lambda p: p.close_ts) if prev else None
+            swing = entry + (stop - entry) / stop_fib                  # el stop está en el stop_fib del nivel al swing
             up = hit.direction == "short"
             a_lvl, l_lvl = (asia.high, london.high) if up else (asia.low, london.low)
             k15 = int(np.searchsorted(t15, int(ts[t]), "right")) - 1
@@ -149,6 +189,10 @@ def run_symbol(df: pd.DataFrame, sym: str, order, zones, stop_fib: float, be_r: 
                            "distancia entre niveles (R)": abs(a_lvl - l_lvl) / risk,
                            "sesgo vs operación": "a favor" if bias15[k15] == want else "en contra" if bias15[k15] == -want else "sin sesgo",
                            "lateral": bool(lateral15[k15]),
+                           "barre el PDH/PDL": None if prev is None else bool(swing > prev.high if up else swing < prev.low),
+                           "distancia al PDH/PDL (R)": float("nan") if prev is None else ((prev.high - entry) if up else (entry - prev.low)) / risk,
+                           "día anterior": None if prev is None else ("a favor" if (OPEN_CLOSE[prev.close_ts][1] < OPEN_CLOSE[prev.close_ts][0]) == up else "en contra"),
+                           "profundidad barrido %": 100 * abs(swing - entry) / entry,
                            "salida (NY)": pd.Timestamp(done.exit_ts - AHEAD, unit="s")})
     return trades, funnel
 
@@ -167,6 +211,8 @@ def main() -> None:
     ap.add_argument("--carpeta", default="analisis/m5", help="carpeta con los parquet M5 (<símbolo>.parquet)")
     ap.add_argument("--stops", nargs="+", type=float, default=[DEFAULT_STOP_FIB, 0.5, 0.786, 1.0],
                     help="niveles del fibonacci (0 = nivel de entrada, 1 = swing) donde probar el stop")
+    ap.add_argument("--variante", default="asia-london", choices=list(VARIANTS),
+                    help="asia-london: NY Open barre Asia y London; pdhl-nyam: Asia barre el PDH/PDL y el High/Low de NY Open")
     ap.add_argument("--entradas", nargs="+", default=[ENTRIES[0]], choices=ENTRIES,
                     help="nivel que se retestea: extremo (el más alto/bajo de los dos), asia o primero (el que el precio toca antes)")
     ap.add_argument("--be-r", type=float, default=None,
@@ -194,7 +240,7 @@ def main() -> None:
     for entry_mode in args.entradas:
         for stop_fib in args.stops:
             for sym, df in frames.items():
-                trades, fun = run_symbol(df, sym, order, zones, stop_fib, be_r, entry_mode)
+                trades, fun = run_symbol(df, sym, order, zones, stop_fib, be_r, entry_mode, None, args.variante)
                 all_trades += [{"entrada en": entry_mode, "stop (fibo)": stop_fib, **t} for t in trades]
                 if stop_fib == args.stops[0]:
                     funnel += [{"entrada en": entry_mode, **f} for f in fun]

@@ -21,10 +21,12 @@ Trabaja siempre con velas de `PATTERN_REVERSION_TF` (M15 al inicio), sea cual se
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from ...timeframes import parse_timeframe
-from .continuacion import _when, run_leg
+from .continuacion import _when, make_sub, run_leg
 from . import confirm as confirmation
 from .fibo import at_level, fibo_levels, level_name, level_settings, rr_of, run_fibo
 from .trade import position_figure
@@ -61,9 +63,12 @@ class Reversion(Pattern):
 
 
 def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, confirm: str = "none",
-            ltf: dict | None = None, mode: str = DEFAULT_FIBO) -> tuple[list[PatternHit], list[Figure]]:
+            ltf: dict | None = None, mode: str = DEFAULT_FIBO, entry_ltf: dict | None = None) -> tuple[list[PatternHit], list[Figure]]:
     """`confirm`: "none" (entrada en el 0,5 sin más), "cisd" (antes de la entrada, una vela de M15 cierra bajo el CISD) o "bpr" (antes de la
-    entrada, BPR + retest + cierre bajo el CISD en las velas `ltf` = {"ts", "open", "high", "low", "close", "tf_min"} de M5 o M3)."""
+    entrada, BPR + retest + cierre bajo el CISD en las velas `ltf` = {"ts", "open", "high", "low", "close", "tf_min"} de M5 o M3).
+
+    `entry_ltf` ({"ts", "open", "high", "low", "close"}, solo con mode "swing"): velas de un timeframe menor en las que buscar la entrada una vez
+    definido el fibo; la hora del resultado (`ts`) es la de esa vela."""
     tbr = ctx.tbr
     start, end = ctx.first_bar, ctx.last_bar
     o, h, l, c, ts = ctx.open, ctx.high, ctx.low, ctx.close, ctx.ts
@@ -140,7 +145,8 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, conf
     if mode == "swing":
         # el fibo es de la primera pierna de reversión: 0 = swing high posterior a la mecha, 1 = swing low siguiente (por debajo del mínimo
         # de la vela del 0); la mecha de la toma solo invalida si el precio la pierde antes de tener el fibo
-        leg = run_leg(H, L, confirmed, end, k, -o if up else o, wick_price, not_before)
+        leg = run_leg(H, L, confirmed, end, k, -o if up else o, wick_price, not_before,
+                      None if entry_ltf is None else make_sub(ctx, entry_ltf, not up))
         if leg.origin is None:
             if leg.breach is not None:
                 return [hit(INVALIDATED, direction, leg.breach, sign * wick_price,
@@ -191,6 +197,8 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5, conf
                   f"en el {level_name(tp)} (RR {rr_of(sl, tp):.2g})")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})
+        if mode == "swing" and leg.entry_sub is not None:
+            found = replace(found, ts=int(entry_ltf["ts"][leg.entry_sub]))
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * stop, sign * target, label)
         return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[x0]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
     if ctx.window_closed:                                     # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»

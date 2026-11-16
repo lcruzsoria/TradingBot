@@ -27,7 +27,7 @@ Trabaja siempre con velas de `PATTERN_CONTINUACION_TF` (M15 al inicio), sea cual
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -76,10 +76,20 @@ class Leg:
     active: bool              # el fibo ya está formado (hay 0 y 1 confirmados)
     entry: tuple[int, float] | None   # (vela de la entrada, nivel 0,5)
     breach: int | None        # vela en la que el precio perdió el 1 antes de la entrada
+    entry_sub: int | None = None      # con entrada en un timeframe menor: índice de esa vela dentro de `sub` (entry[0] es la vela M15 que la contiene)
+
+
+def make_sub(ctx: PatternContext, raw: dict, up: bool) -> dict:
+    """Prepara las velas de un timeframe menor (`raw` = {"ts", "open", "high", "low", "close"}, tf_min la de ctx) para buscar la entrada dentro
+    de cada vela M15: rango [a, b) de cada una, y apertura y mínimo en la orientación del setup (espejo en el corto)."""
+    sts, sec = raw["ts"], ctx.tf_minutes * 60
+    a = np.searchsorted(sts, ctx.ts, "left")
+    b = np.searchsorted(sts, ctx.ts + sec, "left")
+    return {"a": a, "b": b, "ts": sts, "O": raw["open"] if up else -raw["open"], "L": raw["low"] if up else -raw["high"]}
 
 
 def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndarray | None = None, opp: float | None = None,
-            not_before: int = -1) -> Leg:
+            not_before: int = -1, sub: dict | None = None) -> Leg:
     """Recorre las velas `brk + 1 .. end` buscando el swing high (0), el swing low posterior (1) y la entrada en el 0,5.
 
     La entrada solo puede ser una vela posterior a la que confirma el swing low (hasta que cierra no se sabe que el 1 existe) y, si se
@@ -87,19 +97,29 @@ def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndar
 
     `not_before`: la entrada tiene que ser posterior a esa vela (la de una confirmación previa).
 
+    `sub`: velas de un timeframe menor (`make_sub`). Con el fibo ya definido, la entrada se busca en ellas (la primera que abre por encima del
+    0,5 y lo toca) y también ahí se ve si el precio pierde el 1; la vela M15 en curso al definirse el fibo ya no es un límite.
+
     Si antes de confirmar el swing del 1 una vela toca `opp` (el extremo contrario de la TBR), el setup se invalida (`breach`, sin fibo)."""
     zero, zero_idx, origin, origin_idx = None, -1, None, -1
     for t in range(brk + 1, end + 1):
         if origin is None and opp is not None and L[t] <= opp:           # tocó el extremo contrario de la TBR sin tener el fibo definido
             return Leg(zero, zero_idx, None, -1, False, None, t)
-        if origin is not None and L[t] < origin:                            # perdió el 1 (el stop) antes de la entrada
+        checking = origin is not None and t > origin_idx + k and t > not_before
+        if origin is not None and not (sub is not None and checking) and L[t] < origin:      # perdió el 1 (el stop) antes de la entrada
             return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
         p = t - k
         if origin is not None and p >= max(brk, k) and p > origin_idx and H[p] > H[p - k:p].max() and H[p] > H[p + 1:p + k + 1].max()                 and H[p] > zero:
             zero, zero_idx, origin, origin_idx = float(H[p]), p, None, -1       # sin reversión al 0,5, un swing high más alto mueve el 0
         if origin is not None:
             half = (zero + origin) / 2
-            if t > origin_idx + k and t > not_before and L[t] <= half and (O is None or O[t] > half):
+            if sub is not None and checking:
+                for j in range(sub["a"][t], sub["b"][t]):
+                    if sub["L"][j] <= half and sub["O"][j] > half:
+                        return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None, j)
+                    if sub["L"][j] < origin:
+                        return Leg(zero, zero_idx, origin, origin_idx, True, None, t)
+            elif t > origin_idx + k and t > not_before and L[t] <= half and (O is None or O[t] > half):
                 return Leg(zero, zero_idx, origin, origin_idx, True, (t, half), None)
             continue
         if p >= max(brk, k):
@@ -112,7 +132,10 @@ def run_leg(H: np.ndarray, L: np.ndarray, brk: int, end: int, k: int, O: np.ndar
     return Leg(zero, zero_idx, origin, origin_idx, origin is not None, None, None)
 
 
-def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -0.5) -> tuple[list[PatternHit], list[Figure]]:
+def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -0.5,
+            entry_ltf: dict | None = None) -> tuple[list[PatternHit], list[Figure]]:
+    """`entry_ltf`: velas de un timeframe menor ({"ts", "open", "high", "low", "close"}) en las que buscar la entrada una vez definido el
+    fibo (solo el backtest); la hora del resultado (`ts`) es la de esa vela."""
     tbr = ctx.tbr
     start, end = ctx.first_bar, ctx.last_bar
     o, h, l, c, ts = ctx.open, ctx.high, ctx.low, ctx.close, ctx.ts
@@ -146,7 +169,7 @@ def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -
     side = "High" if up else "Low"
     direction = "long" if up else "short"
     # 2) swing high (0) y swing low posterior (1) tras la rotura; 3) entrada en el 0,5 con el swing del 1 ya confirmado
-    leg = run_leg(H, L, j, end, swing_bars, o if up else -o, tbr.low if up else -tbr.high)
+    leg = run_leg(H, L, j, end, swing_bars, o if up else -o, tbr.low if up else -tbr.high, sub=None if entry_ltf is None else make_sub(ctx, entry_ltf, up))
     if leg.origin is None and leg.breach is not None:         # el precio tocó el extremo contrario de la TBR antes de tener el fibo definido
         other = "Low" if up else "High"
         return [hit(INVALIDATED, direction, leg.breach, tbr.low if up else tbr.high,
@@ -182,6 +205,8 @@ def analyze(ctx: PatternContext, swing_bars: int, sl: float = 1.0, tp: float = -
                   f"{'el swing del stop está dentro del rango de la TBR' if case == CASE_IDEAL else 'el swing del stop queda fuera del rango de la TBR'}")
         found = hit(DETECTED, direction, t, sign * half, detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * zero, "fibo 0,5": sign * half}, case)
+        if leg.entry_sub is not None:
+            found = replace(found, ts=int(entry_ltf["ts"][leg.entry_sub]))
         pos = position_figure(ctx, KEY, tbr.zone, direction, t, sign * half, sign * stop, sign * target, label)
         return [found], [Figure("fib", KEY, tbr.zone, direction, int(ts[leg.zero_idx]), x_end, levels, "entrada", label, tbr.day.isoformat(), target=level_name(tp)), pos]
     if ctx.window_closed:                                     # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»

@@ -27,21 +27,23 @@ import backtest_doble_barrido as bt                                             
 from tradingbot.envconfig import EnvConfig                                           # noqa: E402
 from tradingbot.skills.tbr.zones import zones_from_settings                           # noqa: E402
 
-NUMERIC = ["riesgo %", "recorrido objetivo (R)", "hora entrada (NY)", "rango Asia %", "rango London %", "distancia entre niveles (R)"]
-CATEGORICAL = ["dirección", "mercado", "dentro de NY Open", "Asia es el nivel más extremo", "sesgo vs operación", "lateral", "día semana"]
+NUMERIC = ["riesgo %", "recorrido objetivo (R)", "hora entrada (NY)", "rango Asia %", "rango London %", "distancia entre niveles (R)",
+           "distancia al PDH/PDL (R)", "profundidad barrido %"]
+CATEGORICAL = ["dirección", "mercado", "dentro de NY Open", "Asia es el nivel más extremo", "sesgo vs operación", "lateral", "día semana",
+               "barre el PDH/PDL", "día anterior"]
 QUANTILES = (0.2, 0.33, 0.5, 0.67, 0.8)
 MIN_N = 40                                    # operaciones mínimas por parte para fiarse del filtro
 TRAIN = 0.6
 
 
-def build_trades(folder: Path, symbols, be_r, entry_mode: str, stop_fib: float) -> pd.DataFrame:
+def build_trades(folder: Path, symbols, be_r, entry_mode: str, stop_fib: float, variant: str = "asia-london") -> pd.DataFrame:
     env = EnvConfig().section("TBR")
-    order, zones = zones_from_settings(env, bt.ZONE_ORDER), zones_from_settings(env)
+    order = zones = zones_from_settings(env, bt.ZONE_ORDER)
     rows = []
     for sym in symbols:
         path = folder / f"{sym}.parquet"
         if path.exists():
-            rows += bt.run_symbol(bt.load(path), sym, order, zones, stop_fib, be_r, entry_mode)[0]
+            rows += bt.run_symbol(bt.load(path), sym, order, zones, stop_fib, be_r, entry_mode, None, variant)[0]
     t = pd.DataFrame(rows).sort_values("entrada (NY)").reset_index(drop=True)
     t["día semana"] = t["entrada (NY)"].dt.dayofweek.map(dict(enumerate(bt.DAYS)))
     return t
@@ -78,13 +80,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--simbolos", nargs="+", default=list(bt.SYMBOLS))
     ap.add_argument("--carpeta", default="analisis/m5")
+    ap.add_argument("--variante", default="asia-london", choices=list(bt.VARIANTS))
     ap.add_argument("--entrada", default="asia", choices=bt.ENTRIES)
     ap.add_argument("--stop", type=float, default=bt.DEFAULT_STOP_FIB)
     ap.add_argument("--be-r", type=float, default=1.0)
     ap.add_argument("--salida", default="analisis/filtros_doble_barrido.xlsx")
     args = ap.parse_args()
     be_r = args.be_r if args.be_r > 0 else None
-    t = build_trades(Path(args.carpeta), args.simbolos, be_r, args.entrada, args.stop)
+    t = build_trades(Path(args.carpeta), args.simbolos, be_r, args.entrada, args.stop, args.variante)
     cut = int(len(t) * TRAIN)
     pd.set_option("display.width", 220)
     pd.set_option("display.max_colwidth", 70)

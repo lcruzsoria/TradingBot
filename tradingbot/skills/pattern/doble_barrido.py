@@ -35,7 +35,7 @@ DEFAULT_STOP_FIB = 0.618
 ENTRIES = ("asia", "extremo", "primero")   # nivel que se retestea: el de Asia, el más extremo de los dos o el menos extremo
 DEFAULT_ENTRY = "asia"
 NY_KEY = "NY_AM"                       # la TBR que barre
-EARLIER = ("ASIA", "LONDON")           # las TBR cuyos niveles barre
+EARLIER = ("ASIA", "LONDON")           # las TBR cuyos niveles barre (el primero es el que se retestea con entry="asia")
 MAX_GAP = 36 * 3600                    # una Asia o London más antigua que esto no es la del día
 
 
@@ -65,14 +65,14 @@ class DobleBarrido(Pattern):
         return analyze(ctx, self.stop_fib, self.entry)[1]
 
 
-def _earlier(ctx: PatternContext):
-    """Las TBR de Asia y London que preceden a esta NY Open (las últimas cerradas antes de que empezara), o None si falta alguna."""
+def _earlier(ctx: PatternContext, keys: tuple[str, ...] = EARLIER):
+    """Las TBR (por defecto Asia y London) que preceden a esta barredora (las últimas cerradas antes de que empezara), o None si falta alguna."""
     own = next((p for p in ctx.peers if p.key == ctx.tbr.key and p.day == ctx.tbr.day), None)
     start = own.start_ts if own is not None else (int(ctx.ts[ctx.start_bar]) if 0 <= ctx.start_bar < len(ctx.ts) else None)
     if start is None:
         return None, None
     found = []
-    for key in EARLIER:
+    for key in keys:
         options = [p for p in ctx.peers if p.key == key and p.close_ts <= start and start - p.close_ts <= MAX_GAP]
         if not options:
             return None, None
@@ -80,10 +80,11 @@ def _earlier(ctx: PatternContext):
     return found, start
 
 
-def analyze(ctx: PatternContext, stop_fib: float = DEFAULT_STOP_FIB, entry: str = DEFAULT_ENTRY) -> tuple[list[PatternHit], list[Figure]]:
-    if ctx.tbr.key != NY_KEY or not ctx.peers or len(ctx.ts) == 0:
+def analyze(ctx: PatternContext, stop_fib: float = DEFAULT_STOP_FIB, entry: str = DEFAULT_ENTRY,
+            keys: tuple[str, ...] = EARLIER, sweeper: str = NY_KEY, target_key: str | None = None) -> tuple[list[PatternHit], list[Figure]]:
+    if ctx.tbr.key != sweeper or not ctx.peers or len(ctx.ts) == 0:
         return [], []
-    earlier, start_ts = _earlier(ctx)
+    earlier, start_ts = _earlier(ctx, keys)
     if earlier is None:
         return [], []
     end, closed = ctx.last_bar, ctx.window_closed
@@ -96,7 +97,7 @@ def analyze(ctx: PatternContext, stop_fib: float = DEFAULT_STOP_FIB, entry: str 
         return [], []
     hits, figures, trades = [], [], []
     for up in (True, False):
-        found, figs = _side(ctx, earlier, up, begin, end, closed, stop_fib, entry)
+        found, figs = _side(ctx, earlier, up, begin, end, closed, stop_fib, entry, target_key)
         if found and found[0].status == DETECTED:
             trades.append((found, figs))
         else:
@@ -109,7 +110,7 @@ def analyze(ctx: PatternContext, stop_fib: float = DEFAULT_STOP_FIB, entry: str 
     return hits, figures
 
 
-def _side(ctx: PatternContext, earlier, up: bool, begin: int, end: int, closed: bool, stop_fib: float, entry_mode: str) -> tuple[list[PatternHit], list[Figure]]:
+def _side(ctx: PatternContext, earlier, up: bool, begin: int, end: int, closed: bool, stop_fib: float, entry_mode: str, target_key: str | None) -> tuple[list[PatternHit], list[Figure]]:
     ts, tf_sec = ctx.ts, ctx.tf_minutes * 60
     sign = 1 if up else -1
     # espejo: el alcista se calcula con los precios cambiados de signo, así la lógica es una sola
@@ -119,10 +120,13 @@ def _side(ctx: PatternContext, earlier, up: bool, begin: int, end: int, closed: 
     top, lower = max(highs), min(highs)                                   # el más extremo y el menos extremo de los dos niveles
     level = {"extremo": top, "asia": highs[0], "primero": lower}[entry_mode]   # el que se retestea (0 del fibonacci del stop)
     target = min(lows)                                                    # el Low más bajo entre Asia y London
+    if target_key:                                                        # o el lado contrario de una sola de las TBR (p. ej. NY Open)
+        target = next(lw for p, lw in zip(earlier, lows) if p.key == target_key)
     side = "High" if up else "Low"
     direction = "short" if up else "long"
     beyond = "sobre" if up else "bajo"
-    which = {"asia": "de Asia", "extremo": f"más {'alto' if up else 'bajo'}", "primero": "menos extremo"}[entry_mode]
+    names = " y ".join(p.zone for p in earlier)                           # por defecto «Asia y London»
+    which = {"asia": f"de {earlier[0].zone}", "extremo": f"más {'alto' if up else 'bajo'}", "primero": "menos extremo"}[entry_mode]
     start = ctx.start_bar                                                 # inicio de NY Open: la entrada no puede ser antes
 
     def hit(status, x, price, detail, levels=None):
@@ -158,21 +162,23 @@ def _side(ctx: PatternContext, earlier, up: bool, begin: int, end: int, closed: 
             break
         if restart > take_end:
             return [hit(INVALIDATED, restart, swing_price,
-                        f"cierre con cuerpo {beyond} el {side} de Asia y London en {_when(ctx, both)}; el precio superó el swing "
+                        f"cierre con cuerpo {beyond} el {side} de {names} en {_when(ctx, both)}; el precio superó el swing "
                         f"({swing_price:.5g}) en {_when(ctx, restart)} sin haber entrado y ya pasó NY Open: patrón invalidado")], []
         both = restart
     price, goal = sign * level, sign * target
+    if sign * (price - goal) <= 0:                                        # el objetivo debe quedar al otro lado de la entrada
+        return [], []
     levels = {"stop": stop, "target": goal}
     label = f"{ctx.tbr.zone} {'▼' if up else '▲'} DB"
     if entry is not None:
-        detail = (f"cierre con cuerpo {beyond} el {side} de Asia y London en {_when(ctx, both)}, swing en {_when(ctx, swing)} ({swing_price:.5g}), "
+        detail = (f"cierre con cuerpo {beyond} el {side} de {names} en {_when(ctx, both)}, swing en {_when(ctx, swing)} ({swing_price:.5g}), "
                   f"precio por debajo de los dos niveles en {_when(ctx, dip)}; retesteo del {side} {which} "
                   f"({price:.5g}) en {_when(ctx, entry)}. Entrada en el nivel, stop en el {stop_fib:g} del fibonacci hasta el swing ({stop:.5g}) y objetivo en el "
-                  f"{'Low más bajo' if up else 'High más alto'} de Asia y London ({goal:.5g})")
+                  f"{'Low más bajo' if up else 'High más alto'} de {names} ({goal:.5g})")
         return [hit(DETECTED, entry, price, detail, levels)], \
             [position_figure(ctx, KEY, ctx.tbr.zone, direction, entry, price, stop, goal, label)]
     if closed:                                                            # setup formado cuyo plazo se corta por tiempo: Cortex lo anota NO GO «T»
         x = min(max(end, 0), len(ts) - 1)
-        return [hit(EXPIRED, x, price, f"cierre con cuerpo {beyond} el {side} de Asia y London en {_when(ctx, both)} y precio por debajo de los "
+        return [hit(EXPIRED, x, price, f"cierre con cuerpo {beyond} el {side} de {names} en {_when(ctx, both)} y precio por debajo de los "
                                        f"dos niveles en {_when(ctx, dip)}, pero sin retesteo antes del cierre del día", levels)], []
     return [], []
