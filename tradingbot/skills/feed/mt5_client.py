@@ -1,9 +1,11 @@
 """Fuente de datos real: terminal MetaTrader 5 (solo Windows).
 
-Solo LECTURA: no hay ninguna llamada para enviar o modificar órdenes.
+Lee velas, cotizaciones y la cuenta. Solo envía órdenes (abrir, mover el stop, cerrar) en los perfiles con
+MT5_<PERFIL>_SEND_ORDERS=true, y solo si la cuenta conectada es demo: en una cuenta real las rechaza.
 """
 from __future__ import annotations
 
+import math
 import re
 import threading
 import time
@@ -11,10 +13,12 @@ import time
 import pandas as pd
 
 from ...config import Mt5Profile
-from .datasource import AccountSnapshot, ProgressFn, Quote, aggregate_candles, normalize_candles
+from .datasource import AccountSnapshot, Fill, ProgressFn, Quote, aggregate_candles, normalize_candles
 from ...timeframes import DERIVED, SESSION_ANCHORED, base_timeframe, minutes, mt5_constant
 
 CHUNK = 50_000
+MAGIC = 3_690_369          # número mágico de las órdenes del bot: así se distinguen de las que se abren a mano
+DEVIATION = 20             # desvío máximo del precio al enviar una orden a mercado, en puntos
 
 # El mismo mercado con otro nombre según el broker (USOIL en MetaQuotes es CL-OIL.s en PUPrime). Solo nombres que no son
 # también acciones: DOW, CL o SPX son empresas en algunos brokers.
@@ -51,6 +55,10 @@ def equivalent(name: str, names: dict[str, str], explicit: dict[str, str] | None
 
 class Mt5Error(Exception):
     """Error de conexión o lectura con MT5."""
+
+
+class TradeError(Mt5Error):
+    """MT5 no ha aceptado una orden (o el bot no la envía: cuenta real, lote mínimo, precio ya pasado...)."""
 
 
 class Mt5Source:
@@ -249,6 +257,143 @@ class Mt5Source:
         if not base:
             return []
         return sorted(actual for low, actual in names.items() if base in low)[:limit]
+
+    # -- operativa (solo MT5_<PERFIL>_SEND_ORDERS=true y cuenta demo) --------------
+    def open_market(self, symbol: str, direction: str, risk_money: float, stop: float, target: float,
+                    comment: str = "TradingBot") -> Fill:
+        """Abre a mercado `direction` ("long"/"short") en `symbol` con su stop y su objetivo, con los lotes que hacen que tocar
+        el stop cueste `risk_money` (redondeados hacia abajo al paso de lote del broker). TradeError si no se puede."""
+        with self._lock:
+            mt5 = self._trading()
+            exact = self._resolve(mt5, symbol)
+            if exact is None or not mt5.symbol_select(exact, True):
+                raise TradeError(f"el símbolo '{symbol}' no existe en este broker")
+            info, tick = mt5.symbol_info(exact), mt5.symbol_info_tick(exact)
+            if info is None or tick is None or not tick.bid or not tick.ask:
+                raise TradeError(f"{exact} sin cotización (¿mercado cerrado?)")
+            long = direction == "long"
+            kind = mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL
+            price = float(tick.ask if long else tick.bid)
+            digits = int(info.digits)
+            stop, target = round(float(stop), digits), round(float(target), digits)
+            if (long and not stop < price < target) or (not long and not target < price < stop):
+                raise TradeError(f"el precio ({price:.{digits}f}) ya está fuera del stop ({stop:.{digits}f}) o del objetivo "
+                                 f"({target:.{digits}f})")
+            volume, per_lot = self._volume(mt5, info, kind, price, stop, risk_money)
+            if volume <= 0:
+                raise TradeError(f"con {risk_money:,.2f} de riesgo no llega al lote mínimo de {exact} ({info.volume_min:g} lotes "
+                                 f"arriesgan {per_lot * info.volume_min:,.2f})")
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_DEAL, "symbol": exact, "volume": volume, "type": kind,
+                                     "price": price, "sl": stop, "tp": target, "deviation": DEVIATION, "magic": MAGIC,
+                                     "comment": comment[:31], "type_time": mt5.ORDER_TIME_GTC,
+                                     "type_filling": self._filling(mt5, info)})
+            self._check(mt5, result, f"abrir {direction} {exact}")
+            ticket = self._position_ticket(mt5, result, exact)
+            filled = float(result.price or price)
+            return Fill(ticket, exact, float(result.volume or volume), filled, round(per_lot * volume, 2))
+
+    def position_open(self, ticket: int) -> bool:
+        with self._lock:
+            return bool(self._require().positions_get(ticket=int(ticket)))
+
+    def set_stop(self, ticket: int, stop: float) -> bool:
+        """Mueve el stop de la posición (conserva el objetivo). False si la posición ya no existe."""
+        with self._lock:
+            mt5 = self._trading()
+            found = mt5.positions_get(ticket=int(ticket))
+            if not found:
+                return False
+            pos = found[0]
+            info = mt5.symbol_info(pos.symbol)
+            stop = round(float(stop), int(info.digits)) if info is not None else float(stop)
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "position": int(ticket), "symbol": pos.symbol,
+                                     "sl": stop, "tp": float(pos.tp), "magic": MAGIC})
+            self._check(mt5, result, f"mover el stop de {pos.symbol} a {stop}")
+            return True
+
+    def close_position(self, ticket: int, comment: str = "TradingBot cierre") -> bool:
+        """Cierra la posición a mercado. False si ya estaba cerrada (stop u objetivo en MT5)."""
+        with self._lock:
+            mt5 = self._trading()
+            found = mt5.positions_get(ticket=int(ticket))
+            if not found:
+                return False
+            pos = found[0]
+            info, tick = mt5.symbol_info(pos.symbol), mt5.symbol_info_tick(pos.symbol)
+            if info is None or tick is None:
+                raise TradeError(f"{pos.symbol} sin cotización para cerrar la posición {ticket}")
+            buy = pos.type == mt5.POSITION_TYPE_BUY
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_DEAL, "position": int(ticket), "symbol": pos.symbol,
+                                     "volume": float(pos.volume), "type": mt5.ORDER_TYPE_SELL if buy else mt5.ORDER_TYPE_BUY,
+                                     "price": float(tick.bid if buy else tick.ask), "deviation": DEVIATION, "magic": MAGIC,
+                                     "comment": comment[:31], "type_time": mt5.ORDER_TIME_GTC,
+                                     "type_filling": self._filling(mt5, info)})
+            self._check(mt5, result, f"cerrar la posición {ticket} de {pos.symbol}")
+            return True
+
+    def realized(self, ticket: int) -> float | None:
+        """Resultado de la posición ya cerrada, en la moneda de la cuenta (beneficio + comisión + swap). None si no consta."""
+        with self._lock:
+            mt5 = self._require()
+            deals = mt5.history_deals_get(position=int(ticket))
+            if not deals:
+                return None
+            return round(sum(float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
+                             for d in deals), 2)
+
+    def _trading(self):
+        """La conexión, si en ella se puede operar: solo en cuentas demo (es lo que permite MT5_<PERFIL>_SEND_ORDERS)."""
+        mt5 = self._require()
+        info = mt5.account_info()
+        if info is None:
+            raise TradeError(f"MT5 no devuelve datos de la cuenta: {mt5.last_error()}")
+        if info.login != self.profile.login:
+            raise TradeError(f"el terminal está en la cuenta {info.login}, no en la {self.profile.login} del perfil")
+        if info.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
+            raise TradeError(f"la cuenta {info.login} NO es demo: el bot solo envía órdenes a cuentas demo")
+        return mt5
+
+    @staticmethod
+    def _volume(mt5, info, kind, price: float, stop: float, risk_money: float) -> tuple[float, float]:
+        """(lotes, pérdida por lote si toca el stop). Los lotes, hacia abajo al paso del broker y como mucho el máximo;
+        0 si no llega al mínimo."""
+        loss = mt5.order_calc_profit(kind, info.name, 1.0, price, stop)
+        if loss is None or loss >= 0:                       # sin cálculo del terminal: con el valor del tick
+            loss = -abs(price - stop) / float(info.trade_tick_size) * float(info.trade_tick_value)
+        per_lot = abs(float(loss))
+        if per_lot <= 0 or risk_money <= 0:
+            return 0.0, per_lot
+        step = float(info.volume_step) or 0.01
+        lots = min(math.floor(risk_money / per_lot / step + 1e-9) * step, float(info.volume_max))
+        decimals = max(0, -int(math.floor(math.log10(step)))) if step < 1 else 0
+        lots = round(lots, decimals)
+        return (lots if lots >= float(info.volume_min) else 0.0), per_lot
+
+    @staticmethod
+    def _filling(mt5, info) -> int:
+        """Tipo de ejecución que admite el símbolo: FOK, IOC o, si no, RETURN."""
+        mode = int(getattr(info, "filling_mode", 0) or 0)
+        if mode & 1:
+            return mt5.ORDER_FILLING_FOK
+        if mode & 2:
+            return mt5.ORDER_FILLING_IOC
+        return mt5.ORDER_FILLING_RETURN
+
+    @staticmethod
+    def _check(mt5, result, what: str) -> None:
+        if result is None:
+            raise TradeError(f"MT5 no responde al {what}: {mt5.last_error()}")
+        if result.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL, mt5.TRADE_RETCODE_PLACED):
+            raise TradeError(f"MT5 rechaza {what}: {result.retcode} {result.comment}")
+
+    @staticmethod
+    def _position_ticket(mt5, result, symbol: str) -> int:
+        """Ticket de la posición recién abierta: el de la orden (cuentas con cobertura) o, si no, la última del bot en el
+        símbolo (cuentas netting)."""
+        if result.order and mt5.positions_get(ticket=int(result.order)):
+            return int(result.order)
+        mine = [p for p in mt5.positions_get(symbol=symbol) or () if p.magic == MAGIC]
+        return int(max(mine, key=lambda p: p.time_msc).ticket) if mine else int(result.order)
 
     # -- internos ---------------------------------------------------------
     def _require(self):

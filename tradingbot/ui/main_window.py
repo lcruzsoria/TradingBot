@@ -1557,10 +1557,18 @@ class MainWindow(QMainWindow):
         if p.get("consolidate_at"):
             lines.append(f"Saldo virtual: pasa a la cuenta del perfil al cierre de la vela de {p.get('consolidate_hours')} h, "
                          f"a las {self._ny(p['consolidate_at']):%d/%m %H:%M} NY")
-        lines.append("Modo simulación: no hubo posición real en MT5.")
+        real = p.get("real")
+        if not real:
+            lines.append("Modo simulación: no hubo posición real en MT5.")
+        elif real.get("error"):
+            lines.append(f"MT5: no se pudo cerrar la posición {real['ticket']} ({real['error']}): ciérrala a mano.")
+        else:
+            how = "cerrada por el bot" if real.get("closed_by_bot") else "ya cerrada en MT5 (stop u objetivo)"
+            money = f", resultado {real['profit']:+,.2f}" if real.get("profit") is not None else ""
+            lines.append(f"MT5: posición {real['ticket']} ({real.get('volume') or 0:g} lotes) {how}{money}.")
         verdict = {"objetivo": "GANADA (objetivo)", "stop": "PERDIDA (stop)", "tiempo": "cerrada por tiempo",
                    "breakeven": "BREAKEVEN (stop en la entrada)"}.get(c.result, c.result)
-        self.log(f"setup: posición simulada {verdict} - {o.label}: {c.r:+.2f} R, {c.pct:+.2f} % ({opened} -> {closed} NY)",
+        self.log(f"setup: posición {'real' if real and not real.get('error') else 'simulada'} {verdict} - {o.label}: {c.r:+.2f} R, {c.pct:+.2f} % ({opened} -> {closed} NY)",
                  chr(10).join(lines), "go" if c.r > 0 else "nogo" if c.r < 0 else "info")
 
     def _on_setup_consolidated(self, p: dict) -> None:

@@ -367,6 +367,16 @@ La contraseña es opcional: si falta, se usa la variable de entorno `MT5_<PERFIL
 Si el terminal está en otra cuenta, el bot entra en la del perfil con la contraseña que MT5 tenga guardada (marca
 «Guardar contraseña» al entrar a mano una vez en cada cuenta): así varios perfiles comparten un terminal.
 
+**Perfiles que operan de verdad** (`MT5_<PERFIL>_SEND_ORDERS=true`, p. ej. `puprime_live`, que se ve como «puprime-live»):
+la cuenta (con `_BASE`, la de otro perfil) recibe órdenes reales. Setup abre cada orden de Cortex a mercado con su stop y su
+objetivo y con los lotes que arriesgan `SETUP_RISK_PCT` del **saldo real** de la cuenta (redondeados hacia abajo al paso de
+lote; si no llega al lote mínimo, o el precio ya pasó el stop o el objetivo, no la envía y la sigue como simulada). La
+operación se sigue igual que en los demás perfiles (Forwardtest con las mismas reglas que el backtest) y la posición de MT5
+la acompaña: al tocar +1 R el stop real pasa al precio de entrada, y cuando la simulada cierra (stop, objetivo, breakeven o
+tiempo) el bot cierra la real si MT5 no la había cerrado ya; el Registro anota el ticket, los lotes y el resultado en dinero.
+La cabecera muestra el saldo real de la cuenta. No admite `_CAPITAL` y **solo funciona en cuentas demo**: en una real MT5
+no recibe nada. Mientras no se le cambien los mercados en el panel Quotes, opera los mismos que su perfil base.
+
 Protecciones al conectar:
 - Si el terminal está en una cuenta distinta a la del perfil, se cancela.
 - Si el perfil se llama `demo` y la cuenta no es demo, se cancela.

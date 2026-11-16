@@ -59,6 +59,8 @@ class Mt5Profile:
     strategy: str = ""       # MT5_<PERFIL>_STRATEGY: el perfil solo opera esa estrategia (calendario) con sus mercados
     capital: float | None = None   # MT5_<PERFIL>_CAPITAL: capital simulado inicial, en vez del saldo de la cuenta de MT5
     currency: str = "USD"    # MT5_<PERFIL>_CURRENCY: moneda de ese capital simulado
+    base: str = ""           # MT5_<PERFIL>_BASE: el perfil del que toma la cuenta (y, si no tiene los suyos, los mercados)
+    send_orders: bool = False   # MT5_<PERFIL>_SEND_ORDERS=true: opera de verdad en la cuenta (solo demo), con su saldo real
 
     @property
     def symbol_map(self) -> dict[str, str]:
@@ -160,10 +162,18 @@ def load_profiles(path: Path = DEFAULT_ENV_FILE) -> tuple[dict[str, Mt5Profile],
             raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_CAPITAL={capital} debe ser un número.") from None
         if capital_value is not None and capital_value <= 0:
             raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_CAPITAL debe ser mayor que 0.")
+        raw_send = values.get(f"MT5_{tag}_SEND_ORDERS", "").strip().lower()
+        if raw_send not in ("", "true", "false", "1", "0", "si", "sí", "no", "yes"):
+            raise ConfigError(f"Perfil '{tag.lower()}': MT5_{tag}_SEND_ORDERS={raw_send} debe ser true o false.")
+        send_orders = raw_send in ("true", "1", "si", "sí", "yes")
+        if send_orders and capital_value is not None:
+            raise ConfigError(f"Perfil '{tag.lower()}': con MT5_{tag}_SEND_ORDERS=true opera con el saldo real de la cuenta; "
+                              f"quita MT5_{tag}_CAPITAL.")
         profiles[tag.lower()] = Mt5Profile(tag.lower(), int(raw_login), server, password, exe,
                                            values.get(f"MT5_{tag}_NAME", ""), parse_symbol_map(raw_symbols, tag),
                                            values.get(f"MT5_{tag}_STRATEGY", "").lower(), capital_value,
-                                           values.get(f"MT5_{tag}_CURRENCY", "USD").upper())
+                                           values.get(f"MT5_{tag}_CURRENCY", "USD").upper(),
+                                           base.lower() if base else "", send_orders)
     if not profiles:
         raise ConfigError(f"No hay ningún perfil (MT5_<NOMBRE>_LOGIN) en {path}")
     default = (values.get("MT5_DEFAULT") or "").lower() or None

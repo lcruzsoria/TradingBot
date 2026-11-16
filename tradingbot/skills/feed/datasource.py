@@ -29,6 +29,16 @@ class AccountSnapshot:
     currency: str
 
 
+@dataclass(frozen=True)
+class Fill:
+    """Posición abierta de verdad en la cuenta (perfiles con MT5_<PERFIL>_SEND_ORDERS=true)."""
+    ticket: int        # ticket de la posición en MT5
+    symbol: str        # nombre exacto del broker
+    volume: float      # lotes
+    price: float       # precio al que entró
+    risk: float        # lo que se pierde si toca el stop, en la moneda de la cuenta
+
+
 class DataSource(Protocol):
     description: str
 

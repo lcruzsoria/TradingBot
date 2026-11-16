@@ -51,7 +51,7 @@ def test_setup_solo_esta_conectado_a_cortex():
     assert SetupSkill.slot == "aux4"
 
 
-def test_enviar_ordenes_reales_a_mt5_aun_no_esta_implementado():
+def test_setup_send_orders_ya_no_se_usa_se_activa_por_perfil():
     manager, bus, executed = run_skill("SETUP_SEND_ORDERS=true\n")
     bus.publish("setup.order", {"order": ORDER}, source="cortex")
     time.sleep(0.3)

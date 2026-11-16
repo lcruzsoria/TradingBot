@@ -37,12 +37,16 @@ def clean_symbols(symbols) -> list[str]:
     return out
 
 
-def load_watchlist(default: list[str], path: Path | None = None, profile: str | None = None, common: bool = True) -> list[str]:
-    """Watchlist guardada desde la app: la del perfil («watchlists»); si no tiene, la común («watchlist», la de antes de
+def load_watchlist(default: list[str], path: Path | None = None, profile: str | None = None, common: bool = True,
+                   base: str | None = None) -> list[str]:
+    """Watchlist guardada desde la app: la del perfil («watchlists»); si no tiene, la de su perfil base (`base`,
+    MT5_<PERFIL>_BASE: así puprime_live opera los mismos mercados que puprime); si no, la común («watchlist», la de antes de
     los perfiles; no vale con common=False, para los perfiles de estrategia); si no hay, la de config.toml. Los nombres del bot valen en cualquier broker: MT5 los traduce."""
     data = load_settings(path)
     own = data.get("watchlists", {})
     saved = own.get(profile.lower()) if profile and isinstance(own, dict) else None
+    if not isinstance(saved, list) and base and isinstance(own, dict):
+        saved = own.get(base.lower())
     if not isinstance(saved, list) and common:
         saved = data.get("watchlist")
     chosen = clean_symbols(saved) if isinstance(saved, list) else []

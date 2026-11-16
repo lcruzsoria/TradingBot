@@ -137,6 +137,7 @@ def main(argv=None) -> int:
             cfg["app"]["profile_name"] = profile.name
             cfg["app"]["strategy"] = profile.strategy
             cfg["app"]["capital"], cfg["app"]["currency"] = profile.capital, profile.currency
+            cfg["app"]["base_profile"], cfg["app"]["send_orders"] = profile.base, profile.send_orders
         strategy = cfg["app"].get("strategy") or ""
         if strategy:                                              # perfil de estrategia: solo sus skills y sus mercados
             cfg["skills"] = strategy_skills(cfg["skills"], strategy)
@@ -148,7 +149,8 @@ def main(argv=None) -> int:
             if args.timeframe is None and strategy in STRATEGY_TIMEFRAMES:
                 cfg["app"]["timeframe"] = STRATEGY_TIMEFRAMES[strategy]
         else:
-            cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"])
+            cfg["app"]["watchlist"] = settings.load_watchlist(cfg["app"]["watchlist"], profile=cfg["app"]["profile_name"],
+                                                              base=cfg["app"].get("base_profile"))
     except (ConfigError, ValueError) as exc:
         QMessageBox.critical(None, "TradingBot", f"{exc}\n\nPuedes probar la interfaz sin MT5 con  --demo  (o APP_DEMO=true en tradingbot.env)")
         return 2
