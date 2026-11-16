@@ -23,7 +23,7 @@ from ..skills.stats.backtest import (BOT_FILTER, CRT_DEFAULT, CRT_ENTRIES, CRT_L
 from . import theme
 from .extremos_panel import ExtremosPanel
 from .fmt import miles
-from .stats_dialog import Book, Tile
+from .stats_dialog import Book, Tile, _split_at_zero
 
 SIDE_NAMES = {0: "▲ LARGO", 1: "▼ CORTO"}
 METRIC_HEADERS = ("Ops", "Acierto", "R medio", "R total", "PF", "Máx. DD", "t")
@@ -350,7 +350,11 @@ class BacktestDialog(QDialog):
         pi.setMenuEnabled(False)
         pi.hideButtons()
         pi.getViewBox().setMouseEnabled(x=False, y=False)
-        self.curve = pi.plot([0.0])
+        # Verde lo que queda por encima de 0 y rojo lo de debajo: dos rellenos hasta el 0 y dos trazos cortados justo en el cruce
+        self.curve_fill = pi.plot([0.0])
+        self.curve_fill_neg = pi.plot([0.0])
+        self.curve = pi.plot([0.0], connect="finite")
+        self.curve_neg = pi.plot([0.0], connect="finite")
         self.zero = pg.InfiniteLine(0, angle=0, movable=False)
         pi.addItem(self.zero, ignoreBounds=True)
         curve_card.layout().addWidget(self.curve_plot)
@@ -937,14 +941,21 @@ class BacktestDialog(QDialog):
             axis.setPen(pg.mkPen(theme.CHART_GRID or theme.BORDER))
             axis.setTextPen(pg.mkPen(theme.CHART_TEXT))
         self.zero.setPen(pg.mkPen(theme.MUTED, style=Qt.PenStyle.DashLine))
+        items = (self.curve_fill, self.curve_fill_neg, self.curve, self.curve_neg)
         if not len(main):
-            self.curve.setData([], [])
+            for item in items:
+                item.setData([], [])
             self.curve_card.note.setText("sin operaciones")
             return
         xs, ys = main.curve()
-        color = theme.BULL if ys[-1] > 0 else theme.BEAR if ys[-1] < 0 else theme.MUTED
-        fill = pg.mkBrush(theme.mix(theme.CHART_BG, color, 0.25))
-        self.curve.setData(xs, ys, pen=pg.mkPen(color, width=2), fillLevel=0, brush=fill)
+        px, py = _split_at_zero(ys, xs)
+        nan = float("nan")
+        for item, color, keep, clip in ((self.curve_fill, theme.BULL, lambda y: y >= 0, max),
+                                        (self.curve_fill_neg, theme.BEAR, lambda y: y <= 0, min)):
+            item.setData(px, [clip(y, 0.0) for y in py], pen=pg.mkPen(None), fillLevel=0,
+                         brush=pg.mkBrush(theme.mix(theme.CHART_BG, color, 0.25)))
+        self.curve.setData(px, [y if y >= 0 else nan for y in py], pen=pg.mkPen(theme.BULL, width=2), connect="finite")
+        self.curve_neg.setData(px, [y if y <= 0 else nan for y in py], pen=pg.mkPen(theme.BEAR, width=2), connect="finite")
         self.curve_card.note.setText(f"R neto acumulado: {ys[-1]:+.0f} R al final")
 
     def _fill_rows(self, book: Book, rows: list[tuple[str, dict]], name=lambda n: str(n)) -> None:

@@ -61,17 +61,20 @@ def _colored(text: str, color: str | None) -> str:
     return f'<span style="color:{color}">{text}</span>' if color else text
 
 
-def _split_at_zero(values: list[float]) -> tuple[list[float], list[float]]:
-    """Los puntos de la curva con un punto extra en 0 allí donde cruza de un lado al otro, para colorear cada tramo por su signo."""
+def _split_at_zero(values, xs_in=None) -> tuple[list[float], list[float]]:
+    """Los puntos de la curva con un punto extra en 0 allí donde cruza de un lado al otro, para colorear cada tramo por su signo.
+    `xs_in`: la x de cada valor (por defecto, su posición)."""
+    values = [float(v) for v in values]
+    src = [float(x) for x in xs_in] if xs_in is not None else [float(i) for i in range(len(values))]
     xs: list[float] = []
     ys: list[float] = []
     for i, y in enumerate(values):
         if i:
             prev = values[i - 1]
             if (prev > 0 > y) or (prev < 0 < y):
-                xs.append(i - 1 + prev / (prev - y))
+                xs.append(src[i - 1] + (src[i] - src[i - 1]) * prev / (prev - y))
                 ys.append(0.0)
-        xs.append(float(i))
+        xs.append(src[i])
         ys.append(y)
     return xs, ys
 
