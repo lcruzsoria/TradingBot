@@ -8,8 +8,10 @@ del repo (el mismo de MT5, C:\\Users\\claude\\mt5\\.env), o en variables de ento
 """
 from __future__ import annotations
 
+import http.client
 import json
 import secrets
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,6 +24,36 @@ TIMEOUT = 10
 
 class TelegramError(RuntimeError):
     pass
+
+
+class _Ipv6FirstConnection(http.client.HTTPSConnection):
+    """Conexión HTTPS que prueba antes las direcciones IPv6: desde esta red la ruta IPv4 de Telegram tarda segundos (a veces
+    agota el handshake) y las respuestas a los comandos llegaban con mucho retraso. Si IPv6 falla, cae a IPv4."""
+
+    def connect(self) -> None:
+        infos = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM)
+        infos.sort(key=lambda info: info[0] != socket.AF_INET6)
+        error: OSError | None = None
+        for family, kind, proto, _name, address in infos:
+            sock = socket.socket(family, kind, proto)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect(address)
+            except OSError as exc:
+                sock.close()
+                error = exc
+                continue
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            return
+        raise error or OSError(f"sin dirección para {self.host}")
+
+
+class _Ipv6FirstHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_Ipv6FirstConnection, req, context=self._context)
+
+
+_OPENER = urllib.request.build_opener(_Ipv6FirstHandler)
 
 
 def credentials(env_file: Path | str | None = None) -> tuple[str | None, str | None]:
@@ -38,7 +70,7 @@ def _post(token: str, method: str, data: bytes, content_type: str) -> dict:
     request = urllib.request.Request(API.format(token=token, method=method), data=data,
                                      headers={"Content-Type": content_type})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with _OPENER.open(request, timeout=TIMEOUT) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
