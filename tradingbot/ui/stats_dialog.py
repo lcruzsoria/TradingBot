@@ -61,6 +61,21 @@ def _colored(text: str, color: str | None) -> str:
     return f'<span style="color:{color}">{text}</span>' if color else text
 
 
+def _split_at_zero(values: list[float]) -> tuple[list[float], list[float]]:
+    """Los puntos de la curva con un punto extra en 0 allí donde cruza de un lado al otro, para colorear cada tramo por su signo."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for i, y in enumerate(values):
+        if i:
+            prev = values[i - 1]
+            if (prev > 0 > y) or (prev < 0 < y):
+                xs.append(i - 1 + prev / (prev - y))
+                ys.append(0.0)
+        xs.append(float(i))
+        ys.append(y)
+    return xs, ys
+
+
 def _ny_today() -> datetime:
     if NY is not None:
         return datetime.now(NY).replace(tzinfo=None)
@@ -306,7 +321,11 @@ class StatsDialog(QDialog):
         pi.setMenuEnabled(False)
         pi.hideButtons()
         pi.getViewBox().setMouseEnabled(x=False, y=False)
-        self.curve = pi.plot([0.0])
+        # La curva va en dos trazos: verde lo que queda por encima de 0 y rojo lo de debajo (cortados justo en el 0)
+        self.curve = pi.plot([0.0], connect="finite")
+        self.curve_neg = pi.plot([0.0], connect="finite")
+        self.curve_dots = pg.ScatterPlotItem()
+        pi.addItem(self.curve_dots)
         self.zero = pg.InfiniteLine(0, angle=0, movable=False)
         pi.addItem(self.zero, ignoreBounds=True)
         curve_card.layout().addWidget(self.curve_plot)
@@ -563,10 +582,12 @@ class StatsDialog(QDialog):
             axis = self.curve_plot.getPlotItem().getAxis(side)
             axis.setPen(pg.mkPen(theme.CHART_GRID or theme.BORDER))
             axis.setTextPen(pg.mkPen(theme.CHART_TEXT))
-        last = equity[-1]
-        color = theme.BULL if last > 0 else theme.BEAR if last < 0 else theme.MUTED
-        self.curve.setData(list(range(len(equity))), equity, pen=pg.mkPen(color, width=2),
-                           symbol="o", symbolSize=5, symbolBrush=color, symbolPen=None)
+        xs, ys = _split_at_zero(equity)
+        nan = float("nan")
+        self.curve.setData(xs, [y if y >= 0 else nan for y in ys], pen=pg.mkPen(theme.BULL, width=2), connect="finite")
+        self.curve_neg.setData(xs, [y if y <= 0 else nan for y in ys], pen=pg.mkPen(theme.BEAR, width=2), connect="finite")
+        brushes = [pg.mkBrush(theme.BULL if y > 0 else theme.BEAR if y < 0 else theme.MUTED) for y in equity]
+        self.curve_dots.setData(list(range(len(equity))), equity, symbol="o", size=5, brush=brushes, pen=None)
         self.zero.setPen(pg.mkPen(theme.MUTED, style=Qt.PenStyle.DashLine))
 
     def _cell(self, table: QTableWidget, row: int, col: int, text: str, color: str | None = None) -> None:
