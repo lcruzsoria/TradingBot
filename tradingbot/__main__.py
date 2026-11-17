@@ -69,6 +69,19 @@ def relaunch_args(argv: list[str], profile: str) -> list[str]:
     return ["-m", "tradingbot", *out, "--profile", profile]
 
 
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def keep_awake() -> bool:
+    """Pide a Windows que no suspenda el equipo por inactividad mientras el bot esté abierto (la pantalla sí puede apagarse).
+    Suspendido, el bot, MT5 y Telegram se quedan congelados: ni opera, ni anota, ni contesta. No cambia la configuración de
+    energía: la petición es de este proceso y se acaba al cerrarlo. APP_KEEP_AWAKE=false la quita."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    return bool(ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED))
+
+
 def start_sync(minutes: float) -> None:
     """Pone al día, sin ventana, el forwardtest de los perfiles cuyo bot no está abierto (tradingbot/sync.py): al poco de arrancar y cada `minutes`."""
     from PySide6.QtCore import QProcess, QTimer
@@ -178,6 +191,8 @@ def main(argv=None) -> int:
     if not demo and cfg["app"]["profile_name"]:                # este bot está abierto: la sincronización no toca su perfil
         from .sync import DEFAULT_SYNC_MINUTES, register_bot
         register_bot(cfg["app"]["profile_name"])
+        if env.section("APP").get_bool("KEEP_AWAKE", True):
+            keep_awake()
         minutes = env.section("SYNC").get_float("MINUTES", DEFAULT_SYNC_MINUTES)
         if minutes and minutes > 0:
             window.sync_timer = start_sync(minutes)           # se guarda para que el temporizador no se recoja
