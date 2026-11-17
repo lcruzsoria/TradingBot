@@ -66,7 +66,7 @@ class Challenge:
     def update(self, balance: float, equity: float, currency: str = "") -> list[dict]:
         """Mira la cuenta y devuelve lo que acaba de pasar: «inicio», «fase» (pasa a la siguiente), «superado» o
         «suspendido» (cada evento con el resumen del challenge, el saldo y el equity)."""
-        if balance <= 0:
+        if balance <= 0 or equity <= 0:                 # lectura a medias (el terminal cambiando de cuenta): no es la cuenta
             return []
         events = []
         if not self.started:

@@ -141,7 +141,8 @@ class Mt5Source:
 
     def account(self) -> AccountSnapshot | None:
         with self._lock:
-            info = self._require().account_info()
+            mt5 = self._require()
+            info = self._own_account(mt5) if self.profile.send_orders else mt5.account_info()
             if info is None:
                 return None
             return AccountSnapshot(float(info.balance), float(info.equity), float(info.profit), str(info.currency))
@@ -372,7 +373,10 @@ class Mt5Source:
         if info is None:
             raise TradeError(f"MT5 no devuelve datos de la cuenta: {mt5.last_error()}")
         if info.login != self.profile.login:
-            raise TradeError(f"el terminal está en la cuenta {info.login}, no en la {self.profile.login} del perfil")
+            other = info.login
+            info = self._own_account(mt5)
+            if info is None:
+                raise TradeError(f"el terminal está en la cuenta {other}, no en la {self.profile.login} del perfil, y no se pudo volver a ella")
         if info.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
             raise TradeError(f"la cuenta {info.login} NO es demo: el bot solo envía órdenes a cuentas demo")
         return mt5
@@ -420,6 +424,18 @@ class Mt5Source:
         return int(max(mine, key=lambda p: p.time_msc).ticket) if mine else int(result.order)
 
     # -- internos ---------------------------------------------------------
+    def _own_account(self, mt5):
+        """Los datos de la cuenta del perfil. Si otro proceso ha cambiado el terminal de cuenta (otro perfil en el mismo MT5), vuelve a ella;
+        None si no lo consigue o si MT5 da una lectura a medias (equity 0 con saldo: el terminal está cambiando de cuenta)."""
+        p = self.profile
+        info = mt5.account_info()
+        if info is not None and info.login != p.login:
+            logged = (mt5.login(p.login, password=p.password, server=p.server) if p.password else mt5.login(p.login, server=p.server))
+            info = mt5.account_info() if logged else None
+        if info is None or info.login != p.login or (info.balance > 0 and info.equity <= 0):
+            return None
+        return info
+
     def _require(self):
         if self._mt5 is None:
             raise Mt5Error("No hay conexión con MT5.")

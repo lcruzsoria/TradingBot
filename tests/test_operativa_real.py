@@ -77,8 +77,14 @@ class FakeMt5(types.ModuleType):
         return (1, "fake")
 
     def account_info(self):
-        return types.SimpleNamespace(login=7, trade_mode=self.mode, currency="USD", balance=50_000.0, equity=50_000.0,
-                                     profit=0.0)
+        return types.SimpleNamespace(login=getattr(self, "at", 7), trade_mode=self.mode, currency="USD", balance=50_000.0,
+                                     equity=getattr(self, "equity", 50_000.0), profit=0.0)
+
+    def login(self, login, password=None, server=None):
+        self.logins = getattr(self, "logins", []) + [login]
+        if getattr(self, "can_login", True):
+            self.at = login
+        return getattr(self, "can_login", True)
 
     def symbols_get(self):
         return [types.SimpleNamespace(name="NAS100.s", visible=True)]
@@ -357,3 +363,48 @@ def test_el_aviso_de_telegram_del_challenge():
          "target": 116_748.0, "floor": 101_614.0, "target_pct": 8.0, "max_dd_pct": 6.0, "currency": "USD"}
     text = messages.challenge(p, "puprime_live")
     assert "suspendido" in text and "101,600.00 USD" in text and "puprime_live" in text
+
+
+# -- otro proceso cambia el terminal de cuenta (la sincronización de otros perfiles) ------------------------------------
+def test_si_el_terminal_esta_en_otra_cuenta_vuelve_a_la_suya(monkeypatch):
+    mt5 = FakeMt5()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5)
+    src = Mt5Source(Mt5Profile("puprime_live", 7, "PUPrime-Demo", send_orders=True))
+    src.connect()
+    mt5.at = 114285263                                                   # la sincronización ha entrado en la de MetaQuotes
+    assert src.account().balance == 50_000.0 and mt5.at == 7 and mt5.logins == [7]
+    mt5.at, mt5.can_login = 114285263, False                             # y si no puede volver, no hay lectura (ni órdenes)
+    assert src.account() is None
+    with pytest.raises(TradeError, match="no se pudo volver"):
+        src.open_market("NAS100", "long", 500.0, 95.0, 110.0)
+    assert mt5.sent == []
+
+
+def test_una_lectura_a_medias_no_es_la_cuenta(monkeypatch, tmp_path):
+    from tradingbot.skills.setup.challenge import Challenge
+    mt5 = FakeMt5()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5)
+    src = Mt5Source(Mt5Profile("puprime_live", 7, "PUPrime-Demo", send_orders=True))
+    src.connect()
+    mt5.equity = 0.0                                                     # saldo 50.000 y equity 0: el terminal cambiando de cuenta
+    assert src.account() is None
+    ch = Challenge(tmp_path / "challenge.json")
+    ch.update(100_000, 100_000)
+    assert ch.update(100_000, 0.0) == [] and not ch.failed               # el aviso de las 01:40: ya no suspende
+
+
+def test_la_sincronizacion_no_cambia_de_cuenta_con_un_bot_que_opera_de_verdad(monkeypatch, tmp_path):
+    from tradingbot import sync
+    profiles = {"puprime_live": Mt5Profile("puprime_live", 7, "PUPrime-Demo", send_orders=True),
+                "puprime": Mt5Profile("puprime", 7, "PUPrime-Demo"),
+                "metaquotes": Mt5Profile("metaquotes", 114285263, "MetaQuotes-Demo")}
+    done, lines = [], []
+    monkeypatch.setattr(sync, "load_profiles", lambda _env: (profiles, "puprime"))
+    monkeypatch.setattr(sync, "acquire_lock", lambda: tmp_path / "lock")
+    monkeypatch.setattr(sync, "running_profiles", lambda names, root=None: {"puprime_live"})
+    monkeypatch.setattr(sync, "sync_profile", lambda name, *a, **k: done.append(name) or "al día")
+    monkeypatch.setattr(sync, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("builtins.print", lambda *a, **k: lines.append(a[0]))
+    sync.main(["--sync-forwardtest", "--perfiles", "puprime", "metaquotes", "puprime_live"])
+    assert done == ["puprime"]
+    assert any("metaquotes: no se toca" in line for line in lines)

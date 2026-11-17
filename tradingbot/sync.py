@@ -283,7 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     env = envconfig.load()
     profiles, _default = load_profiles(args.env)
     wanted = args.perfiles or env.section("SYNC").get_list("PROFILES", []) or list(profiles)
-    busy = running_profiles(wanted)
+    busy = running_profiles(list(profiles))
+    live = {profiles[n].login for n in busy if n in profiles and profiles[n].send_orders}
     status = 0
     for name in wanted:
         if name not in profiles:
@@ -291,6 +292,10 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if name in busy:
             log(f"{name}: su bot está abierto, se actualiza solo")
+            continue
+        if live and profiles[name].login not in live:
+            # Ponerlo al día cambiaría el terminal a otra cuenta y el bot que opera de verdad se quedaría sin la suya
+            log(f"{name}: no se toca, su cuenta ({profiles[name].login}) no es la del bot que opera de verdad")
             continue
         try:
             log(f"{name}: {sync_profile(name, profiles[name].strategy or '', args.dry_run, log)}")
