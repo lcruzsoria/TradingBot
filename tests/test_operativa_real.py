@@ -314,30 +314,57 @@ def test_cierre_por_tiempo_lo_hace_el_bot(tmp_path):
     assert got["closed"][0].payload["closed"].r == round(227.25 / 499.95, 4)
 
 
-# -- challenge simulado: +8 % pasa de fase, -6 % de equity lo suspende ---------------------------------------------
-def test_challenge_pasa_a_la_fase_2_con_el_8_por_ciento(tmp_path):
+# -- challenge simulado: +8 % congela el día y la fase 2 empieza a las 00:00; el drawdown congela y vuelve a la fase 1 -----
+class Clock:
+    def __init__(self, at):
+        self.at = at
+
+    def __call__(self):
+        return self.at
+
+
+def test_challenge_fase_superada_congela_el_dia_y_la_fase_2_empieza_a_las_00(tmp_path):
+    from datetime import datetime
     from tradingbot.skills.setup.challenge import Challenge
-    ch = Challenge(tmp_path / "challenge.json")
+    clock = Clock(datetime(2026, 11, 18, 15, 30))
+    ch = Challenge(tmp_path / "challenge.json", "8,8", "6,5", 2, now=clock)
     assert [e["kind"] for e in ch.update(100_000, 100_000, "USD")] == ["inicio"]
     assert ch.levels() == (108_000.0, 94_000.0)
     assert ch.update(107_999, 108_500) == []                                       # el objetivo es de saldo, no de equity
     event = ch.update(108_100, 108_100)[0]
-    assert event["kind"] == "fase" and event["phase"] == 1 and event["new"]["phase"] == 2
-    assert ch.phase == 2 and ch.levels() == (116_748.0, 101_614.0)                 # la fase 2 empieza con el saldo de ese momento
-    assert Challenge(tmp_path / "challenge.json").phase == 2                       # sigue al reiniciar
-    assert ch.update(116_748, 116_748)[0]["kind"] == "superado" and ch.update(130_000, 130_000) == []
+    assert event["kind"] == "fase" and event["next"] == {"phase": 2, "phases": 2, "target_pct": 8.0, "max_dd_pct": 5.0,
+                                                          "from": "2026-11-19T00:00"}
+    assert ch.frozen and "congelada hasta las 19/11 00:00" in ch.blocks_trading and ch.phase == 1
+    clock.at = datetime(2026, 11, 18, 23, 59)
+    assert ch.update(109_000, 109_000) == [] and ch.frozen                          # todo el día congelada
+    assert Challenge(tmp_path / "challenge.json", "8,8", "6,5", 2, now=clock).frozen  # sigue al reiniciar el bot
+    clock.at = datetime(2026, 11, 19, 0, 0, 5)
+    event = ch.update(109_000, 109_000)[0]
+    assert event["kind"] == "inicio" and event["phase"] == 2 and event["max_dd_pct"] == 5.0
+    assert not ch.blocks_trading and ch.levels() == (117_720.0, 103_550.0)          # +8 % y -5 % desde 109.000
+    assert ch.update(117_720, 117_720)[0]["kind"] == "superado" and ch.update(130_000, 130_000) == []
 
 
-def test_challenge_se_suspende_con_el_6_por_ciento_de_drawdown(tmp_path):
+def test_challenge_drawdown_congela_el_dia_y_vuelve_a_la_fase_1(tmp_path):
+    from datetime import datetime
     from tradingbot.skills.setup.challenge import Challenge
-    ch = Challenge(tmp_path / "challenge.json")
+    clock = Clock(datetime(2026, 11, 18, 10, 0))
+    ch = Challenge(tmp_path / "challenge.json", "8,8", "6,5", 2, now=clock)
     ch.update(100_000, 100_000)
-    assert ch.update(99_000, 94_001) == []
-    assert ch.update(99_000, 94_000)[0]["kind"] == "suspendido" and ch.failed
-    assert ch.update(120_000, 120_000) == [] and ch.failed                          # suspendido: ya no cambia
+    ch.update(108_000, 108_000)                                                     # fase 1 superada
+    clock.at = datetime(2026, 11, 19, 0, 1)
+    ch.update(108_000, 108_000)                                                     # fase 2: mínimo 102.600 (-5 %)
+    assert ch.update(105_000, 102_601) == []
+    event = ch.update(105_000, 102_600)[0]
+    assert event["kind"] == "suspendido" and event["phase"] == 2 and event["next"]["phase"] == 1
+    assert ch.frozen and "vuelve" not in ch.blocks_trading and "fase 1" in ch.blocks_trading
+    clock.at = datetime(2026, 11, 20, 0, 0)
+    event = ch.update(104_000, 104_000)[0]
+    assert (event["kind"], event["phase"], event["attempt"]) == ("inicio", 1, 2)    # nuevo intento, mismas reglas
+    assert ch.levels() == (112_320.0, 97_760.0)                                    # +8 % y -6 % desde 104.000
 
 
-def test_setup_avisa_del_challenge_y_al_suspender_cierra_y_no_abre_mas(tmp_path):
+def test_setup_avisa_del_challenge_y_al_tocar_el_drawdown_cierra_y_no_abre_mas(tmp_path):
     source = FakeSource()
     manager, bus, got = run_live(source, tmp_path)
     events = []
@@ -353,16 +380,43 @@ def test_setup_avisa_del_challenge_y_al_suspender_cierra_y_no_abre_mas(tmp_path)
     wait(got["skipped"])
     manager.stop()
     assert [e.payload["kind"] for e in events] == ["inicio", "suspendido"]
-    assert ("close", 555) in source.calls and "suspendido" in got["skipped"][0].payload["note"]
+    assert ("close", 555) in source.calls and "congelada" in got["skipped"][0].payload["note"]
     assert len([c for c in source.calls if c[0] == "open"]) == 1
+
+
+def test_setup_al_superar_la_fase_cierra_lo_abierto_y_congela(tmp_path):
+    source = FakeSource()
+    manager, bus, got = run_live(source, tmp_path)
+    events = []
+    bus.subscribe("t", "setup.challenge", events.append)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["executed"])
+    setup = manager.skills["setup"]
+    setup.tick()
+    source.account = lambda: AccountSnapshot(54_100.0, 54_300.0, 200.0, "USD")      # saldo +8,2 %
+    setup.tick()
+    wait(events, 2)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    wait(got["skipped"])
+    manager.stop()
+    assert [e.payload["kind"] for e in events] == ["inicio", "fase"]
+    assert ("close", 555) in source.calls and "fase 1 superada" in got["skipped"][0].payload["note"]
 
 
 def test_el_aviso_de_telegram_del_challenge():
     from tradingbot.skills.telegram import messages
-    p = {"kind": "suspendido", "phase": 2, "phases": 2, "start": 108_100.0, "balance": 103_000.0, "equity": 101_600.0,
-         "target": 116_748.0, "floor": 101_614.0, "target_pct": 8.0, "max_dd_pct": 6.0, "currency": "USD"}
+    nxt = {"phase": 1, "phases": 2, "target_pct": 8.0, "max_dd_pct": 6.0, "from": "2026-11-20T00:00"}
+    p = {"kind": "suspendido", "phase": 2, "phases": 2, "start": 108_000.0, "balance": 105_000.0, "equity": 102_600.0,
+         "target": 116_640.0, "floor": 102_600.0, "target_pct": 8.0, "max_dd_pct": 5.0, "currency": "USD", "next": nxt,
+         "attempt": 1}
     text = messages.challenge(p, "puprime_live")
-    assert "suspendido" in text and "101,600.00 USD" in text and "puprime_live" in text
+    assert "drawdown máximo (-5 %)" in text and "congela la cuenta" in text and "20/11 a las 00:00" in text
+    assert "fase 1</b> (intento 2)" in text and "102,600.00 USD" in text and "puprime_live" in text
+    p.update(kind="fase", phase=1, start=100_000.0, balance=108_100.0, target_pct=8.0,
+             next={"phase": 2, "phases": 2, "target_pct": 8.0, "max_dd_pct": 5.0, "from": "2026-11-19T00:00"})
+    text = messages.challenge(p, "puprime_live")
+    assert "fase 1 superada (+8.10 %)" in text and "fase 2 de 2 empieza el 19/11 a las 00:00" in text
+    assert "drawdown máximo -5 %" in text
 
 
 # -- otro proceso cambia el terminal de cuenta (la sincronización de otros perfiles) ------------------------------------
@@ -451,3 +505,16 @@ def test_la_cabecera_suma_las_recuperadas_al_saldo_real(tmp_path):
     assert (p["balance"], p["real_balance"], p["recovered"]) == (51_791.40, 50_000.0, 1_791.40)
     assert p["balance"] - p["initial"] == pytest.approx(1_791.40)        # resultado del Forwardtest
     assert p["risk_amount"] == 500.0                                     # el riesgo de las órdenes, del saldo real
+
+
+def test_challenge_simulado_sobre_el_historico():
+    from datetime import date
+    from tradingbot.skills.setup.challenge import simulate
+    day = 86_400
+    # 1 % por R: +8,2 % el día 0 (fase 1); el día 0 no se opera más; el día 1, fase 2 con -5 %; al tocarlo, a la fase 1
+    times = [0, 100, 200, day + 10, day + 20, 2 * day + 10]
+    rs = [4.1, 4.1, 10.0, -3.0, -2.2, 1.0]
+    events = simulate(times, rs, lambda t: date.fromordinal(1 + t // day), 1.0, (8, 8), (6, 5), 2)
+    assert [(e["i"], e["kind"], e["phase"], e["key"]) for e in events] == [(1, "fase", 1, "fase"), (4, "drawdown", 2, "drawdown2")]
+    events = simulate([0, 10, day], [8.0, 8.0, -7.0], lambda t: date.fromordinal(1 + t // day), 1.0, (8, 8), (6, 5), 2)
+    assert [e["key"] for e in events] == ["fase", "drawdown2"]                          # el 10 no cuenta: día congelado

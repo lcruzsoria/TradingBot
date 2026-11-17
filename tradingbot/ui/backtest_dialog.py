@@ -12,12 +12,15 @@ el suyo, para que se pueda cambiar de barra viéndolas todas. Los datos los carg
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
+from ..skills.setup import challenge
 from ..skills.stats.backtest import (BOT_FILTER, CRT_DEFAULT, CRT_ENTRIES, CRT_LTFS, CRT_NEAR, CRT_TARGETS, CRT_TBR,
                                      DAYS, MAIN_FILTERS, MONTHS, PATTERNS, Backtest, Group, Ops, summarize, verdict)
 from . import theme
@@ -357,6 +360,10 @@ class BacktestDialog(QDialog):
         self.curve_neg = pi.plot([0.0], connect="finite")
         self.zero = pg.InfiniteLine(0, angle=0, movable=False)
         pi.addItem(self.zero, ignoreBounds=True)
+        # Challenge simulado sobre el histórico (perfiles que operan de verdad): una línea por fase superada, challenge superado
+        # o drawdown, con las reglas del perfil. Lo pone la ventana principal: {"rules": [...], "risk_pct": 1.0}.
+        self.challenge_sim: dict | None = None
+        self._mark_lines: list = []
         curve_card.layout().addWidget(self.curve_plot)
         lay.addWidget(curve_card)
 
@@ -956,7 +963,34 @@ class BacktestDialog(QDialog):
                          brush=pg.mkBrush(theme.mix(theme.CHART_BG, color, 0.25)))
         self.curve.setData(px, [y if y >= 0 else nan for y in py], pen=pg.mkPen(theme.BULL, width=2), connect="finite")
         self.curve_neg.setData(px, [y if y <= 0 else nan for y in py], pen=pg.mkPen(theme.BEAR, width=2), connect="finite")
-        self.curve_card.note.setText(f"R neto acumulado: {ys[-1]:+.0f} R al final")
+        self.curve_card.note.setText(f"R neto acumulado: {ys[-1]:+.0f} R al final" + self._paint_challenge(main, xs))
+
+    def _paint_challenge(self, main: Ops, xs) -> str:
+        """Las líneas del challenge simulado sobre estas operaciones (verde fase 2, amarillo superado, rojo drawdown en la fase 1,
+        morado en la 2) y su resumen para la nota de la curva."""
+        pi = self.curve_plot.getPlotItem()
+        for line in self._mark_lines:
+            pi.removeItem(line)
+        self._mark_lines = []
+        sim = self.challenge_sim
+        if not sim or not sim.get("rules"):
+            return ""
+        rules = sim["rules"]
+        events = challenge.simulate(xs, main.cols["r"], lambda t: datetime.fromtimestamp(float(t), timezone.utc).date(),
+                                    float(sim.get("risk_pct") or 1.0), [r["target_pct"] for r in rules],
+                                    [r["max_dd_pct"] for r in rules], len(rules))
+        for e in events:
+            color = challenge.MARK_COLORS[e["key"]]
+            line = pg.InfiniteLine(float(e["t"]), angle=90, movable=False, pen=pg.mkPen(color, width=1.5))
+            line.setToolTip(f"{challenge.MARK_TEXT[e['key']]}: {datetime.fromtimestamp(float(e['t']), timezone.utc):%d/%m/%Y}")
+            pi.addItem(line, ignoreBounds=True)
+            self._mark_lines.append(line)
+        count = {k: sum(1 for e in events if e["key"] == k) for k in challenge.MARK_COLORS}
+        rules_text = " / ".join(f"+{r['target_pct']:g} % -{r['max_dd_pct']:g} %" for r in rules)
+        parts = [f'<span style="color:{challenge.MARK_COLORS[k]}">{n} {challenge.MARK_TEXT[k].lower()}</span>'
+                 for k, n in count.items()]
+        self.curve_card.note.setTextFormat(Qt.RichText)
+        return f"  ·  challenge simulado ({rules_text}, {sim.get('risk_pct', 1):g} % por R): " + " · ".join(parts)
 
     def _fill_rows(self, book: Book, rows: list[tuple[str, dict]], name=lambda n: str(n)) -> None:
         book.empty_text = "Sin operaciones con este patrón, filtro y selección"

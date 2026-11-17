@@ -76,12 +76,12 @@ class SetupSkill(Skill):
         self.since = live.since(self.services.app_cfg) if self.live else None   # desde cuándo opera de verdad (UTC)
         self._candles: dict[str, tuple] = {}            # últimas velas de cada mercado con posición real (máximo y mínimo en R)
         self.challenge = None                           # challenge simulado sobre la cuenta real (SETUP_CHALLENGE_*)
-        target = self.settings.get_float("CHALLENGE_TARGET_PCT", challenge.DEFAULT_TARGET_PCT)
-        if self.live and target and target > 0:
-            try:
+        target = self.settings.get("CHALLENGE_TARGET_PCT", "") or ",".join(map(str, challenge.DEFAULT_TARGET_PCT))
+        if self.live and target.strip() not in ("0", "0.0"):
+            try:                                        # un valor por fase (8,8 y 6,5) o uno para todas
                 self.challenge = challenge.Challenge(
                     Path(app["data_dir"]) / challenge.FILE if app.get("data_dir") else challenge.FILE, target,
-                    self.settings.get_float("CHALLENGE_MAX_DD_PCT", challenge.DEFAULT_MAX_DD_PCT),
+                    self.settings.get("CHALLENGE_MAX_DD_PCT", "") or ",".join(map(str, challenge.DEFAULT_MAX_DD_PCT)),
                     self.settings.get_int("CHALLENGE_PHASES", challenge.DEFAULT_PHASES))
             except ValueError as exc:
                 self.error = f"SETUP_CHALLENGE_*: {exc}"
@@ -133,8 +133,8 @@ class SetupSkill(Skill):
         en el Forwardtest: este es la imagen de la cuenta) y Cortex libera el mercado."""
         bar = TIMEFRAMES.get(order.timeframe)
         now = self.server_now()
-        if self.challenge is not None and self.challenge.failed:
-            reason = "challenge suspendido (drawdown máximo alcanzado): el bot ya no abre operaciones"
+        if self.challenge is not None and self.challenge.blocks_trading:
+            reason = self.challenge.blocks_trading
         elif not trackable(order):
             reason = "la orden no trae stop, objetivo y horas de entrada y de cierre"
         elif not live.fresh(order, now, live.to_server(self.since, self.offset) if self.since else None,
@@ -254,8 +254,8 @@ class SetupSkill(Skill):
             self._publish_account()
 
     def _check_challenge(self) -> None:
-        """Challenge simulado: pasa de fase al llegar al objetivo y, si el equity toca el drawdown máximo, cierra lo abierto
-        y deja de operar. Cada cambio sale en setup.challenge (Registro y Telegram)."""
+        """Challenge simulado: al llegar al objetivo cierra lo abierto y congela la cuenta hasta las 00:00 (entonces empieza la
+        fase siguiente); si el equity toca el drawdown máximo, cierra lo abierto y deja de operar. Cada cambio sale en setup.challenge (Registro y Telegram)."""
         if self.challenge is None:
             return
         try:
@@ -265,7 +265,7 @@ class SetupSkill(Skill):
         if snap is None:
             return
         for event in self.challenge.update(snap.balance, snap.equity, snap.currency):
-            if event["kind"] == "suspendido":
+            if event["kind"] in ("suspendido", "fase"):      # suspendido, o fase superada: cuenta congelada hasta mañana
                 for order in self.positions:
                     try:
                         self.services.source.close_position(order.ticket)

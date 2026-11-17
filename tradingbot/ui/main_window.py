@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.profile_name: str | None = app_cfg["app"].get("profile_name")
         self.switch_profile = switch_profile              # vuelve a arrancar el bot con otro perfil (lo pone __main__)
         self.virtual: dict | None = None                  # cuenta virtual del perfil (setup.account)
+        self.challenge_rules: dict | None = None          # challenge simulado (perfil que opera de verdad): reglas y fase
         self.last_quotes: dict = {}
         self.bus = bus
         self.manager = manager
@@ -245,12 +246,18 @@ class MainWindow(QMainWindow):
         self.stat_trades.clicked.connect(lambda: self.toggle_stats(not self._stats_shown(), self.stat_trades))
         self._trades_day = None                                   # día (NY) que muestra la tarjeta Operaciones
         self._paint_trades()
-        for i, block in enumerate((self.stat_balance, self.stat_pnl, self.stat_result, self.stat_trades)):
+        self.stat_challenge = StatBlock("Challenge")              # solo en perfiles que operan de verdad con challenge
+        self.stat_challenge.value.setTextFormat(Qt.RichText)
+        for i, block in enumerate((self.stat_balance, self.stat_pnl, self.stat_result, self.stat_trades, self.stat_challenge)):
             if i:
                 divider = QFrame()
                 divider.setObjectName("StatDivider")
                 h.addWidget(divider)
+                if block is self.stat_challenge:
+                    self._challenge_divider = divider
             h.addWidget(block)
+        self.stat_challenge.hide()
+        self._challenge_divider.hide()
 
         # Las cifras del perfil van justo después de la cuenta; la hora y el botón Skins, a la derecha del todo.
         h.addStretch(1)
@@ -808,6 +815,7 @@ class MainWindow(QMainWindow):
             self.stats_dialog = StatsDialog(self, self.stats, lambda ts: self._ny(ts), lambda: list(self.watchlist),
                                             months=lambda: self.stats_journal.months() if self.stats_journal else [],
                                             load_month=self._load_stats_month)
+            self.stats_dialog.set_challenge_marks(((self.virtual or {}).get("challenge") or {}).get("marks") or [])
             self.stats_dialog.hidden.connect(lambda: self.stats_btn.setChecked(False))
             self.stats_dialog.reset_requested.connect(lambda: self.bus.publish("stats.reset", {}, source="ui"))
             self.stats_dialog.market_clicked.connect(self._on_market_clicked)    # el mercado pinchado pasa al gráfico
@@ -875,6 +883,7 @@ class MainWindow(QMainWindow):
             return
         if self.backtest_dialog is None:
             self.backtest_dialog = BacktestDialog(self, self.backtest, self.backtest_error)
+            self.backtest_dialog.challenge_sim = self._challenge_sim()
             self.backtest_dialog.hidden.connect(lambda: self.backtest_btn.setChecked(False))
             self.backtest_dialog.reload_requested.connect(lambda: self.bus.publish("stats.reload", {}, source="ui"))
             if self.backtest is not None and self.backtest.groups_of(self.strategy):     # un perfil con backtest propio (Enigma369) abre el suyo
@@ -1050,8 +1059,21 @@ class MainWindow(QMainWindow):
         color = theme.BULL if account.profit > 0 else theme.BEAR if account.profit < 0 else None
         self.stat_pnl.set_value(f"{account.profit:+,.2f}", f"{pct:+.2f}% del saldo", color)
 
+    def _challenge_sim(self) -> dict | None:
+        """Las reglas del challenge del perfil (si opera de verdad) para simularlo sobre el backtest."""
+        c = self.challenge_rules or {}
+        return {"rules": c["rules"], "risk_pct": (self.virtual or {}).get("risk_pct") or 1.0} if c.get("rules") else None
+
     def _on_setup_account(self, p: dict) -> None:
         self.virtual = p
+        marks = (p.get("challenge") or {}).get("marks") or []
+        self.challenge_rules = p.get("challenge")
+        if self.backtest_dialog is not None and self.backtest_dialog.challenge_sim != (sim := self._challenge_sim()):
+            self.backtest_dialog.challenge_sim = sim
+            if self.backtest_dialog.isVisible():
+                self.backtest_dialog.refresh()
+        if self.stats_dialog is not None:
+            self.stats_dialog.set_challenge_marks(marks)
         if p.get("started"):
             self._paint_virtual()
 
@@ -1090,6 +1112,44 @@ class MainWindow(QMainWindow):
         color = theme.BULL if diff > 0 else theme.BEAR if diff < 0 else None
         self.stat_result.set_value(f"{pct:+.2f}%", f"{diff:+,.2f}  -  capital inicial {initial:,.0f}", color)
         self._paint_trades()
+        self._paint_challenge(v.get("challenge"), balance)
+
+    def _paint_challenge(self, c: dict | None, balance: float) -> None:
+        """Tarjeta Challenge: fase, estado, objetivo y equity mínimo de la fase; las reglas de todas las fases, en el tooltip."""
+        shown = bool(c and c.get("start"))
+        self.stat_challenge.setVisible(shown)
+        self._challenge_divider.setVisible(shown)
+        if not shown:
+            return
+        status, phase, phases = c.get("status"), c["phase"], c["phases"]
+        if status == "congelado":
+            until = str(c.get("frozen_until") or "")
+            when = f"{until[8:10]}/{until[5:7]} {until[11:16]}" if len(until) >= 16 else "mañana 00:00"
+            nxt = c.get("next_phase") or phase + 1
+            if c.get("reason") == "drawdown":
+                value, sub, color = "Drawdown", f"congelada · vuelve a la fase 1 el {when}", theme.BEAR
+            else:
+                value, sub, color = f"Fase {phase} superada", f"congelada · fase {nxt} el {when}", theme.BULL
+        elif status == "suspendido":
+            value, sub, color = "Suspendido", f"drawdown máximo en la fase {phase}", theme.BEAR
+        elif status == "superado":
+            value, sub, color = "Superado", f"{phases} fases", theme.BULL
+        else:
+            left = c["target"] - balance
+            value = f"Fase {phase} de {phases}" + (f" · intento {c['attempt']}" if (c.get("attempt") or 1) > 1 else "")
+            sub = f"objetivo {c['target']:,.0f} (faltan {max(left, 0):,.0f}) · mín. {c['floor']:,.0f}"
+            color = None
+        self.stat_challenge.set_value(value, sub, color)
+        rules = "\n".join(f"  Fase {r['phase']}: objetivo +{r['target_pct']:g} %, drawdown máximo -{r['max_dd_pct']:g} %"
+                          + ("   <- ahora" if r["phase"] == phase and status in ("en curso", "congelado") else "")
+                          for r in c.get("rules") or [])
+        self.stat_challenge.setToolTip(
+            "Challenge simulado sobre la cuenta real (como el de una empresa de fondeo):\n" + rules + "\n\n"
+            "Cada fase empieza con el saldo de ese momento. Al llegar al objetivo, el bot cierra lo abierto y congela la cuenta "
+            "el resto del día; la fase siguiente empieza a las 00:00. Si el equity cae al drawdown máximo (en cualquier fase), "
+            "el bot cierra lo abierto, congela la cuenta el resto del día y a las 00:00 vuelve a empezar en la fase 1.\n\n"
+            f"Fase {phase}: inicio {c['start']:,.2f}, objetivo {c['target']:,.2f}, equity mínimo {c['floor']:,.2f}."
+            + (f"\nIncluye {c['adjustment']:+,.2f} de operaciones recuperadas (no están en MT5)." if c.get("adjustment") else ""))
 
     def _paint_trades(self) -> None:
         """Tarjeta Operaciones: las del Forwardtest con entrada hoy (fecha de Nueva York), igual que la ventana con «Hoy»:
@@ -1547,8 +1607,10 @@ class MainWindow(QMainWindow):
 
     def _on_setup_challenge(self, p: dict) -> None:
         """Challenge simulado: inicio, paso de fase, superado o suspendido (lo mismo que avisa Telegram)."""
-        title = {"inicio": f"empieza la fase {p['phase']} de {p['phases']}", "fase": f"fase {p['phase']} superada",
-                 "superado": "SUPERADO", "suspendido": "SUSPENDIDO por drawdown máximo"}.get(p["kind"], p["kind"])
+        title = {"inicio": f"empieza la fase {p['phase']} de {p['phases']}", "fase": f"fase {p['phase']} superada: cuenta congelada hasta las 00:00, "
+                 f"entonces empieza la fase {(p.get('next') or {}).get('phase', p['phase'] + 1)}",
+                 "superado": "SUPERADO",
+                 "suspendido": "drawdown máximo: cuenta congelada hasta las 00:00, entonces vuelve a empezar en la fase 1"}.get(p["kind"], p["kind"])
         cur = p.get("currency") or ""
         detail = (f"Saldo {p['balance']:,.2f} {cur}, equity {p['equity']:,.2f}. Inicio de la fase {p['start']:,.2f}: objetivo "
                   f"{p['target']:,.2f} (+{p['target_pct']:g} %), equity mínimo {p['floor']:,.2f} (-{p['max_dd_pct']:g} %).")

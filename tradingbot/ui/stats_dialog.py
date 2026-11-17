@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QFrame, QGridLa
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..clock import NY, trading_day
+from ..skills.setup import challenge
 from ..skills.stats.backtest import PATTERNS
 from ..skills.stats.journal import month_label
 from ..skills.stats.session import (ALIGNMENTS, SESSIONS, Group, Signal, Trade, TradeStats, alignment_of,  # noqa: F401
@@ -330,6 +331,8 @@ class StatsDialog(QDialog):
         self.curve_dots = pg.ScatterPlotItem()
         pi.addItem(self.curve_dots)
         self.zero = pg.InfiniteLine(0, angle=0, movable=False)
+        self.challenge_marks: list[dict] = []           # challenge simulado (perfil que opera de verdad): fase 2, superado, drawdown
+        self._mark_lines: list = []
         pi.addItem(self.zero, ignoreBounds=True)
         curve_card.layout().addWidget(self.curve_plot)
         lay.addWidget(curve_card)
@@ -489,7 +492,7 @@ class StatsDialog(QDialog):
         b["dd"].set_value(f"{-dd:.2f} R" if dd else "0 R", "desde el máximo", theme.BEAR if dd else None)
         self.summary.setText(self._summary(s))
 
-        self._paint_curve(s.equity)
+        self._paint_curve(s.equity, s.done)
         self._fill_patterns(s)
         cont = s.only(lambda t: t.order.pattern_key == "continuacion")
         cases = ("A. Ideal", "B. Flexible") + (("Sin caso",) if any(not getattr(t.order, "caso", "") for t in cont.trades) else ())
@@ -579,7 +582,36 @@ class StatsDialog(QDialog):
             else:
                 self.by_pattern.set_highlight(i, pick.name, sub(pick), color)
 
-    def _paint_curve(self, equity: list[float]) -> None:
+    def set_challenge_marks(self, marks: list[dict]) -> None:
+        """Los momentos del challenge (lo que guarda challenge.json): se marcan en la curva con una línea vertical."""
+        if marks != self.challenge_marks:
+            self.challenge_marks = list(marks)
+            if self.isVisible():
+                self.refresh()
+
+    def _paint_marks(self, done) -> None:
+        """Una línea vertical por cada evento del challenge, tras la última operación cerrada antes de él: verde al pasar a la
+        fase 2, amarillo challenge superado, rojo drawdown en la fase 1 y morado drawdown en la fase 2."""
+        pi = self.curve_plot.getPlotItem()
+        for line in self._mark_lines:
+            pi.removeItem(line)
+        self._mark_lines = []
+        exits = [self._to_ny(t.closed.exit_ts) for t in done]
+        for m in self.challenge_marks:
+            try:
+                at = datetime.fromisoformat(m["at"]).astimezone()          # hora de este equipo -> Nueva York
+                at = at.astimezone(NY).replace(tzinfo=None) if NY is not None else at.replace(tzinfo=None)
+            except (KeyError, ValueError):
+                continue
+            x = sum(1 for e in exits if e is not None and e <= at)
+            key = challenge.mark_key(m["kind"], int(m.get("phase", 1)))
+            line = pg.InfiniteLine(x, angle=90, movable=False, pen=pg.mkPen(challenge.MARK_COLORS[key], width=2),
+                                   label=challenge.MARK_TEXT[key], labelOpts={"position": 0.9, "color": challenge.MARK_COLORS[key]})
+            line.setToolTip(f"{challenge.MARK_TEXT[key]}: {m['at'].replace('T', ' ')[:16]}")
+            pi.addItem(line, ignoreBounds=True)
+            self._mark_lines.append(line)
+
+    def _paint_curve(self, equity: list[float], done=()) -> None:
         self.curve_plot.setBackground(theme.CHART_BG)
         for side in ("left", "bottom"):
             axis = self.curve_plot.getPlotItem().getAxis(side)
@@ -592,6 +624,7 @@ class StatsDialog(QDialog):
         brushes = [pg.mkBrush(theme.BULL if y > 0 else theme.BEAR if y < 0 else theme.MUTED) for y in equity]
         self.curve_dots.setData(list(range(len(equity))), equity, symbol="o", size=5, brush=brushes, pen=None)
         self.zero.setPen(pg.mkPen(theme.MUTED, style=Qt.PenStyle.DashLine))
+        self._paint_marks(done)
 
     def _cell(self, table: QTableWidget, row: int, col: int, text: str, color: str | None = None) -> None:
         item = QTableWidgetItem(text)

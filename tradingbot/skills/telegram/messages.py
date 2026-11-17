@@ -108,19 +108,26 @@ def challenge(p: dict, profile: str | None = None) -> str:
         body = (f"Saldo inicial {money(start)}\nObjetivo +{p['target_pct']:g} %: {money(p['target'])}\n"
                 f"Drawdown máximo -{p['max_dd_pct']:g} %: equity mínimo {money(p['floor'])}")
     elif kind == "fase":
-        new = p.get("new") or {}
+        nxt = p.get("next") or {}
+        when = nxt.get("from", "")
+        when = f"{when[8:10]}/{when[5:7]} a las {when[11:16]}" if len(when) >= 16 else "mañana a las 00:00"
         head = f"✅ <b>Challenge: fase {p['phase']} superada (+{pct:.2f} %)</b>"
-        body = (f"Saldo {money(bal)} (inicio de la fase {money(start)})\n\n"
-                f"<b>Empieza la fase {new.get('phase')} de {new.get('phases')}</b>\n"
-                f"Objetivo +{p['target_pct']:g} %: {money(new.get('target'))}\n"
-                f"Equity mínimo (-{p['max_dd_pct']:g} %): {money(new.get('floor'))}")
+        body = (f"Saldo {money(bal)} (inicio de la fase {money(start)}, objetivo +{p['target_pct']:g} %)\n"
+                "El bot cierra lo abierto y <b>congela la cuenta</b> el resto del día: no abre más operaciones.\n\n"
+                f"<b>La fase {nxt.get('phase')} de {nxt.get('phases')} empieza el {when}</b> con el saldo de ese momento:\n"
+                f"objetivo +{nxt.get('target_pct', 0):g} %, drawdown máximo -{nxt.get('max_dd_pct', 0):g} %")
     elif kind == "superado":
         head = f"🏆 <b>Challenge superado: fase {p['phase']} de {p['phases']} (+{pct:.2f} %)</b>"
         body = f"Saldo {money(bal)} (inicio de la fase {money(start)}). El bot sigue operando."
     else:
-        head = f"⛔ <b>Challenge suspendido: drawdown máximo (-{p['max_dd_pct']:g} %) en la fase {p['phase']}</b>"
+        nxt = p.get("next") or {}
+        when = nxt.get("from", "")
+        when = f"{when[8:10]}/{when[5:7]} a las {when[11:16]}" if len(when) >= 16 else "mañana a las 00:00"
+        head = f"⛔ <b>Challenge: drawdown máximo (-{p['max_dd_pct']:g} %) en la fase {p['phase']}</b>"
         body = (f"Equity {money(eq)} (mínimo {money(p['floor'])}), saldo {money(bal)}\n"
-                "El bot cierra lo abierto y no abre más operaciones en este perfil.")
+                "El bot cierra lo abierto y <b>congela la cuenta</b> el resto del día: no abre más operaciones.\n\n"
+                f"<b>El {when} el challenge vuelve a empezar en la fase 1</b> (intento {p.get('attempt', 1) + 1}) con el "
+                f"saldo de ese momento: objetivo +{nxt.get('target_pct', 0):g} %, drawdown máximo -{nxt.get('max_dd_pct', 0):g} %")
         if p.get("errors"):
             body += "\nNo se pudieron cerrar: " + _e(", ".join(p["errors"]))
     return f"{head}\n{body}{_footer(profile)}"
