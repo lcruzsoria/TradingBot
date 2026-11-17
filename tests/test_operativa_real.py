@@ -435,3 +435,19 @@ def test_las_velas_solo_de_su_cuenta(monkeypatch):
     mt5.at, mt5.can_login = 114285263, False
     with pytest.raises(TradeError, match="otro broker"):
         src._require()
+
+
+def test_la_cabecera_suma_las_recuperadas_al_saldo_real(tmp_path):
+    import json
+    (tmp_path / "challenge.json").write_text(json.dumps({"fase": 1, "estado": "en curso", "saldo_inicio_fase": 50_000.0,
+                                                         "ajuste_recuperadas": 1_791.40}), encoding="utf-8")
+    (tmp_path / "cuenta.json").write_text(json.dumps({"capital_inicial": 50_000.0, "moneda": "USD", "operaciones": []}),
+                                          encoding="utf-8")
+    source = FakeSource()
+    manager, bus, got = run_live(source, tmp_path)
+    wait(got["account"])
+    manager.stop()
+    p = [e.payload for e in got["account"] if e.payload.get("live")][-1]
+    assert (p["balance"], p["real_balance"], p["recovered"]) == (51_791.40, 50_000.0, 1_791.40)
+    assert p["balance"] - p["initial"] == pytest.approx(1_791.40)        # resultado del Forwardtest
+    assert p["risk_amount"] == 500.0                                     # el riesgo de las órdenes, del saldo real

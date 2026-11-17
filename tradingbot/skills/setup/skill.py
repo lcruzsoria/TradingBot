@@ -296,9 +296,13 @@ class SetupSkill(Skill):
         summary = self.account.summary(self.risk_pct, self.positions)
         if self.challenge is not None and self.challenge.started:
             summary["challenge"] = self.challenge.summary()
-        if self.live and (real := self._real_balance()) is not None:     # la cabecera muestra el saldo real de la cuenta
+        if self.live and (real := self._real_balance()) is not None:     # la cabecera: el saldo real de la cuenta...
             balance, currency = real
-            summary.update(balance=balance, currency=currency, risk_amount=balance * self.risk_pct / 100, live=True)
+            extra = self.challenge.adjustment if self.challenge is not None else 0.0
+            # ...más las operaciones recuperadas del Forwardtest que no están en MT5 (equipo suspendido): saldo y resultado
+            # son los del Forwardtest. El riesgo de cada orden sigue saliendo del saldo real.
+            summary.update(balance=balance + extra, currency=currency, risk_amount=balance * self.risk_pct / 100, live=True,
+                           real_balance=balance, recovered=extra)
         self.publish("setup.account", summary)
 
     def _follow(self, payload: dict) -> None:

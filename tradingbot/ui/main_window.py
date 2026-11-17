@@ -1077,6 +1077,9 @@ class MainWindow(QMainWindow):
         flt = self.floating()
         equity = f"equity {balance + (flt or 0):,.2f}"
         self.stat_balance.set_value(f"{balance:,.2f}", f"{cur}  -  {equity}" if cur else equity)
+        if v.get("recovered"):                          # perfil que opera de verdad con operaciones recuperadas (no están en MT5)
+            self.stat_balance.setToolTip(f"Saldo del Forwardtest: el real de MT5 ({v['real_balance']:,.2f}) más las operaciones "
+                                         f"recuperadas con el equipo suspendido ({v['recovered']:+,.2f}), que no están en MT5.")
         if flt is None:
             self.stat_pnl.set_value(f"{0:+,.2f}", "sin posiciones abiertas")
         else:
