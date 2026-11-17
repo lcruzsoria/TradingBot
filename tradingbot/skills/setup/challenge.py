@@ -52,6 +52,12 @@ class Challenge:
     def failed(self) -> bool:
         return self.status == FAILED
 
+    @property
+    def adjustment(self) -> float:
+        """Lo que suman las operaciones recuperadas: las que el bot habría hecho con el equipo suspendido. No están en MT5,
+        pero cuentan en el challenge (se suman al saldo y al equity reales). En challenge.json, «ajuste_recuperadas»."""
+        return float(self.state.get("ajuste_recuperadas") or 0.0)
+
     def levels(self) -> tuple[float, float]:
         """(saldo objetivo de la fase, equity mínimo antes de suspender)."""
         start = float(self.state["saldo_inicio_fase"])
@@ -61,13 +67,15 @@ class Challenge:
         target, floor = self.levels() if self.started else (None, None)
         return {"phase": self.phase, "phases": self.phases, "status": self.status, "start": self.state.get("saldo_inicio_fase"),
                 "target": target, "floor": floor, "target_pct": self.target_pct, "max_dd_pct": self.max_dd_pct,
-                "currency": currency}
+                "currency": currency, "adjustment": self.adjustment}
 
     def update(self, balance: float, equity: float, currency: str = "") -> list[dict]:
         """Mira la cuenta y devuelve lo que acaba de pasar: «inicio», «fase» (pasa a la siguiente), «superado» o
         «suspendido» (cada evento con el resumen del challenge, el saldo y el equity)."""
         if balance <= 0 or equity <= 0:                 # lectura a medias (el terminal cambiando de cuenta): no es la cuenta
             return []
+        extra = self.adjustment                         # operaciones recuperadas (no están en MT5) que sí cuentan en el challenge
+        balance, equity = balance + extra, equity + extra
         events = []
         if not self.started:
             self.state = {"fase": 1, "estado": RUNNING, "saldo_inicio_fase": float(balance), "saldo_inicial": float(balance),

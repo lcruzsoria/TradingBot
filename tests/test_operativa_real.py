@@ -408,3 +408,30 @@ def test_la_sincronizacion_no_cambia_de_cuenta_con_un_bot_que_opera_de_verdad(mo
     sync.main(["--sync-forwardtest", "--perfiles", "puprime", "metaquotes", "puprime_live"])
     assert done == ["puprime"]
     assert any("metaquotes: no se toca" in line for line in lines)
+
+
+def test_las_operaciones_recuperadas_cuentan_en_el_challenge(tmp_path):
+    import json
+    from tradingbot.skills.setup.challenge import Challenge
+    path = tmp_path / "challenge.json"
+    ch = Challenge(path)
+    ch.update(100_000, 100_000)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["ajuste_recuperadas"] = 1_791.40                                # no están en MT5, sí en el challenge
+    path.write_text(json.dumps(data), encoding="utf-8")
+    ch = Challenge(path)
+    assert ch.update(100_000, 100_000) == [] and ch.summary()["adjustment"] == 1_791.40
+    assert [e["kind"] for e in ch.update(106_300, 106_300)] == ["fase"]   # 106.300 + 1.791,40 >= 108.000
+
+
+def test_las_velas_solo_de_su_cuenta(monkeypatch):
+    mt5 = FakeMt5()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5)
+    src = Mt5Source(Mt5Profile("puprime_live", 7, "PUPrime-Demo", send_orders=True))
+    src.connect()
+    mt5.at = 114285263
+    src._require()                                                       # vuelve a la suya antes de leer nada
+    assert mt5.at == 7
+    mt5.at, mt5.can_login = 114285263, False
+    with pytest.raises(TradeError, match="otro broker"):
+        src._require()

@@ -141,7 +141,10 @@ class Mt5Source:
 
     def account(self) -> AccountSnapshot | None:
         with self._lock:
-            mt5 = self._require()
+            try:
+                mt5 = self._require()
+            except TradeError:                          # en otra cuenta y sin poder volver: no hay lectura de la suya
+                return None
             info = self._own_account(mt5) if self.profile.send_orders else mt5.account_info()
             if info is None:
                 return None
@@ -439,6 +442,15 @@ class Mt5Source:
     def _require(self):
         if self._mt5 is None:
             raise Mt5Error("No hay conexión con MT5.")
+        if self.profile.send_orders:                    # perfil que opera de verdad: velas, precios y cuenta, solo de la suya
+            mt5, p = self._mt5, self.profile
+            info = mt5.account_info()
+            if info is not None and info.login != p.login:
+                logged = (mt5.login(p.login, password=p.password, server=p.server) if p.password
+                          else mt5.login(p.login, server=p.server))
+                if not logged or getattr(mt5.account_info(), "login", None) != p.login:
+                    raise TradeError(f"El terminal está en la cuenta {info.login} y no se pudo volver a la {p.login} del perfil "
+                                   f"'{p.name}': sin datos hasta que vuelva (no se leen velas de otro broker).")
         return self._mt5
 
     @staticmethod
