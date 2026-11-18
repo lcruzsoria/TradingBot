@@ -10,10 +10,8 @@ Reglas (velas de `BARRIDO_CONTINUACION_TF`, M5 al inicio; todo debe ocurrir entr
    (la vela debe abrir antes de `BARRIDO_CONTINUACION_END`). La primera vela que cierra fuera decide: si aún no se ha tocado el 50 %, no hay setup hoy.
    El toque de la propia vela que rompe no cuenta.
 4. Entrada: a mercado al cierre de esa vela, a favor de la rotura (sobre el High: largo; bajo el Low: corto).
-5. Stop por encima del máximo (corto) o por debajo del mínimo (largo) de las velas que van desde la que toca el 50 % hasta la anterior a la
-   rotura (el retroceso desde el que el precio sigue a favor), más `BARRIDO_CONTINUACION_STOP_BUFFER` (0) puntos; si queda a menos de
-   `BARRIDO_CONTINUACION_STOP_POINTS` (40) puntos de la entrada, se usa ese stop fijo. Objetivo a `BARRIDO_CONTINUACION_RR` (2) veces el riesgo.
-   Sin breakeven (en el backtest lo empeora). Si no hay rotura antes de las 11:00, el setup queda anulado. Cierre por tiempo al final del día de trading.
+5. Stop fijo a `BARRIDO_CONTINUACION_STOP_POINTS` (40) puntos de la entrada y objetivo a `BARRIDO_CONTINUACION_RR` (2) R. Sin breakeven
+   (en el backtest lo empeora). Si no hay rotura antes de las 11:00, el setup queda anulado. Cierre por tiempo al final del día de trading.
 
 Solo los mercados de `BARRIDO_CONTINUACION_MARKETS` (NAS100 al inicio: es el único con el stop validado).
 """
@@ -35,7 +33,6 @@ DEFAULT_TF = "5m"
 DEFAULT_START = "10:00"
 DEFAULT_END = "11:00"
 DEFAULT_STOP_POINTS = 40.0
-DEFAULT_STOP_BUFFER = 0.0
 DEFAULT_RR = 2.0
 DEFAULT_MARKETS = "NAS100"
 PREFIX = "BARRIDO_CONTINUACION"
@@ -55,7 +52,6 @@ class Ajustes:
     start: int = minutos(DEFAULT_START, "START")
     end: int = minutos(DEFAULT_END, "END")
     stop_points: float = DEFAULT_STOP_POINTS
-    stop_buffer: float = DEFAULT_STOP_BUFFER
     rr: float = DEFAULT_RR
     markets: tuple = (DEFAULT_MARKETS,)
     stop_mercado: tuple = ()
@@ -67,20 +63,19 @@ class Ajustes:
         parse_timeframe(tf)
         try:
             points, rr = float(get("STOP_POINTS", DEFAULT_STOP_POINTS)), float(get("RR", DEFAULT_RR))
-            buffer = float(get("STOP_BUFFER", DEFAULT_STOP_BUFFER))
         except ValueError:
-            raise ValueError(f"{PREFIX}_STOP_POINTS, {PREFIX}_STOP_BUFFER y {PREFIX}_RR deben ser números.") from None
-        if points <= 0 or rr <= 0 or buffer < 0:
-            raise ValueError(f"{PREFIX}_STOP_POINTS y {PREFIX}_RR deben ser mayores que 0 y {PREFIX}_STOP_BUFFER no puede ser negativo.")
+            raise ValueError(f"{PREFIX}_STOP_POINTS y {PREFIX}_RR deben ser números.") from None
+        if points <= 0 or rr <= 0:
+            raise ValueError(f"{PREFIX}_STOP_POINTS y {PREFIX}_RR deben ser mayores que 0.")
         markets = tuple(m.strip().upper() for m in str(get("MARKETS", DEFAULT_MARKETS)).split(",") if m.strip())
-        a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"), points, buffer, rr, markets,
-                stops.leer(settings, PREFIX, points, buffer))
+        a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"), points, rr, markets,
+                stops.leer(settings, PREFIX, points, 0.0))
         if a.end <= a.start:
             raise ValueError(f"{PREFIX}_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         return a
 
     def stop_de(self, symbol: str) -> tuple[float, float]:
-        return stops.de(self.stop_mercado, symbol, self.stop_points, self.stop_buffer)
+        return stops.de(self.stop_mercado, symbol, self.stop_points, 0.0)
 
     def admite(self, symbol: str) -> bool:
         name = symbol.strip().upper()
@@ -96,30 +91,26 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     first = int(np.searchsorted(ctx.ts, max(midnight + a.start * 60, rth.close_ts), "left"))
     last = min(ctx.last_bar, int(np.searchsorted(ctx.ts, midnight + a.end * 60, "left")) - 1)
     mid = (rth.high + rth.low) / 2
-    touched = None                                                            # primera vela que toca el 50 %
+    touched = False
     for i in range(first, last + 1):
         if ctx.close[i] > rth.high or ctx.close[i] < rth.low:
-            if touched is None:
+            if not touched:
                 return [], []                                                 # rompe sin haber tocado el 50 %: sin setup
             up = bool(ctx.close[i] > rth.high)
             direction, side = ("long", "High") if up else ("short", "Low")
             close = float(ctx.close[i])
             sign = 1.0 if up else -1.0
-            puntos, buffer = a.stop_de(ctx.symbol)
-            swing = float(ctx.low[touched:i].min() if up else ctx.high[touched:i].max())   # el retroceso: del toque a la vela anterior a la rotura
-            riesgo = max(puntos, sign * (close - swing) + buffer)
-            stop, target = close - sign * riesgo, close + sign * riesgo * a.rr
-            donde = (f"fijo a {puntos:g} puntos" if riesgo == puntos else
-                     f"{'bajo el mínimo' if up else 'sobre el máximo'} del retroceso ({swing:.5g}{f' + {buffer:g}' if buffer else ''}), a {riesgo:.5g} puntos")
+            puntos, _ = a.stop_de(ctx.symbol)
+            stop, target = close - sign * puntos, close + sign * puntos * a.rr
             detail = (f"el precio toca el 50 % del RTH ({mid:.5g}) y a las {hora_ny(ctx, i)} una vela cierra fuera del {side} del RTH "
-                      f"({rth.high if up else rth.low:.5g}) en {close:.5g}. Entrada a mercado a ese cierre, a favor de la rotura, stop {donde} "
-                      f"({stop:.5g}) y objetivo a {a.rr:g} R ({target:.5g}). Sin breakeven")
+                      f"({rth.high if up else rth.low:.5g}) en {close:.5g}. Entrada a mercado a ese cierre, a favor de la rotura, stop fijo a "
+                      f"{puntos:g} puntos ({stop:.5g}) y objetivo a {a.rr:g} R ({target:.5g}). Sin breakeven")
             ts_hit = int(ctx.ts[i]) + ctx.tf_minutes * 60
             figures = []
             if i + 1 < len(ctx.ts):
                 fig = _rth._figura_posicion(ctx, direction, i + 1, close, stop, target, f"Continuación {'▲' if up else '▼'}", None, KEY)
                 figures = [replace(fig, levels={**fig.levels, "entrada_ts": float(ctx.ts[i])})]
             return [PatternHit(KEY, TITLE, direction, int(i), close, detail, {"stop": stop, "target": target}, ts_hit, DETECTED)], figures
-        if touched is None and ctx.low[i] <= mid <= ctx.high[i]:
-            touched = i
+        if ctx.low[i] <= mid <= ctx.high[i]:
+            touched = True
     return [], []
