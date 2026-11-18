@@ -26,25 +26,38 @@ class TelegramError(RuntimeError):
     pass
 
 
+CONNECT_TIMEOUT = 2.0      # por dirección: una que no contesta en 2 s no va a contestar (se pasa a la siguiente)
+_last_good: dict[str, tuple] = {}     # host -> última dirección que conectó: se prueba la primera
+
+
 class _Ipv6FirstConnection(http.client.HTTPSConnection):
-    """Conexión HTTPS que prueba antes las direcciones IPv6: desde esta red la ruta IPv4 de Telegram tarda segundos (a veces
-    agota el handshake) y las respuestas a los comandos llegaban con mucho retraso. Si IPv6 falla, cae a IPv4."""
+    """Conexión HTTPS que prueba antes la última dirección que funcionó y, si no hay, las IPv6: desde esta red la ruta IPv4
+    de Telegram llegó a tardar segundos. Cada dirección tiene CONNECT_TIMEOUT para conectar: a veces una se queda colgada
+    (1 de cada 8 conexiones esperaba los 10 s enteros antes de probar la otra) y los comandos tardaban en contestar."""
 
     def connect(self) -> None:
         infos = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM)
-        infos.sort(key=lambda info: info[0] != socket.AF_INET6)
+        good = _last_good.get(self.host)
+        infos.sort(key=lambda info: (info[4] != good, info[0] != socket.AF_INET6))
         error: OSError | None = None
-        for family, kind, proto, _name, address in infos:
-            sock = socket.socket(family, kind, proto)
-            sock.settimeout(self.timeout)
-            try:
-                sock.connect(address)
-            except OSError as exc:
-                sock.close()
-                error = exc
-                continue
-            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
-            return
+        for attempt in (min(CONNECT_TIMEOUT, self.timeout or CONNECT_TIMEOUT), self.timeout):   # rápido y, si todas fallan, con calma
+            for family, kind, proto, _name, address in infos:
+                sock = socket.socket(family, kind, proto)
+                sock.settimeout(attempt)
+                try:
+                    sock.connect(address)
+                    tls = self._context.wrap_socket(sock, server_hostname=self.host)    # el saludo TLS, con el mismo plazo
+                    tls.settimeout(self.timeout)
+                    self.sock = tls
+                except OSError as exc:
+                    sock.close()
+                    error = exc
+                    continue
+                _last_good[self.host] = address
+                return
+            if attempt == self.timeout:
+                break
+        _last_good.pop(self.host, None)
         raise error or OSError(f"sin dirección para {self.host}")
 
 
