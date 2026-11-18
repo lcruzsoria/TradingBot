@@ -35,7 +35,7 @@ class SetupSkill(Skill):
                    "data/perfiles/<perfil>/: se pueden consultar y siguen ahí al reiniciar el bot.")
     subscribes = ("setup.order", "setup.candles", "feed.connected", "clock.offset")
     publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated", "setup.skipped",
-                 "setup.challenge")
+                 "setup.challenge", "setup.trading")
     slot = "aux4"
     interval = CONSOLIDATE_CHECK_SECONDS
 
@@ -77,6 +77,8 @@ class SetupSkill(Skill):
         self.live = bool(app.get("send_orders"))       # MT5_<PERFIL>_SEND_ORDERS: opera de verdad en la cuenta (demo)
         self._real: tuple[float, str] | None = None    # último saldo real de la cuenta (perfiles que operan de verdad)
         self.since = live.since(self.services.app_cfg) if self.live else None   # desde cuándo opera de verdad (UTC)
+        self._trade_block: str | None = None            # por qué MT5 rechazaría ahora las órdenes (None: las acepta)
+        self._trade_checked = False
         self._candles: dict[str, tuple] = {}            # últimas velas de cada mercado con posición real (máximo y mínimo en R)
         self.challenge = None                           # challenge simulado sobre la cuenta real (SETUP_CHALLENGE_*)
         target = self.settings.get("CHALLENGE_TARGET_PCT", "") or ",".join(map(str, challenge.DEFAULT_TARGET_PCT))
@@ -101,6 +103,7 @@ class SetupSkill(Skill):
         if event.topic == "feed.connected":
             self._start_account()
             if self.live:
+                self._check_trading()
                 self._check_challenge()
                 self._publish_account()
             return
@@ -252,9 +255,29 @@ class SetupSkill(Skill):
     def tick(self) -> None:
         self._consolidate()
         if self.live:                                   # cierres en MT5 y el saldo real, que cambia con cada uno
+            self._check_trading()
             self._sync_real()
             self._check_challenge()
             self._publish_account()
+
+    def _check_trading(self) -> None:
+        """Si MT5 aceptaría ahora las órdenes del bot (Algo Trading activado...). Avisa (setup.trading: Registro y Telegram)
+        al detectar que no, y otra vez cuando vuelve a aceptarlas; mientras tanto las señales se quedan sin enviar."""
+        check = getattr(self.services.source, "trading_block", None)
+        if check is None:
+            return
+        try:
+            block = check()
+        except Exception:  # noqa: BLE001 - sin conexión: en la próxima vuelta
+            return
+        if block == self._trade_block:
+            return
+        first, self._trade_block = self._trade_block is None and not self._trade_checked, block
+        self._trade_checked = True
+        if block is None and first:                     # al arrancar con todo bien no hace falta avisar
+            return
+        self.set_caption("MT5 no acepta órdenes" if block else "MT5 vuelve a aceptar órdenes")
+        self.publish("setup.trading", {"blocked": block})
 
     def _check_challenge(self) -> None:
         """Challenge simulado: al llegar al objetivo cierra lo abierto y congela la cuenta hasta las 00:00 (entonces empieza la

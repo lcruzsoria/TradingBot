@@ -166,6 +166,16 @@ def test_solo_opera_en_cuentas_demo(fake):
     assert mt5.sent == []
 
 
+def test_con_algo_trading_apagado_no_envia_y_lo_dice(fake):
+    mt5, src = fake()
+    assert src.trading_block() is None
+    mt5.terminal_info = lambda: types.SimpleNamespace(trade_allowed=False, tradeapi_disabled=False)
+    assert "Algo Trading" in src.trading_block()
+    with pytest.raises(TradeError, match="Algo Trading"):
+        src.open_market("NAS100", "long", 500.0, 95.0, 110.0)
+    assert mt5.sent == []
+
+
 def test_mueve_el_stop_y_cierra(fake):
     mt5, src = fake()
     src.open_market("NAS100", "long", 500.0, 95.0, 110.0)
@@ -272,6 +282,29 @@ def test_si_mt5_no_la_acepta_no_cuenta(tmp_path):
     setup = manager.skills["setup"]
     manager.stop()
     assert got["executed"] == [] and got["skipped"][0].payload["note"] == "mercado cerrado" and setup.positions == []
+
+
+def test_setup_avisa_cuando_mt5_deja_de_aceptar_ordenes_y_cuando_vuelve(tmp_path):
+    from tradingbot.skills.telegram import messages
+    source = FakeSource()
+    state = {"block": None}
+    source.trading_block = lambda: state["block"]
+    manager, bus, got = run_live(source, tmp_path)
+    events = []
+    bus.subscribe("t", "setup.trading", events.append)
+    wait(got["account"])                                                            # Setup ya ha arrancado
+    setup = manager.skills["setup"]
+    setup.tick()                                                                  # todo bien al arrancar: sin aviso
+    state["block"] = "Algo Trading está desactivado"
+    setup.tick()
+    setup.tick()                                                                    # sigue igual: un solo aviso
+    state["block"] = None
+    setup.tick()
+    wait(events, 2)
+    manager.stop()
+    assert [e.payload["blocked"] for e in events] == ["Algo Trading está desactivado", None]
+    assert "no acepta" in messages.trading(events[0].payload, "puprime_live")
+    assert "vuelve a aceptar" in messages.trading(events[1].payload, "puprime_live")
 
 
 def test_breakeven_en_mt5_y_el_cierre_es_el_de_la_cuenta(tmp_path):

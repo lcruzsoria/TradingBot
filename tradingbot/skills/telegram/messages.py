@@ -94,6 +94,14 @@ def decision(payload: dict, profile: str | None = None) -> str:
             f"{_e(payload['timeframe'])}\n{zone}{_e(dec.reason)}{_footer(profile)}")
 
 
+def trading(p: dict, profile: str | None = None) -> str:
+    """Operativa real: MT5 deja de aceptar las órdenes del bot (Algo Trading apagado...) o vuelve a aceptarlas."""
+    if p.get("blocked"):
+        return (f"⛔ <b>MT5 no acepta las órdenes del bot</b>\n{_e(p['blocked'])}.\n"
+                f"Las señales no se envían hasta que se corrija.{_footer(profile)}")
+    return f"✅ <b>MT5 vuelve a aceptar las órdenes del bot</b>{_footer(profile)}"
+
+
 def challenge(p: dict, profile: str | None = None) -> str:
     """Aviso del challenge simulado: inicio, paso de fase, superado o suspendido por drawdown."""
     cur = f" {_e(p.get('currency') or '')}" if p.get("currency") else ""

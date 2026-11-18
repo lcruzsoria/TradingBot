@@ -369,6 +369,27 @@ class Mt5Source:
             return round(sum(float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
                              for d in deals), 2)
 
+    def trading_block(self) -> str | None:
+        """Por qué el terminal rechazaría ahora las órdenes del bot (Algo Trading apagado, la API de trading desactivada o la
+        cuenta sin permiso para bots), o None si las acepta. No envía nada."""
+        with self._lock:
+            mt5 = self._require()
+            return self._block(mt5)
+
+    @staticmethod
+    def _block(mt5) -> str | None:
+        term = mt5.terminal_info() if hasattr(mt5, "terminal_info") else None
+        info = mt5.account_info()
+        if term is not None and not getattr(term, "trade_allowed", True):
+            return ("Algo Trading está desactivado en el terminal de MT5: rechaza todas las órdenes del bot. Actívalo con el "
+                    "botón «Algo Trading» de la barra de herramientas (en verde)")
+        if term is not None and getattr(term, "tradeapi_disabled", False):
+            return ("el terminal de MT5 tiene desactivado el trading por API (Herramientas > Opciones > Asesores Expertos): "
+                    "rechaza todas las órdenes del bot")
+        if info is not None and not (getattr(info, "trade_allowed", True) and getattr(info, "trade_expert", True)):
+            return f"la cuenta {info.login} no permite operar con bots (trade_allowed/trade_expert del broker)"
+        return None
+
     def _trading(self):
         """La conexión, si en ella se puede operar: solo en cuentas demo (es lo que permite MT5_<PERFIL>_SEND_ORDERS)."""
         mt5 = self._require()
@@ -382,6 +403,8 @@ class Mt5Source:
                 raise TradeError(f"el terminal está en la cuenta {other}, no en la {self.profile.login} del perfil, y no se pudo volver a ella")
         if info.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
             raise TradeError(f"la cuenta {info.login} NO es demo: el bot solo envía órdenes a cuentas demo")
+        if (block := self._block(mt5)) is not None:
+            raise TradeError(block)
         return mt5
 
     @staticmethod

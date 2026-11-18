@@ -56,7 +56,7 @@ class TelegramSkill(Skill):
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
                   "telegram.capture", "clock.offset", "crt.pending", "crt.blocked", "enigma369.updated",
-                  "setup.challenge")
+                  "setup.challenge", "setup.trading")
     publishes = ("telegram.capture.request",)
     slot = "aux1"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
@@ -389,6 +389,8 @@ class TelegramSkill(Skill):
                 self._send(messages.blocked(p, self.profile))
         elif topic == "setup.challenge" and self.telegram:          # challenge simulado: siempre se avisa
             self._send(messages.challenge(p, self.profile))
+        elif topic == "setup.trading" and self.telegram:            # MT5 deja de aceptar órdenes (o vuelve): siempre se avisa
+            self._send(messages.trading(p, self.profile))
         elif topic == "setup.executed" and self.telegram:
             order = p["order"]
             if self._live(order.symbol, order.entry_ts):
