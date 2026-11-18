@@ -442,6 +442,24 @@ def test_barrido_continuacion_toca_el_50_y_entra_a_favor_de_la_rotura_con_stop_4
         Ajustes.desde(EnvConfig(parse("RR=0\n")))
 
 
+def test_barrido_continuacion_stop_sobre_el_extremo_del_retroceso_si_queda_mas_lejos_que_el_fijo():
+    """Caso del 17/11/2026: la vela que toca el 50 % sube hasta 27.279 y la siguiente cierra bajo el RTH en 27.118,55. El stop va sobre ese
+    máximo (160 puntos), no a 40 puntos (27.158,55), que la vela de las 10:10 tocó antes de que el precio siguiera cayendo."""
+    from tradingbot.skills.barrido.continuacion import Ajustes, analizar
+    rth = (27347.05, 27144.05)
+    velas = [(27190.55, 27262.30, 27147.30, 27257.75), (27259.50, 27279.00, 27167.55, 27197.05), (27196.80, 27213.05, 27110.80, 27118.55)]
+    hits, _ = analizar(_barrido_ctx(velas, rth=rth))
+    assert [(h.direction, h.price) for h in hits] == [("short", 27118.55)]
+    assert hits[0].levels["stop"] == 27279.0 and hits[0].levels["target"] == pytest.approx(27118.55 - 2 * 160.45)
+    assert "sobre el máximo del retroceso" in hits[0].detail
+    con_buffer = Ajustes.desde(EnvConfig(parse("STOP_BUFFER=5\n")))
+    assert analizar(_barrido_ctx(velas, rth=rth), con_buffer)[0][0].levels["stop"] == 27284.0
+    # varias velas entre el toque y la rotura: cuenta el máximo de todas (el retroceso entero); el de antes del toque, no
+    velas = [(27190.55, 27300.00, 27147.30, 27257.75), (27259.50, 27250.00, 27167.55, 27200.00), (27200.00, 27260.00, 27170.00, 27180.00),
+             (27180.00, 27190.00, 27110.80, 27118.55)]
+    assert analizar(_barrido_ctx(velas, rth=rth))[0][0].levels["stop"] == 27260.0
+
+
 def test_barrido_rth_casos_sin_setup():
     from tradingbot.skills.barrido.rth import analizar
     solo_mechas = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0]
