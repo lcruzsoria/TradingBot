@@ -48,7 +48,7 @@ SPREAD_BP = {"indices": 1.5, "forex": 0.7}
 MTF_BIT = {15: 1, 5: 2}                                                                 # columna t: TF del FVG normal
 ZONES = ("Asia", "London", "NY Open", "Fuera de TBR")
 _ENV = envconfig.load()
-TBR_ZONES = zones_from_settings(_ENV.section("TBR"), overrides=_ENV.section("CRT_TBR"))                  # las TBR de tradingbot.env; CRT puede tener otro horario (CRT_TBR_NY_AM_HOURS...)
+TBR_ZONES = zones_from_settings(_ENV.section("TBR"), overrides=_ENV.section("CRT_TBR"))                  # las TBR de tradingbot.env
 TBR_HOURS = tuple((z.name, z.start, z.minutes) for z in TBR_ZONES)                                      # nombre, inicio (min NY) y duración
 OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
 OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "BE": "breakeven", "sesión": "tiempo", "fin de datos": "tiempo"}

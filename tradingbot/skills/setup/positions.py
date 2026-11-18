@@ -48,6 +48,8 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
         return None
     sign = 1.0 if long else -1.0
     be_ts = None
+    solo_tiempo = bool(getattr(order, "solo_tiempo", False))     # sin objetivo (Barrido PDH/PDL): solo stop o cierre por tiempo
+    be_price = getattr(order, "be_price", None)       # breakeven por precio (Barrido RTH): al tocarlo el stop pasa a la entrada, además del de +be_r R
 
     def done(result: str, price: float, i: int) -> Closed:
         move = sign * (price - entry)
@@ -71,13 +73,14 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
             return done("tiempo", float(close[last]), last) if last is not None else None
         current = entry if be_ts is not None else stop
         hit_stop = low[i] <= current if long else high[i] >= current
-        hit_target = high[i] >= target if long else low[i] <= target
+        hit_target = not solo_tiempo and (high[i] >= target if long else low[i] <= target)
         if hit_stop:
             return done("breakeven" if be_ts is not None else "stop", current, i)
         if hit_target:
             return done("objetivo", target, i)
-        if be_r is not None and be_ts is None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r:
-            be_ts = int(ts[i])          # el precio tocó +be_r R: el stop pasa a la entrada desde la vela siguiente
+        if be_ts is None and ((be_r is not None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r)
+                              or (be_price is not None and i > start and (high[i] >= be_price if long else low[i] <= be_price))):      # la vela de entrada es anterior a la entrada: su extremo no cuenta como toque
+            be_ts = int(ts[i])          # el precio tocó +be_r R (o el precio de breakeven de la orden): el stop pasa a la entrada desde la vela siguiente
         last = i
     if last is not None and now is not None and bar and now - (ts[last] + bar) > MARKET_CLOSED_SECONDS:
         return done("tiempo", float(close[last]), last)            # el mercado está cerrado ahora: se cierra con su última vela

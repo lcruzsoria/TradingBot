@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
+from dataclasses import replace
 from datetime import date
 
 from tradingbot.envconfig import EnvConfig, parse
@@ -34,7 +35,7 @@ def test_sin_sesgo_o_en_lateral_no_se_opera_salvo_que_se_permita():
     assert not validate("long", None).allowed and "aún no está calculado" in validate("long", None).reason
 
 
-def run_skills(env_text="", with_setup=True):
+def run_skills(env_text="", with_setup=True, app=None):
     from tradingbot.core import EventBus, Services, SkillManager
     import tradingbot.skills  # noqa: F401
     bus, decisions, orders, executed = EventBus(), [], [], []
@@ -42,7 +43,7 @@ def run_skills(env_text="", with_setup=True):
     bus.subscribe("t", "setup.order", orders.append)
     bus.subscribe("t", "setup.executed", executed.append)
     skills = [{"type": "cortex"}] + ([{"type": "setup"}] if with_setup else [])
-    manager = SkillManager(bus, Services(None, None, {"app": {}}, EnvConfig(parse(env_text))), skills)
+    manager = SkillManager(bus, Services(None, None, {"app": app or {}}, EnvConfig(parse(env_text))), skills)
     manager.start()
     return manager, bus, decisions, orders, executed
 
@@ -295,3 +296,46 @@ def test_un_setup_invalidado_con_fibo_es_no_go_con_etiqueta_i():
     d = decisions[0].payload["decision"]
     assert not d.allowed and d.reason.startswith("I:")
     assert short_reason(d.reason) == "I" and reason_of(d.reason) == "I · invalidado"
+
+
+def test_en_barrido_nyam_una_orden_vencida_por_tiempo_no_bloquea_aunque_no_haya_velas_para_verlo():
+    """Los patrones pasados se anuncian de golpe al arrancar: una orden antigua sin velas cargadas no debe bloquear todas las siguientes."""
+    manager, bus, decisions, orders, executed = run_skills(app={"strategy": "barrido_nyam"})
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    first = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+    event = {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": first}
+    bus.publish("pattern.detected", event, source="pattern")
+    wait(orders)
+    later = PatternHit("q", "Otro patrón", "long", 20, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_000_000 + 25 * 3600)
+    bus.publish("pattern.detected", {**event, "tbr": replace(TBR, day=date(2026, 10, 7)), "hit": later}, source="pattern")   # otro día: otra sesión
+    wait(orders, 2)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, True] and len(orders) == 2
+
+
+def test_en_barrido_nyam_el_sesgo_no_desactiva_entradas():
+    """Barrido_NYAM no usa el sesgo para decidir: un corto con sesgo alcista, o sin sesgo, es GO (el sesgo solo se muestra)."""
+    manager, bus, decisions, orders, executed = run_skills(with_setup=False, app={"strategy": "barrido_nyam"})
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    bus.publish("pattern.detected", pattern_event(direction="short"), source="pattern")
+    wait(orders)
+    manager.stop()
+    assert decisions[0].payload["decision"].allowed and "no depende del sesgo" in decisions[0].payload["decision"].reason
+    assert len(orders) == 1
+
+
+def test_en_otros_perfiles_la_orden_sin_velas_sigue_bloqueando_como_antes():
+    """El cambio de la orden vencida es solo de Barrido_NYAM: el resto de perfiles se comporta como siempre."""
+    manager, bus, decisions, orders, executed = run_skills()
+    bus.publish("candles.loaded", {"symbol": "EURUSD", "timeframe": "15m", "df": None}, source="feed")
+    bus.publish("bias.updated", {"result": bias(Bias.BULLISH), "symbol": "EURUSD", "timeframe": "15m"}, source="bias")
+    first = PatternHit("p", "Patrón de prueba", "long", 13, 105.0, "detalle", {"stop": 95.0, "target": 115.0}, 1_000_000)
+    event = {"symbol": "EURUSD", "timeframe": "15m", "tbr": TBR, "hit": first}
+    bus.publish("pattern.detected", event, source="pattern")
+    wait(orders)
+    later = PatternHit("q", "Otro patrón", "long", 20, 105.0, "d", {"stop": 95.0, "target": 115.0}, 1_000_000 + 25 * 3600)
+    bus.publish("pattern.detected", {**event, "tbr": replace(TBR, day=date(2026, 10, 7)), "hit": later}, source="pattern")
+    time.sleep(0.4)
+    manager.stop()
+    assert [d.payload["decision"].allowed for d in decisions] == [True, False]

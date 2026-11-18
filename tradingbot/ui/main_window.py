@@ -20,6 +20,7 @@ from ..core import Event, EventBus, SkillManager
 from ..skills.feed.datasource import AccountSnapshot
 from ..skills.levels.skill import GAP_STRATEGIES
 from ..skills.levels.daylevels import DEFAULT_COLORS, DEFAULT_SMA_SHOW, SMA_SHOWS
+from ..config import BARRIDO_STRATEGIES
 from ..timeframes import DEFAULT_TIMEFRAME, TIMEFRAMES, display_label, minutes, selector_timeframes
 from . import theme
 from .icons import gear_icon
@@ -353,7 +354,7 @@ class MainWindow(QMainWindow):
         self._sma_cfg = (30, "#00ACC1", "normal", show if show in SMA_SHOWS else DEFAULT_SMA_SHOW,
                          DEFAULT_COLORS["VWAP"], "normal")        # (periodos, color, trazo, qué mostrar, color y trazo del VWAP)
         # Fibonacci de los patrones (0, 0,5 y 1 del tramo): lo dibuja la skill Pattern
-        pattern_skill = self.manager.skills.get("pattern")
+        pattern_skill = self.manager.skills.get("pattern") or self.manager.skills.get("barrido")
         self.fibo_btn = QPushButton("Fibo")
         self.fibo_btn.setProperty("chip", "true")
         self.fibo_btn.setCheckable(True)
@@ -378,6 +379,12 @@ class MainWindow(QMainWindow):
                                 "objetivo, zona roja hasta el stop, con el R:R.")
         self.pos_btn.setVisible(pattern_skill is not None or self.strategy == "calendario")
         self.pos_btn.setChecked(pattern_skill is None or pattern_skill.settings.get_bool("SHOW_POSITIONS", True))
+        self.gaps_profile = app_cfg["app"].get("strategy") in BARRIDO_STRATEGIES     # perfiles Barrido: TBR y Entradas siempre a la vista, sin Fibo
+        if self.gaps_profile:
+            self.fibo_btn.setChecked(False)
+            self.fibo_btn.setVisible(False)                     # sus entradas no son fibos
+            self.tbr_btn.setChecked(self.manager.skills.get("tbr") is not None)
+            self.pos_btn.setChecked(pattern_skill is not None)
         self._fibs: list = []                                   # fibonacci vigentes del activo del gráfico (Figure)
         self._positions: list = []                              # posiciones (entrada, stop y objetivo) de los patrones (Figure)
         self._decisions: dict = {}                              # (mercado, TBR, día, lado) -> GO / NO GO de Cortex y motivo corto
@@ -423,7 +430,7 @@ class MainWindow(QMainWindow):
             grid.addWidget(btn, i // 2, i % 2 + 1)
         grid.addWidget(self.hist_btn, 1, 0)                  # bajo SMA
         grid.addWidget(self.fibo_btn, 0, 3)
-        grid.addWidget(self.pos_btn, 1, 3)
+        grid.addWidget(self.pos_btn, 0 if self.gaps_profile else 1, 3)     # sin Fibo, Entradas sube a su sitio
         sma_cell = QWidget()
         sma_row = QHBoxLayout(sma_cell)
         sma_row.setContentsMargins(0, 0, 0, 0)
@@ -1372,7 +1379,8 @@ class MainWindow(QMainWindow):
             x0 = int(np.searchsorted(ts, f.x0_ts, "left"))
             decision, reason = self._entry_decision(x0, f.direction)
             positions.append({"x0": x0, "x1": min(int(np.searchsorted(ts, f.x1_ts, "left")), n + 4),
-                              "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"],
+                              "entry": f.levels["entrada"], "stop": f.levels["stop"], "target": f.levels["objetivo"], "target2": f.levels.get("objetivo2"),
+                              "entry_x": (int(np.searchsorted(ts, int(f.levels["entrada_ts"]), "left")) if f.levels.get("entrada_ts") else None),
                               "direction": f.direction, "state": f.state, "label": f.label, "decision": decision,
                               "reason": reason, "session": (f.zone, f.day)})
         busy_until = -1                                         # una sola posición abierta: las que llegan antes de que cierre no entran

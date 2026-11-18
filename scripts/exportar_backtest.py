@@ -220,12 +220,12 @@ def main() -> None:
                               "notas_mercado": {r["mercado"]: r["nota"] for r in bot if r.get("nota")}}
     if not out["grupos"]:
         raise SystemExit(f"No hay backtests en {args.analisis}: ejecuta antes scripts/backtest_patrones.py")
-    if args.salida.exists():                                           # los grupos CRT y Enigma369 no salen de analisis/*.xlsx: se conservan
+    if args.salida.exists():                                           # los grupos CRT, Enigma369 y Barrido_NYAM no salen de analisis/*.xlsx: se conservan
         kept = [g for g in json.loads(gzip.decompress(args.salida.read_bytes()).decode("utf-8")).get("grupos", [])
-                if g.get("perfil") in ("crt", "enigma369")]            # (se regeneran con scripts/exportar_backtest_crt.py y _enigma369.py)
+                if g.get("perfil") in ("crt", "enigma369", "barrido_nyam")]   # (se regeneran con exportar_backtest_crt.py, _enigma369.py y _barrido.py)
         out["grupos"].extend(kept)
         if kept:
-            print(f"  conservados {len(kept)} grupos CRT / Enigma369 del fichero actual")
+            print(f"  conservados {len(kept)} grupos CRT / Enigma369 / Barrido del fichero actual")
     args.salida.parent.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     args.salida.write_bytes(gzip.compress(raw, 9, mtime=0))

@@ -29,9 +29,18 @@ class TbrSkill(Skill):
         self.error = ""
         self.set_caption(f"{len(self.zones)} zonas")
 
+    @property
+    def strategy(self) -> str:
+        """Estrategia del perfil (vacía en los perfiles normales)."""
+        cfg = self.services.app_cfg
+        return (cfg["app"].get("strategy") or "") if cfg else ""
+
     def _load_settings(self) -> None:
         # tradingbot.env, bloque TBR
-        self.zones = zones_from_settings(self.settings)
+        env = self.services.env
+        own = env.section(f"{self.strategy}_TBR") if env is not None and self.strategy else None   # <ESTRATEGIA>_TBR_ZONES / _<CLAVE>_HOURS: solo ese perfil
+        keys = own.get_list("ZONES", []) if own is not None else []
+        self.zones = zones_from_settings(self.settings, keys or None, own)
         self.days = self.settings.get_int("DAYS", DEFAULT_DAYS)
         self.max_tf = self.settings.get_int("MAX_TF_MINUTES", DEFAULT_MAX_TF_MINUTES)
         opacity = self.settings.get_float("OPACITY", DEFAULT_OPACITY)

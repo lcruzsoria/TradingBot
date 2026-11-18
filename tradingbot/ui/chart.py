@@ -787,13 +787,16 @@ class ChartView(pg.PlotWidget):
             fill = QColor(s.zone.color)
             fill.setAlphaF(self._tbr_opacity)
             # caja de la zona: de su inicio a su final y de su Low a su High
-            box = QGraphicsRectItem(QRectF(s.x0, s.low, s.x1 - s.x0, max(s.high - s.low, 1e-9)))
-            box.setBrush(fill)
-            box.setPen(QPen(Qt.PenStyle.NoPen))
-            box.setZValue(-10)                          # detrás de las velas
-            pi.addItem(box, ignoreBounds=True)
-            self._tbr_items.append(box)
+            if s.zone.box:
+                box = QGraphicsRectItem(QRectF(s.x0, s.low, s.x1 - s.x0, max(s.high - s.low, 1e-9)))
+                box.setBrush(fill)
+                box.setPen(QPen(Qt.PenStyle.NoPen))
+                box.setZValue(-10)                      # detrás de las velas
+                pi.addItem(box, ignoreBounds=True)
+                self._tbr_items.append(box)
             for level in s.levels:
+                if level.kind == "mid" and not s.zone.mid:
+                    continue
                 xs, ys = lines.setdefault((s.zone.color, level.kind), ([], []))
                 xs += [level.x0, level.x1]
                 ys += [level.price, level.price]
@@ -929,10 +932,29 @@ class ChartView(pg.PlotWidget):
                 frame.setZValue(-4)
                 pi.addItem(frame, ignoreBounds=True)
                 self._pos_items.append(frame)
-            line = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([entry, entry]), pen=pg.mkPen(theme.MUTED, width=1.2))
+            ex = pos.get("entry_x")                                  # vela cuyo cierre es la entrada (Barrido_NYAM): se marca con un punto
+            line = pg.PlotCurveItem(x=np.array([x0 if ex is None else min(float(ex), x0), x1]), y=np.array([entry, entry]),
+                                    pen=pg.mkPen(theme.MUTED, width=1.2))
             line.setZValue(-5)
             pi.addItem(line, ignoreBounds=True)
             self._pos_items.append(line)
+            if ex is not None:
+                side = "#26A69A" if pos["direction"] == "long" else "#EF5350"
+                dot = pg.ScatterPlotItem(x=[float(ex)], y=[entry], symbol="o", size=9, pen=pg.mkPen("#FFFFFF", width=1.5),
+                                         brush=pg.mkBrush(side))
+                dot.setZValue(6)
+                pi.addItem(dot, ignoreBounds=True)
+                self._pos_items.append(dot)
+            if pos.get("target2") is not None:                      # segundo objetivo (Barrido_NYAM): línea discontinua con su etiqueta
+                t2 = float(pos["target2"])
+                tp2 = pg.PlotCurveItem(x=np.array([x0, x1]), y=np.array([t2, t2]),
+                                       pen=pg.mkPen("#26A69A", width=1.2, style=Qt.PenStyle.DashLine))
+                tp2.setZValue(-5)
+                pi.addItem(tp2, ignoreBounds=True)
+                tag = pg.TextItem("TP2", color="#26A69A", anchor=(0, 0.5))
+                tag.setPos(x1, t2)
+                pi.addItem(tag, ignoreBounds=True)
+                self._pos_items += [tp2, tag]
             pill = PositionPill(pos)
             pill.setPos(x0, stop)
             pi.addItem(pill, ignoreBounds=True)

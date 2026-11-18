@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import time
 from datetime import date, datetime
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -371,3 +372,559 @@ def test_la_lista_de_mercados_de_un_perfil_de_estrategia_no_hereda_la_comun(tmp_
     assert settings.load_watchlist(["NAS100", "DJ30"], path, profile="calendario") == ["EURUSD", "XAUUSD"]
     settings.save_watchlist(["DJ30"], path, profile="calendario")
     assert settings.load_watchlist(["NAS100"], path, profile="calendario", common=False) == ["DJ30"]
+
+
+def test_el_perfil_barrido_nyam_usa_la_cuenta_de_puprime_con_10000_y_solo_el_doble_barrido(tmp_path):
+    from tradingbot.config import STRATEGY_PATTERNS, load_profiles, strategy_skills
+    env = tmp_path / ".env"
+    env.write_text("MT5_PUPRIME_LOGIN=7\nMT5_PUPRIME_SERVER=PUPrime-Demo\nMT5_PUPRIME_PASSWORD=x\n"
+                   "MT5_BARRIDO_NYAM_BASE=puprime\nMT5_BARRIDO_NYAM_NAME=Barrido_NYAM\n"
+                   "MT5_BARRIDO_NYAM_STRATEGY=barrido_nyam\nMT5_BARRIDO_NYAM_CAPITAL=10000\n", encoding="utf-8")
+    p = load_profiles(env)[0]["barrido_nyam"]
+    assert (p.login, p.server, p.display, p.strategy, p.capital, p.currency) == (7, "PUPrime-Demo", "Barrido_NYAM",
+                                                                                "barrido_nyam", 10_000.0, "USD")
+    assert "barrido_nyam" not in STRATEGY_PATTERNS                                   # no usa Pattern: tiene su propia skill
+    kept = strategy_skills([{"type": t} for t in ("cortex", "pattern", "tbr", "calendario")], "barrido_nyam")
+    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido", 4), ("smt", "aux2")]   # skill propia en un hexágono grande, sin Pattern ni Calendario, y SMT en un auxiliar
+
+
+# -- perfil Barrido_NYAM: barrido del RTH --------------------------------------------------------------------------
+def _barrido_ctx(candles, rth=(100.0, 90.0), previas=(), symbol="NAS100"):
+    """Velas de M5 desde las 09:55 (hora NY = servidor): (open, high, low, close). RTH 09:00-10:00 (rango `rth`: High, Low)."""
+    from tradingbot.skills._comun.contratos import ActiveTbr
+    from tradingbot.skills.barrido.rth import Contexto, Zona
+    day, base = date(1970, 1, 1), 9 * 3600 + 55 * 60
+    ts = np.array([base + 300 * i for i in range(len(candles))])
+    o, h, l, c = (np.array(x, dtype=float) for x in zip(*candles))
+    zona = Zona("PRE_NY", "RTH", day, rth[0], rth[1], 10 * 3600)
+    return Contexto(symbol, 5, ts, o, h, l, c, 0, ActiveTbr("PRE_NY", "RTH", day, rth[0], rth[1], 0, 0), zona, tuple(previas), len(ts) - 1)
+
+
+IN = (95, 98, 93, 95)           # vela dentro del RTH (90-100)
+OUT = (102, 104, 100, 103)      # vela que cierra fuera (por arriba)
+
+
+def test_barrido_rth_la_rotura_es_un_cierre_fuera_y_la_entrada_la_primera_vela_que_vuelve_dentro():
+    from tradingbot.skills.barrido.rth import analizar
+    # 09:55 y 10:00 dentro; 10:05 y 10:10 cierran fuera (rotura y swing en 105); 10:15 cierra dentro en 98: el stop fijo de 30 puntos (128) cubre el swing
+    hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]))
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0, "be": 68.0}   # be: el Low de NY Open (95) está a 0,1 R de la entrada; el mínimo de 1 R lo deja en 98 - 30 = 68
+    # el swing queda a más de 30 puntos de la entrada (140): el stop es el swing + 5
+    hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 140, 99, 101), (101, 102, 97, 98)]))
+    assert hits[0].levels["stop"] == 145.0
+    # rompe por debajo: largo, entrada en 91, el stop fijo queda 30 puntos por debajo (61) y el objetivo es el High del RTH
+    hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 86, 91)]))
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 61.0, "target": 100.0, "be": 121.0}     # el High de NY Open (98) está a 0,23 R: el breakeven se arma a +1 R (91 + 30)
+    # una mecha que supera el nivel y cierra dentro no es una rotura (caso del 3 de noviembre): la entrada es tras la rotura real
+    hits, _ = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 104, 97, 102), (102, 103, 99, 99)]))
+    assert [(h.direction, h.x) for h in hits] == [("short", 4)] and hits[0].levels["stop"] == 129.0
+
+
+def test_barrido_continuacion_toca_el_50_y_entra_a_favor_de_la_rotura_con_stop_40_y_2r():
+    from tradingbot.skills.barrido.continuacion import Ajustes, KEY, analizar
+    toca = (96, 98, 94, 97)                                              # toca el 50 % del RTH (95) con la mecha
+    sin_toque = (97, 99, 96, 98)
+    hits, _ = analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)]))     # 10:05 cierra por encima: largo a favor
+    assert [(h.key, h.direction, h.x, h.price, h.levels) for h in hits] == [(KEY, "long", 2, 103.0, {"stop": 63.0, "target": 183.0})]
+    hits, _ = analizar(_barrido_ctx([IN, toca, (92, 93, 86, 88)]))       # por debajo: corto (cualquier lado)
+    assert [(h.direction, h.levels) for h in hits] == [("short", {"stop": 128.0, "target": 8.0})]
+    assert analizar(_barrido_ctx([IN, sin_toque, (97, 104, 96, 103)]))[0] == []      # rompe sin haber tocado el 50 %
+    assert analizar(_barrido_ctx([IN, (97, 104, 94, 103)]))[0] == []                 # el toque de la propia vela que rompe no cuenta
+    assert analizar(_barrido_ctx([IN, toca, (97, 104, 96, 99)]))[0] == []            # una mecha fuera sin cierre fuera no es rotura
+    tarde = [IN] + [sin_toque] * 11 + [toca, (97, 104, 96, 103)]                       # la rotura es la vela de las 11:00: anulado
+    assert analizar(_barrido_ctx(tarde))[0] == []
+    assert analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"))[0] == []   # solo Nasdaq
+    a = Ajustes.desde(EnvConfig(parse("STOP_POINTS=10\nRR=3\nMARKETS=SP500\n")))
+    hits, _ = analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"), a)
+    assert hits[0].levels == {"stop": 93.0, "target": 133.0}
+    with pytest.raises(ValueError, match="BARRIDO_CONTINUACION_RR"):
+        Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
+def test_barrido_rth_casos_sin_setup():
+    from tradingbot.skills.barrido.rth import analizar
+    solo_mechas = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0]
+    assert solo_mechas == []                                                       # nunca cierra fuera: no hay rotura
+    no_vuelve = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 92, 85, 86), (86, 88, 84, 85)]))[0]
+    assert no_vuelve == []                                                         # rompe y nunca vuelve a cerrar dentro (caso del 5 de noviembre)
+    otro_lado = analizar(_barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
+    assert [h.status for h in otro_lado] == ["invalidated"]                        # rompe también el Low antes de volver
+
+
+def test_barrido_rth_ventanas_de_rotura_y_de_entrada():
+    from tradingbot.skills.barrido.rth import Ajustes, analizar
+    # 09:55 = vela 0; 10:00 = 1; 10:55 = 12; 11:00 = 13; 11:15 = 16; 12:00 = 25
+    break_1055 = [(95, 99, 94, 96)] + [IN] * 11 + [OUT] * 4 + [(101, 102, 97, 98)]    # rotura a las 10:55, vuelve a las 11:15
+    hits, _ = analizar(_barrido_ctx(break_1055))
+    assert [(h.direction, h.x) for h in hits] == [("short", 16)]                      # la vuelta puede llegar después de las 11:00
+    break_1100 = [(95, 99, 94, 96)] + [IN] * 12 + [OUT] + [(101, 102, 97, 98)]        # rotura a las 11:00: fuera de la ventana
+    assert analizar(_barrido_ctx(break_1100))[0] == []
+    assert [h.status for h in analizar(_barrido_ctx(break_1100), Ajustes(end=720))[0]] == ["detected"]   # con la ventana hasta las 12:00 sí vale
+    late_back = [(95, 99, 94, 96)] + [IN] * 11 + [OUT] * 14 + [(101, 102, 97, 98)]    # vuelve a las 12:05: tarde
+    assert analizar(_barrido_ctx(late_back))[0] == []
+
+
+def test_barrido_rth_ajustes_configurables_y_validos():
+    from tradingbot.envconfig import EnvConfig, parse
+    from tradingbot.skills.barrido.rth import Ajustes
+    with pytest.raises(ValueError, match="BARRIDO_RTH_END"):
+        Ajustes.desde(EnvConfig(parse("START=10:30\nEND=10:00\n")))
+    with pytest.raises(ValueError, match="ENTRY_END"):
+        Ajustes.desde(EnvConfig(parse("END=11:00\nENTRY_END=10:00\n")))
+    assert Ajustes.desde(EnvConfig(parse("ENTRY_END=13:00\n"))).entry_end == 13 * 60
+    assert Ajustes.desde(None) == Ajustes() and Ajustes().stop_points == 30.0 and Ajustes().stop_buffer == 5.0
+    with pytest.raises(ValueError, match="STOP_POINTS"):
+        Ajustes.desde(EnvConfig(parse("STOP_POINTS=0\n")))
+
+
+def test_barrido_nyam_pinta_su_rth_y_su_ciclo_solo_en_su_perfil(tmp_path):
+    from tradingbot.core import Services
+    from tradingbot.skills.tbr.skill import TbrSkill
+    env = EnvConfig(parse("TBR_ZONES=ASIA, LONDON, NY_AM\nBARRIDO_NYAM_TBR_ZONES=ASIA, LONDON, PRE_NY, NY_AM\n"))
+
+    def zones(strategy):
+        cfg = {"app": {"strategy": strategy}}
+        from tradingbot.core import EventBus
+        skill = TbrSkill(EventBus(), Services(None, None, cfg, env))
+        skill._load_settings()
+        return [z.key for z in skill.zones]
+    assert zones("barrido_nyam") == ["ASIA", "LONDON", "PRE_NY", "NY_AM"]
+    assert zones("") == zones("crt") == ["ASIA", "LONDON", "NY_AM"]
+
+
+def test_ndog_y_nwog_salen_del_cierre_de_las_17_y_de_la_pausa_del_fin_de_semana():
+    from tradingbot.skills._comun.gaps import opening_gaps
+    H, D = 3600, 86400
+    # días 1970-01-05 (lunes) a 01-09 (viernes) y 01-12 (lunes); servidor = NY. Velas de 15 min.
+    def day(d, a, b, price):
+        return [(d * D + a * H + k * 900, price + k * 0.01) for k in range(int((b - a) * 4))]
+    rows = []
+    for d, p in ((4, 100.0), (5, 101.0), (6, 102.0), (7, 103.0), (8, 104.0)):         # lunes a viernes 1970: 4 = lunes 05-01... (índices de día)
+        rows += day(d, 0, 17, p)                       # hasta las 17:00 NY (la última vela empieza a las 16:45)
+        if d != 8:
+            rows += day(d, 17, 24, p + 5)              # reabre a las 17:00 con un hueco de +5 sobre la última vela
+    rows += day(11, 18, 24, 120.0)                     # domingo sobre las 18:00: hueco semanal
+    ts = np.array([r[0] for r in rows])
+    close = np.array([r[1] for r in rows])
+    open_ = close.copy()
+    gaps = opening_gaps(ts, open_, close, int(ts[-1]) + 900, 0)
+    assert gaps["NWOG"].kind == "NWOG" and gaps["NWOG"].open == 120.0 and gaps["NWOG"].close_ts == 8 * D + 16 * H + 45 * 60
+    assert gaps["NDOG"].kind == "NDOG" and gaps["NDOG"].open_ts == 7 * D + 17 * H and gaps["NDOG"].high > gaps["NDOG"].low
+    assert opening_gaps(ts, open_, close, 4 * D, 0) == {"NDOG": None, "NWOG": None}   # sin velas anteriores
+
+
+def test_barrido_rth_solo_busca_en_indices_usa():
+    from dataclasses import replace
+    from tradingbot.skills.barrido.rth import analizar
+    ctx = _barrido_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)])
+    assert analizar(replace(ctx, symbol="NAS100.s"))[0] and not analizar(replace(ctx, symbol="EURUSD"))[0]
+
+
+def test_barrido_rth_objetivo_2_es_lo_que_este_antes_mas_alla_del_objetivo_1():
+    from tradingbot.skills.barrido.rth import Zona, analizar
+    velas = [(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98)]
+    day = date(1970, 1, 1)
+    asia, london = Zona("ASIA", "Asia", day, 88.0, 70.0, 0), Zona("LONDON", "London", day, 86.0, 60.0, 5 * 3600)
+    hits, figs = analizar(_barrido_ctx(velas, previas=(asia, london)))
+    assert hits[0].levels["target"] == 90.0 and hits[0].levels["target2"] == 70.0        # Low de Asia (70) más cercano que el de London (60)
+    assert "Low de Asia" in hits[0].detail and figs[0].levels["objetivo2"] == 70.0
+    only_london = analizar(_barrido_ctx(velas, previas=(Zona("ASIA", "Asia", day, 99.0, 95.0, 0), london)))[0]   # el de Asia (95) está antes que el RTH: no vale
+    assert only_london[0].levels["target2"] == 60.0
+    assert "target2" not in analizar(_barrido_ctx(velas))[0][0].levels                   # sin Asia ni London ni huecos: sin objetivo 2
+    assert figs[0].levels["entrada_ts"] == float(9 * 3600 + 55 * 60 + 300 * 4)           # la vela de entrada, para marcarla en el gráfico
+
+
+def test_las_lineas_de_ndog_nwog_llevan_los_bordes_y_el_50_por_ciento():
+    from tradingbot.skills.levels.daylevels import Line
+    from tradingbot.skills._comun.gaps import gap_lines
+    H, D = 3600, 86400
+    ts = np.array([7 * D + 16 * H + 45 * 60, 7 * D + 17 * H, 7 * D + 17 * H + 900])
+    open_, close = np.array([100.0, 104.0, 104.5]), np.array([102.0, 104.5, 105.0])
+    lines = gap_lines(ts, open_, close, 0, Line)
+    assert sorted((l.kind, l.price) for l in lines) == [("ndog", 104.0), ("ndog50", 103.0), ("ndoglo", 102.0)]
+
+
+def test_los_botones_de_huecos_solo_existen_en_el_perfil_barrido_nyam(tmp_path, monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    plain = make_window(tmp_path, monkeypatch)
+    assert "ndog" not in plain.level_btns
+    own = make_window(tmp_path, monkeypatch, {"strategy": "barrido_nyam"})
+    assert {"ndog", "nwog"} <= set(own.level_btns)
+
+
+def test_barrido_nyam_oculta_fibo_y_muestra_tbr_y_entradas(tmp_path, monkeypatch):
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    from PySide6.QtWidgets import QApplication
+    from tradingbot import settings
+    from tradingbot.ui.main_window import MainWindow
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "s.json")
+    cfg = {"app": {"symbol": "NAS100", "timeframe": "5m", "watchlist": ["NAS100"], "strategy": "barrido_nyam"}}
+    bus = EventBus()
+    win = MainWindow(bus, SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "tbr"}, {"type": "pattern"}]), cfg, "t")
+    assert win.fibo_btn.isHidden() and not win.fibo_btn.isChecked()
+    assert win.tbr_btn.isChecked() and win.pos_btn.isChecked()
+
+
+def test_barrido_nyam_asia_y_london_solo_con_maximos_y_minimos():
+    from tradingbot.skills.tbr.zones import zones_from_settings
+    env = EnvConfig(parse("TBR_ZONES=ASIA, LONDON, NY_AM\nBARRIDO_NYAM_TBR_ZONES=ASIA, LONDON, PRE_NY, NY_AM\n"
+                          "BARRIDO_NYAM_TBR_ASIA_BOX=false\nBARRIDO_NYAM_TBR_ASIA_MID=false\nBARRIDO_NYAM_TBR_LONDON_BOX=false\n"))
+    own = env.section("BARRIDO_NYAM_TBR")
+    zones = {z.key: z for z in zones_from_settings(env.section("TBR"), own.get_list("ZONES"), own)}
+    assert (zones["ASIA"].box, zones["ASIA"].mid) == (False, False) and (zones["LONDON"].box, zones["LONDON"].mid) == (False, True)
+    assert zones["PRE_NY"].box and zones["NY_AM"].box                                   # el RTH y NY Open, pintados
+    assert all(z.box and z.mid for z in zones_from_settings(env.section("TBR")))        # el resto de perfiles no cambia
+
+
+def test_la_skill_barrido_es_independiente_de_pattern_y_ocupa_el_hexagono_grande_4_con_los_cuatro_setups():
+    import ast
+    from pathlib import Path
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.envconfig import load
+    import tradingbot.skills  # noqa: F401
+    root = Path(__file__).resolve().parent.parent
+    env = load(root / "tradingbot.env")
+    manager = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": "barrido_nyam"}}, env), [{"type": "tbr"}, {"type": "barrido", "slot": 4}])
+    skill = manager.skills["barrido"]
+    skill.on_start()
+    assert skill.slot == 4 and skill.error == ""
+    assert list(skill.setups) == ["rth", "asia_continuacion", "londres", "continuacion", "preny"]      # BARRIDO_SETUPS de tradingbot.env: el PDH/PDL de Asia está desactivado
+    r, asia = skill.setups["rth"][1], skill.setups["asia_continuacion"][1]
+    assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.be) == ("5m", 600, 660, 720, 30.0, True)        # BARRIDO_RTH_* de tradingbot.env
+    assert (asia.start, asia.end, asia.stop_points, asia.rr) == (0, 30, 30.0, 3.0)                              # BARRIDO_ASIA_CONTINUACION_*
+    from tradingbot.skills.barrido import pdh as _pdh
+    pdh = _pdh.Ajustes.desde(env.section("BARRIDO_PDH"))                                                        # sigue configurado aunque esté desactivado
+    assert (pdh.start, pdh.end, pdh.stop_points, pdh.stop_buffer) == (1200, 1260, 30.0, 5.0)                    # BARRIDO_PDH_*
+    preny = skill.setups["preny"][1]
+    assert (preny.start, preny.end, preny.stop_points, preny.rr) == (300, 540, 30.0, 2.0)                       # BARRIDO_PRENY_*
+    for path in (root / "tradingbot" / "skills" / "barrido").glob("*.py"):           # ni hereda ni importa código de la skill Pattern
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            module = getattr(node, "module", None) or ""
+            assert not (isinstance(node, ast.ImportFrom) and (module.startswith("pattern") or ".pattern" in module)), (path.name, module)
+
+
+def test_la_skill_barrido_publica_el_setup_del_rth_del_3_de_noviembre_al_cerrar_la_vela_de_entrada(tmp_path):
+    """Integración: con el RTH cerrado y las velas, la skill publica pattern.detected sin esperar a que NY Open termine."""
+    import pandas as pd
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.tbr.zones import Session, Zone
+    import tradingbot.skills  # noqa: F401
+    bus, found, updated = EventBus(), [], []
+    bus.subscribe("t", "pattern.detected", found.append)
+    bus.subscribe("t", "pattern.updated", updated.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(""))), [{"type": "barrido"}])
+    manager.start()
+    day = date(2026, 11, 3)
+    ny0 = (day.toordinal() - date(1970, 1, 1).toordinal()) * 86400 + 9 * 3600           # 09:00 NY (el servidor va 7 h por delante)
+    rows = [(95, 99, 94, 96)] * 12 + [(95, 98, 93, 95)] * 2 + [(97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98), (98, 99, 97, 98)]
+    df = pd.DataFrame({"ts": [ny0 + 7 * 3600 + 300 * i for i in range(len(rows))], "open": [r[0] for r in rows], "high": [r[1] for r in rows],
+                       "low": [r[2] for r in rows], "close": [r[3] for r in rows]})
+    rth = Session(Zone("PRE_NY", "RTH", 9 * 60, 10 * 60, "#9E9E9E"), day, -0.5, 11.5, True, 100.0, 90.0)
+    bus.publish("tbr.updated", {"symbol": "NAS100.s", "timeframe": "5m", "sessions": [rth], "available": True}, source="tbr")
+    bus.publish("candles.loaded", {"symbol": "NAS100.s", "timeframe": "5m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not found and time.time() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    manager.stop()
+    rth_found = [e for e in found if e.payload["hit"].key == "barrido_rth"]          # la continuación también salta con estas velas (largo en 102): aquí solo el RTH
+    hit = rth_found[0].payload["hit"]
+    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("short", 98.0, 128.0, 90.0)
+    assert rth_found[0].payload["tbr"].zone == "RTH" and rth_found[0].payload["tbr"].day == day
+    assert updated[-1].payload["figures"][0].levels["entrada_ts"] == float(df["ts"][16])  # la vela cuyo cierre es la entrada
+
+
+def test_el_grafico_marca_con_un_punto_la_vela_de_entrada_y_el_tp2(tmp_path, monkeypatch):
+    import pyqtgraph as pg
+    win = make_window(tmp_path, monkeypatch)
+    pos = {"x0": 5, "x1": 20, "entry": 98.0, "stop": 105.0, "target": 90.0, "target2": 80.0, "entry_x": 4, "direction": "short",
+           "state": "abierta", "label": "RTH ▼ barrido", "decision": "GO", "reason": "", "session": ("NY Open", "2026-11-03")}
+    win.chart.show_positions(True)
+    win.chart.set_positions([pos])
+    dots = [i for i in win.chart._pos_items if isinstance(i, pg.ScatterPlotItem)]
+    assert len(dots) == 1 and list(dots[0].data["x"]) == [4.0] and list(dots[0].data["y"]) == [98.0]   # el punto, en la vela de entrada
+    win.chart.set_positions([{**pos, "entry_x": None, "target2": None}])
+    assert not [i for i in win.chart._pos_items if isinstance(i, pg.ScatterPlotItem)]                  # sin vela de entrada, sin punto
+
+
+def test_barrido_nyam_sin_breakeven_solo_tp1_o_sl_y_configurable():
+    """BARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0 apaga el breakeven de Setup solo en este perfil; los demás siguen con SETUP_BE_TRIGGER_PCT."""
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+    env = EnvConfig(parse("SETUP_BE_TRIGGER_PCT=1\nSETUP_RISK_PCT=1\nBARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0\n"))
+
+    def be_r(strategy, text=None):
+        e = env if text is None else EnvConfig(parse(text))
+        skill = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": strategy}}, e), [{"type": "setup"}]).skills["setup"]
+        skill.on_start()
+        return skill.be_r
+    assert be_r("barrido_nyam") is None and be_r("") == 1.0 and be_r("crt") == 1.0
+    assert be_r("barrido_nyam", "SETUP_BE_TRIGGER_PCT=1\nSETUP_RISK_PCT=1\nBARRIDO_NYAM_SETUP_BE_TRIGGER_PCT=0.5\n") == 0.5
+
+
+def test_barrido_rth_breakeven_al_tomar_el_low_de_ny_open_y_configurable():
+    from tradingbot.skills.barrido.rth import Ajustes, analizar
+    from tradingbot.skills.cortex.order import Order
+    from tradingbot.skills.setup.positions import resolve
+    velas = [(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)]
+    ctx = _barrido_ctx(velas + [(98, 99, 94, 95), (95, 100, 94.5, 99), (99, 129, 98, 128)])    # toca 95 (breakeven), vuelve a 98 y sube al stop
+    hit = analizar(ctx, Ajustes(be_min_r=0))[0][0]
+    assert hit.levels["be"] == 95.0                                                   # sin mínimo: el Low del NY Open (95), a 0,1 R de la entrada (98, riesgo 30)
+    assert analizar(ctx)[0][0].levels["be"] == 68.0                                   # con el mínimo de 1 R (BARRIDO_RTH_BE_MIN_R=1) se arma a +1 R: 98 - 30
+    with pytest.raises(ValueError, match="BARRIDO_RTH_BE_MIN_R"):
+        Ajustes.desde(EnvConfig(parse("BE_MIN_R=-1\n")))
+    assert "be" not in analizar(ctx, Ajustes(be=False))[0][0].levels                  # BARRIDO_RTH_BE=false: sin este breakeven
+    order = Order("NAS100", "5m", "short", "p", "barrido_rth", "RTH", date(1970, 1, 1), 100, 90, 95, 98.0, 128.0, 90.0, "No Bias", 0.0, "r",
+                  entry_ts=int(ctx.ts[5]), close_ts=int(ctx.ts[-1]) + 3600, be_price=95.0)
+    closed = resolve(order, ctx.ts, ctx.high, ctx.low, ctx.close)
+    assert closed.result == "breakeven" and closed.r == 0 and closed.be_ts == int(ctx.ts[6])   # al tocar el Low pasó a la entrada y volvió a ella
+    # el extremo de la propia vela de entrada es anterior a la entrada: no arma el breakeven (la vela 5 toca 95 pero es la de entrada)
+    solo_entrada = resolve(order, ctx.ts[:6], ctx.high[:6], ctx.low[:6], ctx.close[:6])
+    assert solo_entrada is None
+    sin_be = resolve(replace_order(order), ctx.ts, ctx.high, ctx.low, ctx.close)
+    assert sin_be.result == "stop" and sin_be.r < 0                                   # sin breakeven por precio, la misma vela acaba en stop
+
+
+def replace_order(order):
+    from dataclasses import replace
+    return replace(order, be_price=None)
+
+
+# -- perfil Barrido_ASIA: barrido del rango de Asia ----------------------------------------------------------------
+def _asia_ctx(candles, asia=(100.0, 90.0), symbol="NAS100"):
+    """Velas de M5 desde las 23:55 (hora NY = servidor): (open, high, low, close). Asia 20:00-00:00 del día 1970-01-01 (cierra a medianoche)."""
+    from tradingbot.skills._comun.contratos import ActiveTbr
+    from tradingbot.skills.barrido.asia import Contexto, Zona
+    day, base = date(1970, 1, 1), 24 * 3600 - 300
+    ts = np.array([base + 300 * i for i in range(len(candles))])
+    o, h, l, c = (np.array(x, dtype=float) for x in zip(*candles))
+    zona = Zona("Asia", day, asia[0], asia[1], 24 * 3600)
+    return Contexto(symbol, 5, ts, o, h, l, c, 0, ActiveTbr("ASIA", "Asia", day, asia[0], asia[1], 0, 0), zona, len(ts) - 1)
+
+
+def test_barrido_asia_rotura_con_cierre_fuera_entrada_al_volver_dentro_y_objetivo_en_el_otro_lado():
+    from tradingbot.skills.barrido.asia import analizar
+    # 23:55 y 00:00 dentro; 00:05 y 00:10 cierran fuera (rotura y swing en 105); 00:15 cierra dentro en 98: stop fijo 30 puntos (128) y objetivo en el Low de Asia
+    hits, figs = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98)]))
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 4)]
+    assert hits[0].price == 98 and hits[0].levels == {"stop": 128.0, "target": 90.0}      # sin breakeven ni segundo objetivo
+    assert figs[0].levels["entrada_ts"] == float(24 * 3600 - 300 + 300 * 4) and figs[0].zone == "Asia"
+    # rompe por debajo: largo, objetivo en el High de Asia; con el swing a más de 30 puntos, el stop es el swing + 5
+    hits, _ = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 88), (88, 91, 40, 91)]))
+    assert [(h.direction, h.x) for h in hits] == [("long", 3)] and hits[0].levels == {"stop": 35.0, "target": 100.0}
+
+
+def test_barrido_asia_casos_sin_setup_y_ventanas():
+    from tradingbot.skills.barrido.asia import Ajustes, analizar
+    IN, OUT = (95, 98, 93, 95), (102, 104, 100, 103)
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 98), (98, 99, 97, 98)]))[0] == []      # una mecha no es rotura
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (92, 93, 87, 92), (92, 92, 85, 86), (86, 88, 84, 85)]))[0] == []   # nunca vuelve
+    otro = analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 103, 87, 101), (101, 102, 88, 95)]))[0]
+    assert [h.status for h in otro] == ["invalidated"]                                  # rompe también el otro lado
+    # 23:55 = vela 0; 00:00 = 1; 00:30 = 7; 00:55 = 12; 01:00 = 13
+    back_0055 = [(95, 99, 94, 96)] + [IN] * 6 + [OUT] * 5 + [(101, 102, 97, 98)]         # rotura a las 00:30, la vela de 00:55 cierra dentro (a la 01:00): vale
+    assert [(h.direction, h.x) for h in analizar(_asia_ctx(back_0055))[0]] == [("short", 12)]
+    back_0100 = [(95, 99, 94, 96)] + [IN] * 6 + [OUT] * 6 + [(101, 102, 97, 98)]         # la vela que vuelve a cerrar dentro es la de 01:00: cierra a la 01:05, tarde
+    assert analizar(_asia_ctx(back_0100))[0] == []
+    break_0100 = [(95, 99, 94, 96)] + [IN] * 12 + [OUT] + [(101, 102, 97, 98)]           # rotura a la 01:00: fuera de la ventana
+    assert analizar(_asia_ctx(break_0100))[0] == []
+    assert [h.status for h in analizar(_asia_ctx(break_0100), Ajustes(end=120, entry_end=180))[0]] == ["detected"]
+    assert analizar(_asia_ctx([(95, 99, 94, 96), (96, 98, 95, 97), (97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98)], symbol="EURUSD"))[0] == []   # solo índices USA
+
+
+def test_barrido_asia_ajustes_validos():
+    from tradingbot.skills.barrido.asia import Ajustes
+    with pytest.raises(ValueError, match="BARRIDO_ASIA_END"):
+        Ajustes.desde(EnvConfig(parse("START=01:30\nEND=01:00\n")))
+    with pytest.raises(ValueError, match="STOP_POINTS"):
+        Ajustes.desde(EnvConfig(parse("STOP_POINTS=0\n")))
+    a = Ajustes.desde(None)
+    assert (a.start, a.end, a.entry_end, a.stop_points, a.stop_buffer) == (0, 60, 60, 30.0, 5.0)
+
+
+# -- setup PDH/PDL en Asia (skill barrido) ------------------------------------------------------------------------
+def _pdh_ctx(window, pre=None, pdh=100.0, pdl=90.0, asia=(104.0, 80.0), symbol="NAS100"):
+    """Velas de M5 desde las 18:00 (hora NY = servidor) del 1970-01-01: 24 velas tranquilas hasta las 20:00 (o `pre`) y luego `window` desde las 20:00."""
+    from tradingbot.skills._comun.contratos import ActiveTbr
+    from tradingbot.skills.barrido.pdh import Contexto, Zona
+    day, base = date(1970, 1, 1), 18 * 3600
+    candles = list(pre or [(95, 97, 94, 96)] * 24) + list(window)
+    ts = np.array([base + 300 * i for i in range(len(candles))])
+    o, h, l, c = (np.array(x, dtype=float) for x in zip(*candles))
+    return Contexto(symbol, 5, ts, o, h, l, c, 0, ActiveTbr("ASIA", "Asia", day, asia[0], asia[1], 0, 0), Zona("Asia", day, asia[0], asia[1], 24 * 3600),
+                    pdh, pdl, 0, len(ts) - 1, 18 * 60)
+
+
+def test_barrido_pdh_entrada_en_el_primer_cierre_de_vuelta_y_objetivo_en_el_otro_lado_de_asia():
+    from tradingbot.skills.barrido.pdh import analizar
+    # 20:00 barre el PDH (100) y cierra encima; 20:05 cierra de vuelta en 99: corto, swing 104, stop fijo 129 y objetivo en el Low de Asia
+    hits, figs = analizar(_pdh_ctx([(96, 103, 95, 102), (102, 104, 98, 99)]))
+    assert [(h.direction, h.status, h.x) for h in hits] == [("short", "detected", 25)]
+    assert hits[0].price == 99 and hits[0].levels == {"stop": 129.0, "target": 95.0}      # objetivo: el Low de Asia ya formado en la entrada (95)
+    assert figs == [] or figs[0].levels["entrada_ts"] == float(18 * 3600 + 300 * 25)        # sin velas posteriores no hay dibujo de posición
+    # la propia vela del barrido cierra por debajo del nivel (mecha): es la entrada
+    hits, _ = analizar(_pdh_ctx([(96, 103, 95, 98), (98, 99, 96, 97)]))
+    assert [(h.direction, h.x, h.price) for h in hits] == [("short", 24, 98.0)]
+    # PDL: barrido por debajo (mínimo 85) y cierre de vuelta en 91: largo, stop fijo 61 y objetivo en el High de Asia
+    hits, _ = analizar(_pdh_ctx([(92, 93, 85, 87), (87, 91, 86, 91)]))
+    assert [(h.direction, h.x) for h in hits] == [("long", 25)] and hits[0].levels == {"stop": 61.0, "target": 93.0}
+    # el cierre de entrada ya está en el extremo opuesto del rango formado: sin objetivo, salida por tiempo (el Low final de Asia solo es la referencia)
+    hits, _ = analizar(_pdh_ctx([(96, 103, 95, 95)]))
+    assert hits[0].levels == {"stop": 125.0, "target": 80.0, "solo_tiempo": 1.0}
+    # swing a más de 30 puntos de la entrada: el stop es el swing + 5
+    hits, _ = analizar(_pdh_ctx([(96, 150, 95, 102), (102, 104, 98, 99)], asia=(150.0, 80.0)))
+    assert hits[0].levels["stop"] == 155.0
+
+
+def test_barrido_pdh_casos_sin_setup():
+    from tradingbot.skills.barrido.pdh import Ajustes, analizar
+    quiet = (95, 97, 94, 96)
+    pre_tocado = [quiet] * 10 + [(96, 101, 95, 97)] + [quiet] * 13                       # el precio tocó el PDH a las 18:50: ya no está fresco
+    assert analizar(_pdh_ctx([(96, 103, 95, 102), (102, 104, 98, 99)], pre=pre_tocado))[0] == []
+    assert analizar(_pdh_ctx([quiet, (96, 99, 95, 98)]))[0] == []                         # no llega a barrer el nivel
+    assert analizar(_pdh_ctx([(96, 103, 95, 102), (102, 105, 99, 103), (103, 104, 100, 102)]))[0] == []   # no vuelve a cerrar por debajo
+    # 20:00 = vela 24; 20:55 = 35 (la última que puede ser la de entrada); 21:00 = 36
+    tarde = [quiet] * 11 + [(96, 103, 95, 102), (102, 104, 98, 99)]                       # barre a las 20:55 y cierra de vuelta a las 21:00 (vela 36): tarde
+    assert analizar(_pdh_ctx(tarde))[0] == []
+    en_hora = [quiet] * 10 + [(96, 103, 95, 102), (102, 104, 98, 99)]                     # la vela de 20:55 cierra de vuelta (a las 21:00): vale
+    assert [h.x for h in analizar(_pdh_ctx(en_hora))[0]] == [35]
+    assert analizar(_pdh_ctx([(96, 103, 95, 102), (102, 104, 98, 99)], symbol="EURUSD"))[0] == []   # solo índices USA
+    assert analizar(_pdh_ctx([(96, 103, 95, 102), (102, 104, 98, 99)], pdh=None))[0] == []         # sin día anterior
+    assert [h.x for h in analizar(_pdh_ctx(tarde), Ajustes(end=22 * 60))[0]] == [36]
+
+
+def test_barrido_pdh_ajustes_validos():
+    from tradingbot.skills.barrido.pdh import Ajustes
+    with pytest.raises(ValueError, match="BARRIDO_PDH_END"):
+        Ajustes.desde(EnvConfig(parse("START=21:30\nEND=21:00\n")))
+    with pytest.raises(ValueError, match="STOP_POINTS"):
+        Ajustes.desde(EnvConfig(parse("STOP_POINTS=0\n")))
+    a = Ajustes.desde(None)
+    assert (a.start, a.end, a.stop_points, a.stop_buffer) == (20 * 60, 21 * 60, 30.0, 5.0)
+
+
+def test_barrido_pdh_el_dia_anterior_va_de_las_18_a_las_18():
+    from datetime import datetime, timezone
+    from tradingbot.skills.barrido.pdh import contextos
+    from tradingbot.skills.tbr.zones import Session, Zone
+    t0 = int(datetime(2026, 11, 1, 18, tzinfo=timezone.utc).timestamp())              # NY = servidor (ahead 0): domingo 18:00, abre el día de trading del lunes
+    n = 26 * 12 + 6                                                                   # hasta el lunes 20:30
+    ts = np.array([t0 + 300 * i for i in range(n)])
+    h, l = np.full(n, 97.0), np.full(n, 94.0)
+    h[10], l[20] = 120.0, 70.0                                                         # extremos del día anterior (domingo 18:00 - lunes 18:00)
+    h[12 * 24 + 2], l[12 * 24 + 4] = 130.0, 60.0                                       # lunes 18:10 y 18:20: ya son del día siguiente
+    o = c = np.full(n, 95.0)
+    asia = Session(Zone("ASIA", "Asia", 20 * 60, 0, "#FFD60A"), date(2026, 11, 2), -0.5, 47.5, True, 100.0, 90.0)
+    ctx = contextos("NAS100.s", 5, ts, o, h, l, c, [asia], 0, 18 * 60)[0]
+    assert (ctx.pdh, ctx.pdl) == (120.0, 70.0) and int(ts[ctx.dia_ini]) == t0 + 24 * 3600
+    assert contextos("NAS100.s", 5, ts, o, h, l, c, [asia], 0, 17 * 60)[0].pdh == 120.0   # con día de 17:00, el 18:10 sigue siendo del mismo día pero el 130 se ve
+    assert not contextos("NAS100.s", 5, ts, o, h, l, c, [], 0, 18 * 60)
+
+
+def _londres_ctx(window, pdh=100.0, pdl=90.0, london=(104.0, 80.0), symbol="NAS100"):
+    """Velas de M5 desde las 18:00 del 1970-01-01 (NY = servidor); Londres es la del 1970-01-02 (02:00 = vela 96, cierra a las 05:00)."""
+    from tradingbot.skills._comun.contratos import ActiveTbr
+    from tradingbot.skills.barrido.pdh import Contexto, Zona
+    day, base = date(1970, 1, 2), 18 * 3600
+    candles = [(95, 97, 94, 96)] * 96 + list(window)
+    ts = np.array([base + 300 * i for i in range(len(candles))])
+    o, h, l, c = (np.array(x, dtype=float) for x in zip(*candles))
+    return Contexto(symbol, 5, ts, o, h, l, c, 0, ActiveTbr("LONDON", "London", day, london[0], london[1], 0, 0), Zona("London", day, london[0], london[1], 86400 + 5 * 3600),
+                    pdh, pdl, 0, len(ts) - 1, 18 * 60, True)
+
+
+def test_barrido_pdh_de_londres_mismas_reglas_con_objetivo_en_londres_y_salida_al_cierre():
+    from tradingbot.skills.barrido.londres import Ajustes, KEY, analizar
+    hits, _ = analizar(_londres_ctx([(96, 103, 95, 102), (102, 104, 98, 99)]))
+    assert [(h.key, h.direction, h.x, h.price) for h in hits] == [(KEY, "short", 97, 99.0)]       # 02:00 barre, 02:05 cierra de vuelta
+    assert hits[0].levels == {"stop": 129.0, "target": 95.0, "cierre": float(86400 + 5 * 3600)}    # objetivo en el Low ya formado; si no llega, salida por tiempo a las 05:00
+    assert analizar(_londres_ctx([(96, 103, 95, 102), (102, 105, 99, 103)]))[0] == []              # no vuelve a cerrar por debajo
+    tarde = [(95, 97, 94, 96)] * 11 + [(96, 103, 95, 102), (102, 104, 98, 99)]                     # cierra de vuelta a las 03:00 (vela 108): tarde
+    assert analizar(_londres_ctx(tarde))[0] == []
+    a = Ajustes.desde(None)
+    assert (a.start, a.end) == (2 * 60, 3 * 60)
+    with pytest.raises(ValueError, match="BARRIDO_LONDRES_END"):
+        Ajustes.desde(EnvConfig(parse("START=03:30\nEND=03:00\n")))
+
+
+def test_barrido_pdh_pre_ny_entra_al_cierre_de_vuelta_con_objetivo_fijo_2r():
+    from tradingbot.skills.barrido.preny import Ajustes, KEY, analizar
+    relleno = [(95, 97, 94, 96)] * 36                                                                 # de las 02:00 a las 05:00 sin tocar el PDH (100)
+    hits, figs = analizar(_londres_ctx(relleno + [(96, 103, 95, 102), (102, 104, 98, 99), (99, 100, 97, 98)]))
+    assert [(h.key, h.direction, h.x, h.price) for h in hits] == [(KEY, "short", 133, 99.0)]           # 05:00 barre, 05:05 cierra de vuelta
+    assert hits[0].levels == {"stop": 129.0, "target": 39.0}                                           # stop fijo 30, objetivo 2R = 60 puntos
+    assert len(figs) == 1
+    assert analizar(_londres_ctx([(96, 101, 95, 96)] + [(95, 97, 94, 96)] * 35 + [(96, 103, 95, 102), (102, 104, 98, 99)]))[0] == []
+    tarde = [(95, 97, 94, 96)] * 36 + [(95, 97, 94, 96)] * 47 + [(96, 103, 95, 102), (102, 104, 98, 99)]       # barre a las 08:55 y cierra de vuelta a las 09:00: fuera de la ventana
+    # (la comprobación de frescura está en la línea anterior: un High de 101 a las 02:00 ya tocó el nivel)
+    assert analizar(_londres_ctx(tarde))[0] == []
+    a = Ajustes.desde(None)
+    assert (a.start, a.end, a.rr) == (5 * 60, 9 * 60, 2.0)
+    with pytest.raises(ValueError, match="BARRIDO_PRENY_RR"):
+        Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
+def test_la_skill_barrido_publica_tambien_la_continuacion_de_asia():
+    import pandas as pd
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills.tbr.zones import Session, Zone
+    import tradingbot.skills  # noqa: F401
+    bus, found = EventBus(), []
+    bus.subscribe("t", "pattern.detected", found.append)
+    manager = SkillManager(bus, Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(""))), [{"type": "barrido", "slot": 4}])
+    manager.start()
+    day = date(2026, 11, 3)                                                              # Asia del 3/11 20:00 a 4/11 00:00 NY
+    nyx = (day.toordinal() - date(1970, 1, 1).toordinal()) * 86400 + 20 * 3600           # 20:00 NY (el servidor va 7 h por delante)
+    rows = [(95, 99, 94, 96)] * 48 + [(95, 98, 93, 95)] * 2 + [(97, 103, 96, 102), (102, 105, 99, 101), (101, 102, 97, 98), (98, 99, 97, 98), (98, 99, 97, 98)]
+    df = pd.DataFrame({"ts": [nyx + 7 * 3600 + 300 * i for i in range(len(rows))], "open": [r[0] for r in rows], "high": [r[1] for r in rows],
+                       "low": [r[2] for r in rows], "close": [r[3] for r in rows]})
+    asia = Session(Zone("ASIA", "Asia", 20 * 60, 0, "#FFD60A"), day, -0.5, 47.5, True, 100.0, 90.0)
+    bus.publish("tbr.updated", {"symbol": "NAS100.s", "timeframe": "5m", "sessions": [asia], "available": True}, source="tbr")
+    bus.publish("candles.loaded", {"symbol": "NAS100.s", "timeframe": "5m", "df": df}, source="feed")
+    deadline = time.time() + 3
+    while not found and time.time() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    manager.stop()
+    asia_found = [e for e in found if e.payload["hit"].key == "barrido_asia_continuacion"]
+    hit = asia_found[0].payload["hit"]                                                   # 00:10 cierra sobre el High (100): largo a favor, stop 30 y 3R
+    assert (hit.direction, hit.price, hit.levels["stop"], hit.levels["target"]) == ("long", 102.0, 72.0, 192.0)
+    assert asia_found[0].payload["tbr"].zone == "Asia" and asia_found[0].payload["tbr"].day == day
+
+
+def test_la_skill_barrido_elige_sus_setups_con_barrido_setups():
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+
+    def skill(text):
+        s = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": "barrido_nyam"}}, EnvConfig(parse(text))), [{"type": "barrido"}]).skills["barrido"]
+        s.on_start()
+        return s
+    assert list(skill("").setups) == ["rth", "asia_continuacion", "pdh", "londres", "continuacion", "preny"]   # sin BARRIDO_SETUPS, todos los módulos
+    assert "pdh" in skill("BARRIDO_SETUPS=rth, pdh\n").setups                                          # el PDH/PDL de Asia se reactiva añadiéndolo
+    assert list(skill("BARRIDO_SETUPS=asia_continuacion\n").setups) == ["asia_continuacion"]
+    assert skill("BARRIDO_ASIA_CONTINUACION_STOP_POINTS=40\n").setups["asia_continuacion"][1].stop_points == 40.0   # cada setup, su bloque de ajustes
+    with pytest.raises(ValueError, match="BARRIDO_SETUPS"):
+        skill("BARRIDO_SETUPS=rth, luna\n")
+
+
+def test_barrido_stop_fijo_por_mercado():
+    """El stop fijo es el general (Nasdaq) salvo que el bloque defina STOP_POINTS_<MERCADO> / STOP_BUFFER_<MERCADO> (casa con el comienzo del símbolo)."""
+    from tradingbot.envconfig import EnvConfig
+    from tradingbot.skills.barrido import asia_continuacion, pdh, rth
+    env = EnvConfig({"BARRIDO_RTH_STOP_POINTS": "30", "BARRIDO_RTH_STOP_BUFFER": "5", "BARRIDO_RTH_STOP_POINTS_DJ30": "75",
+                     "BARRIDO_RTH_STOP_BUFFER_DJ30": "10", "BARRIDO_RTH_STOP_POINTS_SP500": "12"})
+    a = rth.Ajustes.desde(env.section("BARRIDO_RTH"))
+    assert a.stop_de("NAS100.s") == (30.0, 5.0) and a.stop_de("DJ30.s") == (75.0, 10.0)
+    assert a.stop_de("SP500.s") == (12.0, 5.0)                                          # sin buffer propio, el general
+    assert asia_continuacion.Ajustes.desde(None).stop_de("DJ30.s") == (30.0, 0.0) and pdh.Ajustes.desde(None).stop_de("SP500.s") == (30.0, 5.0)
+    bad = EnvConfig({"BARRIDO_PDH_STOP_POINTS_DJ30": "0"})
+    try:
+        pdh.Ajustes.desde(bad.section("BARRIDO_PDH"))
+    except ValueError as e:
+        assert "STOP_POINTS_DJ30" in str(e)
+    else:
+        raise AssertionError("debe rechazar puntos <= 0")
