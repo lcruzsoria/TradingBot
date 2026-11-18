@@ -63,8 +63,8 @@ def _forward_start(env) -> date | None:
 class BarridoSkill(Skill):
     title = "Barrido"
     description = ("Setups de barrido del perfil Barrido_NYAM. RTH: tras el rango 09:00-10:00, la primera rotura (vela que cierra fuera) entre las "
-                   "10:00 y las 11:00 y la primera vela M5 posterior que cierra dentro (antes de las 12:00) da la entrada; stop fijo de 30 puntos "
-                   "(o el swing + 5), objetivo 1 en el lado contrario del RTH y breakeven al tomar el Low/High de NY Open. Continuación de Asia: la "
+                   "10:00 y las 11:00 y la primera vela M5 posterior que cierra dentro (antes de las 12:00) da la entrada; stop sobre el extremo del barrido "
+                   "(fijo de 40 puntos si queda más cerca), objetivo 1 en el lado contrario del RTH y breakeven al tomar el Low/High de NY Open. Continuación de Asia: la "
                    "primera vela M5 que cierra fuera del rango de Asia entre las 00:00 y las 00:30 da la entrada a favor de la rotura; stop 30 puntos y objetivo 3R. PDH/PDL: "
                    "nivel del día anterior sin tocar que se barre entre las 20:00 y las 21:00; entrada en el primer cierre de vuelta dentro y objetivo en el otro lado de Asia. Londres: lo mismo entre las 02:00 y las 03:00 con salida al cierre de Londres (05:00). Continuación: tras tocar el 50 % del RTH, la primera vela M5 que cierra fuera del rango (antes de las 11:00) da la entrada a favor; stop 40 puntos y objetivo 2R (Nasdaq). Pre-NY: el PDH/PDL fresco barrido entre las 05:00 y las 09:00, con entrada en el cierre de vuelta y objetivo fijo 2R. Cortex los "
                    "valida; solo informa, no envía órdenes.")

@@ -611,7 +611,7 @@ def test_la_skill_barrido_es_independiente_de_pattern_y_ocupa_el_hexagono_grande
     assert skill.slot == 4 and skill.error == ""
     assert list(skill.setups) == ["rth", "asia_continuacion", "londres", "continuacion", "preny"]      # BARRIDO_SETUPS de tradingbot.env: el PDH/PDL de Asia está desactivado
     r, asia = skill.setups["rth"][1], skill.setups["asia_continuacion"][1]
-    assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.be) == ("5m", 600, 660, 720, 30.0, True)        # BARRIDO_RTH_* de tradingbot.env
+    assert (r.tf, r.start, r.end, r.entry_end, r.stop_points, r.stop_buffer, r.be) == ("5m", 600, 660, 720, 40.0, 0.0, True)   # BARRIDO_RTH_* de tradingbot.env
     assert (asia.start, asia.end, asia.stop_points, asia.rr) == (0, 30, 30.0, 3.0)                              # BARRIDO_ASIA_CONTINUACION_*
     from tradingbot.skills.barrido import pdh as _pdh
     pdh = _pdh.Ajustes.desde(env.section("BARRIDO_PDH"))                                                        # sigue configurado aunque esté desactivado
