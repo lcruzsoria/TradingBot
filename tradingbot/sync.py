@@ -166,6 +166,9 @@ def catch_up(name: str, folder: Path | None = None, log=print) -> bool:
     cfg["app"]["env_file"] = str(DEFAULT_ENV_FILE)
     profiles, default = load_profiles(DEFAULT_ENV_FILE)
     profile = profiles[name]
+    own_start = env.get(f"{profile.strategy}_STATS_FORWARD_START") if profile.strategy else None
+    if own_start:                                     # <ESTRATEGIA>_STATS_FORWARD_START: como al abrir su bot, el forwardtest empieza en su fecha
+        env.values["STATS_FORWARD_START"] = own_start
     env.values["FEED_SWEEP_DAYS"] = str(sweep_days(env))
     source = Mt5Source(profile, int(cfg["app"]["max_bars"]))
     cfg["app"]["data_dir"] = str(folder or profile_dir(profile.name))
