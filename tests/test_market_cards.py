@@ -89,11 +89,24 @@ def test_si_el_mercado_actual_sigue_no_se_recarga(make_window):
 
 def test_al_conectar_se_avisa_de_los_nombres_traducidos(make_window):
     win, _ = make_window(["NAS100", "GER40"])
-    win._on_connected({"info": "MT5 DEMO 2  USD 100.00", "all_symbols": ["NAS100.s"],
+    win._on_connected({"info": "PUPRIME DEMO 2  USD 100.00", "all_symbols": ["NAS100.s"],
                        "equivalents": {"NAS100": "NAS100.s", "GER40": None}})
     text = win.log_view.toPlainText()
     assert "NAS100 → NAS100.s" in text and "no tiene GER40" in text
-    assert win.account.text() == "MT5 DEMO" and win.account.toolTip() == "MT5 DEMO 2  USD 100.00"
+    assert win.account.text() == "PUPRIME DEMO" and win.account.toolTip() == "PUPRIME DEMO 2  USD 100.00"
+
+
+def test_con_algo_trading_apagado_el_estado_pasa_a_desconectado_en_rojo(make_window):
+    win, _ = make_window(["NAS100"])
+    win._on_connected({"info": "PUPRIME DEMO 2  USD 100.00", "all_symbols": [], "equivalents": {}})
+    assert win.status.text() == "Conectado" and win.status.property("state") == "ok"
+    win._on_setup_trading({"blocked": "el Algo Trading de MT5 está desactivado"})
+    assert win.status.text() == "Desconectado" and win.status.property("state") == "error"
+    assert "Algo Trading" in win.status.toolTip()
+    win._on_connected({"info": "PUPRIME DEMO 2  USD 100.00", "all_symbols": [], "equivalents": {}})
+    assert win.status.text() == "Desconectado"                       # reconectar no lo pone en verde si sigue apagado
+    win._on_setup_trading({"blocked": None})
+    assert win.status.text() == "Conectado" and win.status.property("state") == "ok"
 
 
 def test_pulsar_las_operaciones_de_la_cabecera_abre_y_cierra_el_forwardtest(make_window):

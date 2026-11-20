@@ -176,7 +176,7 @@ def test_sin_conexion(install):
 
 def test_conexion_devuelve_cuenta_y_saldo(install):
     install()
-    assert Mt5Source(PROFILE).connect() == "MT5 DEMO 26231460  USD 100,000.00"
+    assert Mt5Source(PROFILE).connect() == "VANTAGEMARKETS DEMO 26231460  USD 100,000.00"   # el broker, del nombre del servidor
 
 
 def test_cotizaciones(install):
@@ -253,3 +253,34 @@ def test_timeframes_nativos_usan_su_constante(install):
         src.load_candles("EURUSD", tf)
     assert asked == [FakeMt5.TIMEFRAME_H3, FakeMt5.TIMEFRAME_H4, FakeMt5.TIMEFRAME_H12,
                      FakeMt5.TIMEFRAME_D1, FakeMt5.TIMEFRAME_W1]
+
+
+def test_la_etiqueta_de_la_cuenta_es_el_broker():
+    assert mt5_client.broker_label("PUPrime-Demo") == "PUPRIME"
+    assert mt5_client.broker_label("MetaQuotes-Demo") == "METAQUOTES"
+    assert mt5_client.broker_label("") == "MT5"
+
+
+def test_no_cambia_de_cuenta_con_un_bot_que_opera_de_verdad_abierto(install, tmp_path, monkeypatch):
+    """Cambiar el terminal de cuenta apaga el Algo Trading de MT5: con el bot de operativa real abierto, otro perfil no conecta."""
+    import os
+    from tradingbot import config
+    env = tmp_path / "cuentas.env"
+    env.write_text("\n".join(["MT5_PUPRIME_LOGIN=700", "MT5_PUPRIME_SERVER=PUPrime-Demo", "MT5_META_LOGIN=26231460",
+                              "MT5_META_SERVER=MetaQuotes-Demo", "MT5_PUPRIME_LIVE_BASE=puprime",
+                              "MT5_PUPRIME_LIVE_SEND_ORDERS=true"]) + "\n", encoding="utf-8")
+    monkeypatch.setattr(config, "DEFAULT_ENV_FILE", env)
+    profiles, _ = config.load_profiles(env)
+    fake = install(login=700)
+    pid = config.PROFILES_DIR / "puprime_live" / "bot.pid"
+    pid.parent.mkdir(parents=True)
+    pid.write_text(str(os.getpid()), encoding="utf-8")                 # su bot está abierto
+    with pytest.raises(Mt5Error, match="Algo Trading"):
+        Mt5Source(profiles["meta"]).connect()
+    assert fake.init_kwargs is None                                    # ni siquiera llega a tocar el terminal
+    assert Mt5Source(profiles["puprime"]).connect().endswith("DEMO 700  USD 100,000.00")   # su misma cuenta: sí
+    pid.unlink()
+    fake = install(login=700)
+    with pytest.raises(Mt5Error, match="Abre esa cuenta"):            # con el bot cerrado sí lo intenta (aquí sin contraseña)
+        Mt5Source(profiles["meta"]).connect()
+    assert fake.init_kwargs is not None

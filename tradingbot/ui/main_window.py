@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self.profile_name: str | None = app_cfg["app"].get("profile_name")
         self.switch_profile = switch_profile              # vuelve a arrancar el bot con otro perfil (lo pone __main__)
         self.virtual: dict | None = None                  # cuenta virtual del perfil (setup.account)
+        self.trade_block: str | None = None               # operativa real: por qué MT5 no acepta las órdenes (setup.trading)
         self.challenge_rules: dict | None = None          # challenge simulado (perfil que opera de verdad): reglas y fase
         self.last_quotes: dict = {}
         self.bus = bus
@@ -946,10 +947,20 @@ class MainWindow(QMainWindow):
         if handler:
             handler(event.payload)
 
+    def _set_connected_status(self) -> None:
+        """Verde «Conectado»; en rojo «Desconectado» si el perfil opera de verdad y MT5 no acepta sus órdenes (Algo Trading apagado...)."""
+        if self.trade_block:
+            self._set_status("Desconectado", "error")
+            self.status.setToolTip(f"MT5 no acepta las órdenes del bot: {self.trade_block}.\n"
+                                   "Las señales no se envían hasta que se corrija (en MT5: botón Algo Trading).")
+        else:
+            self._set_status("Conectado", "ok")
+            self.status.setToolTip("")
+
     def _on_connected(self, p: dict) -> None:
         self.connected = True
-        self._set_status("Conectado", "ok")
-        self.account.setText(" ".join(p["info"].split()[:2]))   # «MT5 DEMO»: cuenta y saldo, en el tooltip
+        self._set_connected_status()
+        self.account.setText(" ".join(p["info"].split()[:2]))   # «PUPRIME DEMO»: el broker y el tipo; cuenta y saldo, en el tooltip
         self.account.setToolTip(p["info"])
         self.account.show()
         self.log(f"feed: conectado - {p['info']}")
@@ -986,7 +997,7 @@ class MainWindow(QMainWindow):
             self._hist_data = None
         self.error_banner.hide()
         if self.connected:
-            self._set_status("Conectado", "ok")
+            self._set_connected_status()
         refresh = bool(p.get("refresh")) and self.candles is not None
         self.candles = df
         self.chart.set_candles(df, keep_view=refresh)
@@ -1627,6 +1638,9 @@ class MainWindow(QMainWindow):
 
     def _on_setup_trading(self, p: dict) -> None:
         """Operativa real: MT5 deja de aceptar las órdenes del bot (Algo Trading apagado...) o vuelve a aceptarlas."""
+        self.trade_block = p.get("blocked") or None
+        if self.connected:
+            self._set_connected_status()
         if p.get("blocked"):
             self.log("setup: MT5 NO acepta órdenes del bot", f"Motivo:   {p['blocked']}.\nLas señales no se envían "
                      "(ni entran en el Forwardtest) hasta que se corrija.", "nogo")

@@ -9,6 +9,7 @@ import math
 import re
 import threading
 import time
+from pathlib import Path
 
 import pandas as pd
 
@@ -53,6 +54,28 @@ def equivalent(name: str, names: dict[str, str], explicit: dict[str, str] | None
     return None
 
 
+def broker_label(server: str) -> str:
+    """El broker de la cuenta, del nombre de su servidor: «PUPrime-Demo» → «PUPRIME», «MetaQuotes-Demo» → «METAQUOTES»."""
+    name = re.split(r"[-\s]", (server or "").strip())[0]
+    return name.upper() or "MT5"
+
+
+def live_bot_on_other_account(profile: Mt5Profile, env_file: Path | None = None) -> Mt5Profile | None:
+    """El perfil que opera de verdad (MT5_<PERFIL>_SEND_ORDERS) con su bot abierto en el mismo terminal y otra cuenta, si lo hay."""
+    from ... import config
+    from ...sync import running_profiles
+    try:
+        profiles, _ = config.load_profiles(env_file or config.DEFAULT_ENV_FILE)
+    except Exception:  # noqa: BLE001 - sin fichero de cuentas no hay bots que proteger
+        return None
+    live = [q for q in profiles.values() if q.send_orders and q.login != profile.login
+            and (q.terminal_path or None) == (profile.terminal_path or None)]
+    if not live:
+        return None
+    running = running_profiles([q.name for q in live], config.PROFILES_DIR)
+    return next((q for q in live if q.name in running), None)
+
+
 class Mt5Error(Exception):
     """Error de conexión o lectura con MT5."""
 
@@ -84,6 +107,12 @@ class Mt5Source:
             raise Mt5Error("No se pudo importar MetaTrader5 (solo disponible en Windows). Usa --demo para probar sin MT5.") from exc
 
         p = self.profile
+        holder = live_bot_on_other_account(p)
+        if holder:
+            # Cambiar el terminal de cuenta apaga el Algo Trading de MT5 («account has been changed») y deja sin su cuenta al
+            # bot que opera de verdad: mientras esté abierto, nadie más se lleva el terminal a otra cuenta.
+            raise Mt5Error(f"El bot del perfil '{holder.name}' opera de verdad en la cuenta {holder.login} de este terminal: "
+                           f"no se cambia a la {p.login} del perfil '{p.name}' (MT5 apagaría el Algo Trading).")
         kwargs: dict = {}
         if p.terminal_path:
             kwargs["path"] = p.terminal_path
@@ -115,7 +144,7 @@ class Mt5Source:
             self.close()
             raise Mt5Error(f"El perfil '{p.name}' se llama demo, pero la cuenta {info.login} NO es demo. Conexión cancelada.")
         kind = "DEMO" if is_demo else "REAL"
-        return f"MT5 {kind} {info.login}  {info.currency} {info.balance:,.2f}"
+        return f"{broker_label(getattr(info, 'server', ''))} {kind} {info.login}  {info.currency} {info.balance:,.2f}"
 
     def close(self) -> None:
         with self._lock:
