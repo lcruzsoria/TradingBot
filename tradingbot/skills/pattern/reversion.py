@@ -24,7 +24,7 @@ from ...timeframes import parse_timeframe
 from .continuacion import _when
 from .fibo import at_level, fibo_levels, level_name, level_settings, rr_of, run_fibo
 from .trade import position_figure
-from .patterns import DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
+from .patterns import ARMED, DETECTED, EXPIRED, INVALIDATED, Figure, Pattern, PatternContext, PatternHit, register_pattern
 
 DEFAULT_TF = "15m"
 DEFAULT_SWING_BARS = 1
@@ -149,4 +149,8 @@ def analyze(ctx: PatternContext, k: int, sl: float = 1.0, tp: float = -0.5) -> t
         return [hit(EXPIRED, direction, x, sign * half, found[0].detail,
                     {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})], \
             [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "vencida", label, tbr.day.isoformat(), target=level_name(tp))]
-    return [], [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label, tbr.day.isoformat(), target=level_name(tp))]
+    armed = [] if state.zero is None else [hit(                 # con el 0 confirmado, el 0,5 ya es la entrada: orden limitada
+        ARMED, direction, min(end, len(ts) - 1), sign * half,
+        f"fibo formado (mecha pivote en {_when(ctx, origin)}, 0 en {_when(ctx, zero_idx)}): entrada limitada en el 0,5",
+        {"stop": sign * stop, "target": sign * target, "fibo 0": sign * extreme, "fibo 0,5": sign * half})]
+    return armed, [Figure("fib", KEY, tbr.zone, direction, int(ts[origin]), x_end, levels, "en curso", label, tbr.day.isoformat(), target=level_name(tp))]

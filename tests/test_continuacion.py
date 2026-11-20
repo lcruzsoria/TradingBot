@@ -9,7 +9,7 @@ import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
 from tradingbot.skills.pattern.continuacion import Continuacion, analyze
-from tradingbot.skills.pattern.patterns import DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY, PatternContext
+from tradingbot.skills.pattern.patterns import ARMED, DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY, PatternContext
 
 from tests.test_pattern import DAY, NY, TBR, ny, run_skill, session
 
@@ -61,10 +61,11 @@ def test_bajista_es_el_espejo_exacto():
 
 def test_el_fibo_se_dibuja_con_los_dos_swing_points_y_no_hay_entrada_hasta_que_retrocede():
     hits, figs = analyze(ctx_for(ROWS, last_bar=14), 1)                                                   # activado, sin retroceso aún
-    assert hits == [] and len(figs) == 1 and figs[0].state == "en curso"
+    assert [(h.status, h.price, h.levels["stop"], h.levels["target"]) for h in hits] == [(ARMED, 107.0, 103.0, 115.0)]   # limitada en el 0,5
+    assert len(figs) == 1 and figs[0].state == "en curso"
     assert figs[0].levels == {"-0,5": 115.0, "0": 111.0, "0,5": 107.0, "1": 103.0}                        # el tramo queda fijo
     hits, figs = analyze(ctx_for(ROWS, last_bar=13), 1)                                                   # swing low confirmado, sin activar
-    assert hits == [] and figs[0].levels["1"] == 103.0 and figs[0].levels["0"] == 111.0
+    assert [h.status for h in hits] == [ARMED] and figs[0].levels["1"] == 103.0 and figs[0].levels["0"] == 111.0
     assert analyze(ctx_for(ROWS, last_bar=11), 1) == ([], [])                                             # aún no hay swing low
     assert analyze(ctx_for(ROWS, last_bar=8), 1) == ([], [])                                              # sin rotura: nada
 
@@ -78,7 +79,7 @@ def test_entra_en_el_05_sin_necesidad_de_superar_antes_el_0():
 def test_sin_el_swing_del_1_formado_no_hay_trade():
     assert analyze(ctx_for(ROWS[:13]), 1) == ([], [])                      # el swing low (12) aún no está confirmado: no hay 1, no hay stop
     confirma = ROWS[:13] + [(109, 110, 106, 108)]                          # 13: confirma el swing low y llega al 0,5, pero esa vela no vale
-    assert analyze(ctx_for(confirma), 1)[0] == []
+    assert [h.status for h in analyze(ctx_for(confirma), 1)[0]] == [ARMED]   # sin entrada: la limitada espera a la siguiente
     siguiente = confirma + [(108, 110, 106.5, 109)]                        # 14: la primera posterior que retrocede al 0,5 (abre sobre él)
     assert [(h.status, h.x) for h in analyze(ctx_for(siguiente), 1)[0]] == [(DETECTED, 14)]
 
@@ -91,7 +92,7 @@ def test_perder_el_1_antes_de_la_entrada_invalida_el_patron():
 
 def test_la_entrada_no_cruza_el_nivel_si_abre_por_debajo_del_05():
     rows = ROWS[:14] + [(105, 110, 104, 108)]                              # 14 abre en 105, ya por debajo del 0,5 (107): no es un retroceso
-    assert analyze(ctx_for(rows), 1)[0] == []
+    assert [h.status for h in analyze(ctx_for(rows), 1)[0]] == [ARMED]
 
 
 def test_un_swing_high_mas_alto_antes_del_swing_low_sustituye_al_0():

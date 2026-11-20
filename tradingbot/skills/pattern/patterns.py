@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from .._comun.contratos import ANNULLED, DETECTED, EXPIRED, INVALIDATED, ActiveTbr, Figure, PatternHit  # noqa: F401  (los tipos que se intercambian las skills viven en _comun)
+from .._comun.contratos import ANNULLED, ARMED, DETECTED, EXPIRED, INVALIDATED, ActiveTbr, Figure, PatternHit  # noqa: F401  (los tipos que se intercambian las skills viven en _comun)
 
 import numpy as np
 

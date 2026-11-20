@@ -13,7 +13,7 @@ from ...config import STRATEGY_PATTERNS
 from ..feed.datasource import aggregate_candles
 from ..levels.daylevels import DEFAULT_DAY_START, DEFAULT_INDEX_DAY_START, DEFAULT_US_INDICES, is_us_index, parse_time
 from ..tbr.zones import zones_from_settings
-from .patterns import DETECTED, PATTERN_REGISTRY, PatternContext, PeerTbr, history_tbrs, recent_tbrs, window_for
+from .patterns import ARMED, DETECTED, PATTERN_REGISTRY, PatternContext, PeerTbr, history_tbrs, recent_tbrs, window_for
 from .trade import day_close
 
 DEFAULT_ZONE_ORDER = ("ASIA", "LONDON", "NY_AM", "NY_PM")
@@ -41,7 +41,8 @@ class PatternSkill(Skill):
                    "identifica (y de los que se invalidan, anulan o vencen). Cortex valida cada patrón con el sesgo "
                    "(GO / NO GO). Solo informa: no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
-    publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.session", "pattern.swept")
+    publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.session", "pattern.swept",
+                 "pattern.armed")
     slot = 4
 
     def on_start(self) -> None:
@@ -201,6 +202,8 @@ class PatternSkill(Skill):
                 self._evaluate_tbr(c, item, window, ahead, results, figures if drawn else [], errors, unavailable, tfs, peers)
             else:
                 self._evaluate_tbr(c, item, window, ahead, [], figures, [], [], {}, peers)
+        armed = [(i, h) for i, h in results if h.status == ARMED]   # fibos formados esperando el 0,5: van aparte (orden limitada)
+        results = [(i, h) for i, h in results if h.status != ARMED]
         results.sort(key=lambda r: r[1].ts or 0)           # en orden de hora: así los decide Cortex
         hits = [h for _t, h in results]
         window = windows[tbr.key]
@@ -230,12 +233,21 @@ class PatternSkill(Skill):
             payload = {"symbol": symbol, "timeframe": tfs.get(hit.key, tf), "tbr": item, "hit": hit,
                        "session_close": self._session_close(symbol, hit.ts, ahead), **mark}
             self.publish("pattern.detected" if hit.status == DETECTED else "pattern.discarded", payload)
+        if not errors and not unavailable:               # la foto completa del mercado: lo que no sale ya no espera al 0,5
+            self.publish("pattern.armed", {"symbol": symbol, "armed": [self._armed(symbol, tfs.get(h.key, tf), i, h, ahead)
+                                                                      for i, h in armed], **mark})
         if ended:
             key = (symbol, "session", tbr.key, tbr.day)
             if key not in self._seen:
                 self._seen.add(key)
                 self.publish("pattern.session", {"symbol": symbol, "timeframe": tf, "tbr": tbr,
                                                  "session_end": window.session_end_hours, **mark})
+
+    def _armed(self, symbol: str, tf: str, item, hit, ahead: int) -> dict:
+        """Un fibo formado que espera el 0,5, con la hora (servidor) en que termina su plazo (`until`): la limitada vale hasta ahí."""
+        window = window_for(item, self.order, ahead, self.extend, self.until)
+        return {"symbol": symbol, "timeframe": tf, "tbr": item, "hit": hit, "session_close": self._session_close(symbol, hit.ts, ahead),
+                "until": window.end_ts if window is not None else None}
 
     def _peers(self, sessions, ahead: int) -> tuple[PeerTbr, ...]:
         """Todas las TBR cerradas (de cualquier zona, aunque PATTERN_ZONES no las busque) con sus horas, para los patrones que cruzan varias."""

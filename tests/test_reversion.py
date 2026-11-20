@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 from tradingbot.envconfig import EnvConfig, parse
-from tradingbot.skills.pattern.patterns import DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY
+from tradingbot.skills.pattern.patterns import ARMED, DETECTED, EXPIRED, INVALIDATED, PATTERN_REGISTRY
 from tradingbot.skills.pattern.reversion import Reversion, analyze
 
 from tests.test_continuacion import ctx_for, m5_from_m15, mirror
@@ -81,7 +81,8 @@ def test_el_0_se_desplaza_al_siguiente_pivote_mientras_no_revierta_al_0_5():
     rows = ROWS[:9] + [(98.5, 99.0, 93, 94),                          # 9: no revierte (máx. 99 < 101) y baja más
                        (94, 96, 93.5, 95)]                            # 10: confirma el pivote bajo 93: el 0 pasa del 96 al 93 (0,5 en 99,5)
     hits, figs = run(rows)
-    assert hits == [] and figs[0].levels == {"-0,5": 86.5, "0": 93.0, "0,5": 99.5, "1": 106.0} and figs[0].state == "en curso"
+    assert [(h.status, h.price, h.levels["stop"]) for h in hits] == [(ARMED, 99.5, 106.0)]       # la limitada sigue al 0 nuevo
+    assert figs[0].levels == {"-0,5": 86.5, "0": 93.0, "0,5": 99.5, "1": 106.0} and figs[0].state == "en curso"
     hits, figs = run(rows + [(95, 99.6, 94.5, 99)])                   # 11: revierte al 0,5 del fibo vigente (99,5): entrada
     assert [(h.status, h.x, h.price) for h in hits] == [(DETECTED, 11, 99.5)] and figs[0].levels["0"] == 93.0
 

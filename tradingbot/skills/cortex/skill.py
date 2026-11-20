@@ -32,8 +32,9 @@ class CortexSkill(Skill):
                    "del barrido de la watchlist retiene los patrones y los decide al final, todos los mercados juntos y en "
                    "orden de hora (así se respeta una sola posición en toda la cuenta).")
     subscribes = ("bias.updated", "bias.history", "candles.loaded", "trade.request", "pattern.detected", "pattern.discarded",
-                  "calendar.signal", "crt.signal", "setup.closed", "setup.skipped", "feed.sweep", "pattern.swept")
-    publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles")
+                  "calendar.signal", "crt.signal", "setup.closed", "setup.skipped", "feed.sweep", "pattern.swept",
+                  "pattern.armed", "setup.executed")
+    publishes = ("trade.verdict", "cortex.decision", "setup.order", "setup.candles", "setup.pending")
     slot = "center"
     interval = 5.0                   # para no esperar para siempre a una vuelta del barrido que no se completa
 
@@ -101,6 +102,12 @@ class CortexSkill(Skill):
             self._sweep(p)
         elif event.topic == "pattern.swept":
             self._round_seen("swept", p)
+        elif event.topic == "pattern.armed":
+            self._armed(p)
+        elif event.topic == "setup.executed":                        # p. ej. una limitada que se llenó antes de que llegue su patrón
+            order = p["order"]
+            if p.get("sent") and order.symbol not in self._open and trackable(order):
+                self._open[order.symbol] = order          # su patrón (al cerrar la vela) no lo bloquea: ver _decide
         elif event.topic == "setup.skipped":                         # no llegó a la cuenta (operativa real): mercado libre
             if self._open.get(event.payload["order"].symbol) == event.payload["order"]:
                 self._open.pop(event.payload["order"].symbol, None)
@@ -234,6 +241,29 @@ class CortexSkill(Skill):
             self._send(build_calendar_order(payload, result, reason))
         self.set_caption(f"{'GO' if allowed else 'NO GO'} {direction.capitalize()} {payload.get('strategy', 'calendario')}")
 
+    def _armed(self, p: dict) -> None:
+        """Fibos formados que esperan el 0,5 en un mercado: los que darían GO pasan a Setup como órdenes limitadas (solo las
+        envían los perfiles que operan de verdad). Es la foto completa del mercado: lo que no va en ella, Setup lo retira."""
+        orders = []
+        for a in p["armed"]:
+            if self._busy(a["symbol"], a["hit"].ts) is not None or self._session_reason(a):
+                continue
+            bias = self._biases.get(a["symbol"])
+            if not self.pattern_use_bias:
+                decision = Decision(True, "orden limitada en el 0,5: la estrategia no depende del sesgo")
+                result = bias["result"] if bias is not None else None
+            elif bias is None:
+                continue                                    # sin el sesgo de su mercado no hay GO
+            else:
+                result = bias["result"]
+                decision = validate(a["hit"].direction, result, self.allow_no_bias)
+            if not decision.allowed:
+                continue
+            if result is None:
+                result = BiasResult(Bias.NO_BIAS, None, (), {}, "sin sesgo", 0.0, 0.0, False)
+            orders.append((build_order(a, decision, result), a.get("until")))
+        self.publish("setup.pending", {"symbol": p["symbol"], "orders": orders})
+
     def _decide(self, closing: bool = False) -> None:
         """Valida cada patrón pendiente con el sesgo de su mercado; si es GO, le pasa la orden a Setup.
 
@@ -264,6 +294,8 @@ class CortexSkill(Skill):
                 self.set_caption(f"NO GO {decision.reason[0]} {p['hit'].direction.capitalize()} {p['tbr'].zone}")
                 continue
             busy = self._busy(p["symbol"], p["hit"].ts)
+            if busy is not None and _own(busy, p):       # la limitada de este mismo fibo ya se llenó: es su posición
+                busy = None
             if busy is not None:                         # una sola posición abierta a la vez
                 decision = Decision(False, self._busy_reason(busy))
             elif self._session_reason(p):                # y una misma sesión no puede dar dos trades
@@ -288,3 +320,10 @@ def _when(p: dict) -> int:
     if p.get("calendar"):
         return int(p.get("entry_ts") or 0)
     return int(p["hit"].ts or 0)
+
+
+def _own(order, p: dict) -> bool:
+    """Si la orden abierta es la de este mismo patrón (la limitada en el 0,5 que se llenó antes de que cerrara la vela)."""
+    hit, tbr = p["hit"], p["tbr"]
+    return (order.symbol == p["symbol"] and order.pattern_key == hit.key and order.direction == hit.direction
+            and order.tbr_zone == tbr.zone and order.tbr_day == tbr.day)

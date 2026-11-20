@@ -374,6 +374,11 @@ la cuenta (con `_BASE`, la de otro perfil) recibe órdenes reales y su **Forward
 - Setup abre a mercado con el stop y el objetivo de la señal y con los lotes que arriesgan `SETUP_RISK_PCT` del **saldo real**
   (hacia abajo al paso de lote). Si no llega al lote mínimo, el símbolo no se puede operar, el precio ya pasó el stop o el
   objetivo, o MT5 la rechaza, no se abre y no cuenta (el Registro dice por qué).
+- **Entrada limitada en el 0,5** (Continuación y Reversión): en cuanto el fibo está formado (0 y 1 confirmados), Pattern lo
+  anuncia (`pattern.armed`), Cortex lo valida como una señal y Setup deja en MT5 una **orden limitada** en el 0,5 con su stop
+  y su objetivo: entra en el toque, como el backtest, sin esperar al cierre de la vela. Si el 0 o el 1 se mueven, se
+  sustituye; si el fibo se invalida o vence, o llega el final de su plazo, se retira (`limitadas.json` en la carpeta del
+  perfil). Si el toque llega antes de colocarla (o el spread no la llena), al cerrar la vela se entra a mercado como antes.
 - La entrada es el precio de ejecución; al tocar +1 R el bot pasa el stop real a la entrada; a la hora de cierre por tiempo
   la cierra el bot. El cierre, su precio, su hora y el resultado son los de MT5; el R es el dinero (con comisión y swap)
   entre el riesgo al abrir.

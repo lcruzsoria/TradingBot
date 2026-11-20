@@ -1,6 +1,7 @@
 """Skill Setup: el ejecutor. Solo actúa cuando Cortex le da la orden de operar en la cuenta del broker."""
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from .positions import resolve, trackable
 DEFAULT_RISK_PCT = 1.0            # SETUP_RISK_PCT: riesgo de cada operación, % del saldo virtual
 DEFAULT_BE_TRIGGER_PCT = 1.0      # SETUP_BE_TRIGGER_PCT: ganancia flotante (% del saldo) que pasa el stop a la entrada
 CONSOLIDATE_CHECK_SECONDS = 30.0  # cada cuánto se mira si ha terminado una vela de consolidación
+PENDING_FILE = "limitadas.json"   # órdenes limitadas en el 0,5 que esperan en MT5 (perfiles que operan de verdad)
 
 
 @register_skill("setup")
@@ -25,7 +27,9 @@ class SetupSkill(Skill):
                    "quien reúne el activo, la temporalidad, el sesgo, la TBR y el patrón válido; Setup no decide nada. "
                    "En casi todos los perfiles funciona en modo simulación: prepara la orden y la anota, pero no la envía a "
                    "MT5. Los perfiles con MT5_<PERFIL>_SEND_ORDERS=true (solo cuentas demo) la envían de verdad, con los lotes "
-                   "que arriesgan SETUP_RISK_PCT del saldo real de la cuenta, solo si la señal es nueva; mueven el stop a "
+                   "que arriesgan SETUP_RISK_PCT del saldo real de la cuenta, solo si la señal es nueva. En los patrones con entrada en "
+                   "el 0,5 dejan una orden limitada en ese nivel en cuanto el fibo está formado (como el backtest, sin esperar "
+                   "al cierre de la vela del toque) y la retiran si el fibo se mueve, se invalida o vence; mueven el stop a "
                    "breakeven, cierran por tiempo y su Forwardtest es la imagen de la cuenta: entrada, salida y resultado "
                    "los de MT5. Sigue las "
                    "posiciones simuladas (stop, objetivo, stop a breakeven y cierre por tiempo) con las velas que le reenvía "
@@ -33,7 +37,7 @@ class SetupSkill(Skill):
                    "cada operación (R x riesgo). Las cerradas del forwardtest pasan a la cuenta al consolidar: al cierre de la "
                    "vela de 3 h (índices) o de 4 h (resto) en la que cerraron. Las abiertas y la cuenta se guardan en "
                    "data/perfiles/<perfil>/: se pueden consultar y siguen ahí al reiniciar el bot.")
-    subscribes = ("setup.order", "setup.candles", "feed.connected", "clock.offset")
+    subscribes = ("setup.order", "setup.candles", "setup.pending", "feed.connected", "clock.offset")
     publishes = ("setup.executed", "setup.closed", "setup.account", "setup.consolidated", "setup.skipped",
                  "setup.challenge", "setup.trading")
     slot = "aux4"
@@ -80,6 +84,8 @@ class SetupSkill(Skill):
         self._trade_block: str | None = None            # por qué MT5 rechazaría ahora las órdenes (None: las acepta)
         self._trade_checked = False
         self._candles: dict[str, tuple] = {}            # últimas velas de cada mercado con posición real (máximo y mínimo en R)
+        self.pending_file = self.file.with_name(PENDING_FILE)
+        self.pending: list[tuple] = _load_pending(self.pending_file) if self.live else []   # (orden, hasta): limitadas en MT5
         self.challenge = None                           # challenge simulado sobre la cuenta real (SETUP_CHALLENGE_*)
         target = self.settings.get("CHALLENGE_TARGET_PCT", "") or ",".join(map(str, challenge.DEFAULT_TARGET_PCT))
         if self.live and target.strip() not in ("0", "0.0"):
@@ -117,6 +123,10 @@ class SetupSkill(Skill):
         if event.topic == "setup.candles":
             self._follow(event.payload)
             return
+        if event.topic == "setup.pending":
+            if self.live:
+                self._reconcile(event.payload["symbol"], event.payload["orders"])
+            return
         order = event.payload["order"]
         self.executed += 1
         if self.live:
@@ -136,7 +146,16 @@ class SetupSkill(Skill):
 
     def _live_order(self, order) -> None:
         """Perfil que opera de verdad: solo abre en MT5 las señales nuevas; lo que no llega a la cuenta no cuenta (no entra
-        en el Forwardtest: este es la imagen de la cuenta) y Cortex libera el mercado."""
+        en el Forwardtest: este es la imagen de la cuenta) y Cortex libera el mercado.
+
+        Si la señal ya tenía su orden limitada en el 0,5, manda ella: llena, la posición ya está en la cuenta y no se abre otra;
+        sin llenar (el toque fue antes de colocarla o el spread no la llenó), se retira y se entra a mercado como siempre."""
+        if any(_same_setup(o, order) for o in self.positions):
+            self.set_caption(f"limitada ya llena: {order.direction.capitalize()} {order.symbol}")
+            return
+        for item in [x for x in self.pending if _same_setup(x[0], order)]:
+            if self._settle(item, cancel=True):
+                return                                  # se llenó: ya es la posición de esta señal
         bar = TIMEFRAMES.get(order.timeframe)
         now = self.server_now()
         if self.challenge is not None and self.challenge.blocks_trading:
@@ -149,6 +168,8 @@ class SetupSkill(Skill):
         else:
             order, sent, risk, note = self._send(order)
             if sent:
+                for item in [x for x in self.pending if x[0].symbol == order.symbol]:
+                    self._settle(item, cancel=True)     # una posición por mercado: fuera la limitada que hubiera
                 self.positions.append(order)
                 store.save(self.positions, self.file)
                 self._publish_account()
@@ -158,6 +179,83 @@ class SetupSkill(Skill):
             reason = note
         self.set_caption(f"no enviada: {order.direction.capitalize()} {order.symbol}")
         self.publish("setup.skipped", {"order": order, "note": reason})
+
+    # -- órdenes limitadas en el 0,5 (operativa real) ---------------------------------------------
+    def _reconcile(self, symbol: str, orders: list) -> None:
+        """La foto de los fibos que esperan el 0,5 en `symbol`: retira las limitadas que ya no están (invalidado, vencido, el
+        0 o el 1 se han movido) y deja la de la primera que falta, si el mercado está libre."""
+        wanted = {_setup_key(o): o for o, _until in orders}
+        for item in [x for x in self.pending if x[0].symbol == symbol]:
+            new = wanted.get(_setup_key(item[0]))
+            if new is not None and _same_levels(item[0], new):
+                continue
+            self._settle(item, cancel=True)             # se retira (o, si se llenó, pasa a posición)
+        for order, until in orders:
+            if any(o.symbol == symbol for o in self.positions) or any(x[0].symbol == symbol for x in self.pending):
+                break                                   # una posición (o una limitada) por mercado
+            self._place(order, until)
+
+    def _place(self, order, until) -> None:
+        """Deja en MT5 la limitada en el 0,5 con los lotes que arriesgan SETUP_RISK_PCT del saldo real."""
+        if (self.challenge is not None and self.challenge.blocks_trading) or self._trade_block or not trackable(order):
+            return
+        if until is not None and self.server_now() >= until:
+            return
+        place = getattr(self.services.source, "place_limit", None)
+        real = self._real_balance()
+        if place is None or real is None:
+            return
+        risk = round(real[0] * self.risk_pct / 100, 2)
+        try:
+            fill = place(order.symbol, order.direction, risk, order.price, order.stop, order.target,
+                         f"TB {order.pattern_key}"[:31])
+        except Exception as exc:  # noqa: BLE001 - p. ej. el precio ya está en el 0,5: entrará a mercado con la señal
+            self.set_caption(f"limitada no colocada en {order.symbol}: {exc}")
+            return
+        self.pending.append((replace(order, ticket=fill.ticket, volume=fill.volume, risk_money=fill.risk), until))
+        _save_pending(self.pending, self.pending_file)
+        self.set_caption(f"limitada: {order.direction.capitalize()} {order.symbol} en {order.price:g}")
+
+    def _settle(self, item, cancel: bool) -> bool:
+        """Mira la limitada en MT5: llena, pasa a posición (True); sin llenar, se retira si `cancel`; anulada, se olvida."""
+        order = item[0]
+        src = self.services.source
+        try:
+            state = src.pending_state(order.ticket)
+            if state is not None and state["state"] == "pendiente" and cancel:
+                state = {"state": "anulada"} if src.cancel_order(order.ticket) else src.pending_state(order.ticket)
+        except Exception as exc:  # noqa: BLE001 - sin conexión: en la próxima vuelta
+            self.set_caption(f"{order.symbol}: sin datos de la limitada ({exc})")
+            return False
+        if state is None or state["state"] == "pendiente":
+            return False
+        self.pending = [x for x in self.pending if x is not item]
+        _save_pending(self.pending, self.pending_file)
+        if state["state"] != "llena":
+            return False
+        self._adopt(order, state)
+        return True
+
+    def _adopt(self, order, state: dict) -> None:
+        """La limitada se llenó: es la posición real de la señal, con la entrada y la hora de MT5."""
+        bar = (TIMEFRAMES.get(order.timeframe) or 15) * 60
+        order = replace(order, ticket=int(state["position"]), volume=float(state["volume"]), signal_price=order.price,
+                        price=float(state["price"]), entry_ts=int(state["ts"]) // bar * bar)     # la vela en la que entró
+        self.positions.append(order)
+        store.save(self.positions, self.file)
+        self._publish_account()
+        note = (f"Limitada llena en MT5: posición {order.ticket}, {order.volume:g} lotes a {order.price:g} (0,5 del fibo "
+                f"{order.signal_price:g}), stop {order.stop:g} y objetivo {order.target:g}; arriesga {order.risk_money:,.2f}.")
+        self.set_caption(f"limitada llena: {order.direction.capitalize()} {order.symbol}")
+        self.publish("setup.executed", {"order": order, "sent": True, "note": note, "risk_amount": order.risk_money})
+
+    def _check_pending(self) -> None:
+        """Cada vuelta: las limitadas llenas pasan a posición; las que llegan al final de su plazo se retiran."""
+        now = self.server_now()
+        for item in list(self.pending):
+            order, until = item
+            late = (until is not None and now >= until) or (order.close_ts is not None and now >= order.close_ts)
+            self._settle(item, cancel=late)
 
     # -- operativa real (MT5_<PERFIL>_SEND_ORDERS=true) -----------------------------------------
     def _real_balance(self) -> tuple[float, str] | None:
@@ -256,6 +354,7 @@ class SetupSkill(Skill):
         self._consolidate()
         if self.live:                                   # cierres en MT5 y el saldo real, que cambia con cada uno
             self._check_trading()
+            self._check_pending()
             self._sync_real()
             self._check_challenge()
             self._publish_account()
@@ -292,6 +391,8 @@ class SetupSkill(Skill):
             return
         for event in self.challenge.update(snap.balance, snap.equity, snap.currency):
             if event["kind"] in ("suspendido", "fase"):      # suspendido, o fase superada: cuenta congelada hasta mañana
+                for item in list(self.pending):         # sin limitadas: no puede entrar nada más
+                    self._settle(item, cancel=True)
                 for order in self.positions:
                     try:
                         self.services.source.close_position(order.ticket)
@@ -337,6 +438,8 @@ class SetupSkill(Skill):
         ts, high, low, close = (df[k].to_numpy() for k in ("ts", "high", "low", "close"))
         if self.live:                                   # la posición la cierra MT5 (o el bot por tiempo): aquí solo el breakeven
             self._candles[payload["symbol"]] = (ts, high, low)
+            for item in [x for x in self.pending if x[0].symbol == payload["symbol"]]:
+                self._settle(item, cancel=False)        # llena: pasa a posición
             moved = [self._breakeven(o, ts, high, low) if o.symbol == payload["symbol"] else o for o in self.positions]
             if any(a is not b for a, b in zip(moved, self.positions)):
                 self.positions = moved
@@ -362,3 +465,41 @@ class SetupSkill(Skill):
             self._publish_account()
         if still:
             self.set_caption(f"{len(still)} posición(es) abierta(s)")
+
+
+def _setup_key(order) -> tuple:
+    """La señal de un fibo: mercado, patrón, lado y TBR (zona y día)."""
+    return (order.symbol, order.pattern_key, order.direction, order.tbr_zone, str(order.tbr_day))
+
+
+def _same_setup(a, b) -> bool:
+    return _setup_key(a) == _setup_key(b)
+
+
+def _same_levels(a, b) -> bool:
+    return all(abs(float(x) - float(y)) <= 1e-9 * max(1.0, abs(float(x)))
+               for x, y in ((a.price, b.price), (a.stop, b.stop), (a.target, b.target)))
+
+
+def _load_pending(path: Path) -> list[tuple]:
+    """Las limitadas que el bot dejó en MT5 antes de reiniciar (limitadas.json): (orden, hasta)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for item in data if isinstance(data, list) else []:
+        try:
+            out.append((store.order_from_json(item["orden"]), item.get("hasta")))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _save_pending(items: list[tuple], path: Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps([{"orden": store.order_to_json(o), "hasta": u} for o, u in items], ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    tmp.replace(path)

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 DETECTED, INVALIDATED, ANNULLED, EXPIRED = "detected", "invalidated", "annulled", "expired"
+ARMED = "armed"                    # fibo formado esperando el 0,5: la entrada ya tiene precio, stop y objetivo (orden limitada)
 
 
 @dataclass(frozen=True)

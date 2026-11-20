@@ -328,6 +328,73 @@ class Mt5Source:
             filled = float(result.price or price)
             return Fill(ticket, exact, float(result.volume or volume), filled, round(per_lot * volume, 2))
 
+    def place_limit(self, symbol: str, direction: str, risk_money: float, price: float, stop: float, target: float,
+                    comment: str = "TradingBot") -> Fill:
+        """Deja una orden limitada (compra por debajo del precio, venta por encima) en `price` con su stop y su objetivo, con los
+        lotes que hacen que tocar el stop cueste `risk_money`. El ticket del Fill es el de la orden pendiente. TradeError si no
+        se puede (también si el precio ya ha llegado a `price`: entonces no es una limitada)."""
+        with self._lock:
+            mt5 = self._trading()
+            exact = self._resolve(mt5, symbol)
+            if exact is None or not mt5.symbol_select(exact, True):
+                raise TradeError(f"el símbolo '{symbol}' no existe en este broker")
+            info, tick = mt5.symbol_info(exact), mt5.symbol_info_tick(exact)
+            if info is None or tick is None or not tick.bid or not tick.ask:
+                raise TradeError(f"{exact} sin cotización (¿mercado cerrado?)")
+            if int(getattr(info, "trade_mode", 4)) == 0:
+                raise TradeError(f"{exact} no se puede operar en este broker")
+            long = direction == "long"
+            digits = int(info.digits)
+            price, stop, target = round(float(price), digits), round(float(stop), digits), round(float(target), digits)
+            if (long and not stop < price < target) or (not long and not target < price < stop):
+                raise TradeError(f"la entrada ({price:.{digits}f}) no está entre el stop ({stop:.{digits}f}) y el objetivo "
+                                 f"({target:.{digits}f})")
+            now = float(tick.ask if long else tick.bid)
+            if (long and now <= price) or (not long and now >= price):
+                raise TradeError(f"el precio ({now:.{digits}f}) ya ha llegado a la entrada ({price:.{digits}f})")
+            kind = mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL
+            volume, per_lot = self._volume(mt5, info, kind, price, stop, risk_money)
+            if volume <= 0:
+                raise TradeError(f"con {risk_money:,.2f} de riesgo no llega al lote mínimo de {exact} ({info.volume_min:g} lotes "
+                                 f"arriesgan {per_lot * info.volume_min:,.2f})")
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_PENDING, "symbol": exact, "volume": volume,
+                                     "type": mt5.ORDER_TYPE_BUY_LIMIT if long else mt5.ORDER_TYPE_SELL_LIMIT,
+                                     "price": price, "sl": stop, "tp": target, "magic": MAGIC, "comment": comment[:31],
+                                     "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_RETURN})
+            self._check(mt5, result, f"dejar la limitada {direction} de {exact} en {price}")
+            return Fill(int(result.order), exact, volume, price, round(per_lot * volume, 2))
+
+    def pending_state(self, ticket: int) -> dict | None:
+        """Qué ha sido de la orden limitada `ticket`: {"state": "pendiente"}, {"state": "llena", "position", "price", "volume",
+        "ts"} (precio medio y hora del servidor de la entrada) o {"state": "anulada"} (cancelada o caducada sin llenarse)."""
+        with self._lock:
+            mt5 = self._require()
+            if mt5.orders_get(ticket=int(ticket)):
+                return {"state": "pendiente"}
+            hist = mt5.history_orders_get(ticket=int(ticket)) or ()
+            position = int(getattr(hist[0], "position_id", 0) or 0) if hist else 0
+            deals = mt5.history_deals_get(position=position or int(ticket)) or ()
+            ins = [d for d in deals if int(d.entry) == 0]                    # DEAL_ENTRY_IN
+            if not ins:
+                return {"state": "anulada"} if hist else None             # sin historial todavía: se mira en la próxima vuelta
+            volume = sum(float(d.volume) for d in ins) or 1.0
+            return {"state": "llena", "position": position or int(ins[0].position_id or ticket),
+                    "price": sum(float(d.price) * float(d.volume) for d in ins) / volume, "volume": volume,
+                    "ts": int(min(d.time for d in ins))}
+
+    def cancel_order(self, ticket: int) -> bool:
+        """Retira la orden limitada. False si ya no estaba pendiente (se llenó o ya no existe)."""
+        with self._lock:
+            mt5 = self._trading()
+            if not mt5.orders_get(ticket=int(ticket)):
+                return False
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": int(ticket), "magic": MAGIC})
+            if result is not None and result.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
+                if not mt5.orders_get(ticket=int(ticket)):
+                    return False                                           # se llenó mientras tanto
+            self._check(mt5, result, f"retirar la limitada {ticket}")
+            return True
+
     def position_open(self, ticket: int) -> bool:
         with self._lock:
             return bool(self._require().positions_get(ticket=int(ticket)))

@@ -409,7 +409,7 @@ def test_setup_avisa_del_challenge_y_al_tocar_el_drawdown_cierra_y_no_abre_mas(t
     source.account = lambda: AccountSnapshot(50_000.0, 46_900.0, -3_100.0, "USD")   # equity -6,2 %
     setup.tick()
     wait(events, 2)
-    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    bus.publish("setup.order", {"order": fresh_order(pattern_key="otra")}, source="cortex")   # otra señal (la misma no vuelve)
     wait(got["skipped"])
     manager.stop()
     assert [e.payload["kind"] for e in events] == ["inicio", "suspendido"]
@@ -429,7 +429,7 @@ def test_setup_al_superar_la_fase_cierra_lo_abierto_y_congela(tmp_path):
     source.account = lambda: AccountSnapshot(54_100.0, 54_300.0, 200.0, "USD")      # saldo +8,2 %
     setup.tick()
     wait(events, 2)
-    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")
+    bus.publish("setup.order", {"order": fresh_order(pattern_key="otra")}, source="cortex")   # otra señal (la misma no vuelve)
     wait(got["skipped"])
     manager.stop()
     assert [e.payload["kind"] for e in events] == ["inicio", "fase"]
@@ -551,3 +551,179 @@ def test_challenge_simulado_sobre_el_historico():
     assert [(e["i"], e["kind"], e["phase"], e["key"]) for e in events] == [(1, "fase", 1, "fase"), (4, "drawdown", 2, "drawdown2")]
     events = simulate([0, 10, day], [8.0, 8.0, -7.0], lambda t: date.fromordinal(1 + t // day), 1.0, (8, 8), (6, 5), 2)
     assert [e["key"] for e in events] == ["fase", "drawdown2"]                          # el 10 no cuenta: día congelado
+
+
+# -- orden limitada en el 0,5 (antes del toque, como el backtest) ---------------------------------------------------
+class FakeMt5Limit(FakeMt5):
+    TRADE_ACTION_PENDING, TRADE_ACTION_REMOVE = 5, 8
+    ORDER_TYPE_BUY_LIMIT, ORDER_TYPE_SELL_LIMIT = 2, 3
+
+    def __init__(self):
+        super().__init__()
+        self.orders, self.history, self.deals = {}, {}, {}
+
+    def order_send(self, request):
+        if request["action"] == self.TRADE_ACTION_PENDING:
+            self.sent.append(request)
+            self.orders[777] = request
+            return types.SimpleNamespace(retcode=self.TRADE_RETCODE_PLACED, order=777, price=0, volume=0, comment="placed")
+        if request["action"] == self.TRADE_ACTION_REMOVE:
+            self.sent.append(request)
+            self.history[request["order"]] = types.SimpleNamespace(position_id=0)
+            self.deals.pop(request["order"], None)
+            self.orders.pop(request["order"], None)
+            return types.SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, order=request["order"], price=0, volume=0, comment="")
+        return super().order_send(request)
+
+    def orders_get(self, ticket=None):
+        return tuple(o for t, o in self.orders.items() if ticket in (None, t))
+
+    def history_orders_get(self, ticket=None):
+        return (self.history[ticket],) if ticket in self.history else ()
+
+    def history_deals_get(self, position=None):
+        return self.deals.get(position, ())
+
+    def fill(self, ticket, price, ts):
+        req = self.orders.pop(ticket)
+        self.history[ticket] = types.SimpleNamespace(position_id=ticket)
+        self.deals[ticket] = (types.SimpleNamespace(entry=0, price=price, volume=req["volume"], time=ts, position_id=ticket),)
+
+
+def test_la_limitada_se_deja_en_el_05_y_se_sabe_si_se_lleno_o_se_retiro(monkeypatch):
+    mt5 = FakeMt5Limit()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5)
+    src = Mt5Source(Mt5Profile("puprime_live", 7, "PUPrime-Demo"))
+    src.connect()
+    fill = src.place_limit("NAS100", "long", 500.0, 98.0, 93.0, 108.0, "TB continuacion")
+    req = mt5.sent[-1]
+    assert (req["action"], req["type"], req["price"], req["sl"], req["tp"]) == (5, 2, 98.0, 93.0, 108.0)   # compra limitada
+    assert (fill.ticket, fill.volume, fill.price, fill.risk) == (777, 100.0, 98.0, 500.0)                 # 5 puntos x 100 lotes
+    assert src.pending_state(777) == {"state": "pendiente"}
+    mt5.fill(777, 97.9, 5000)
+    assert src.pending_state(777) == {"state": "llena", "position": 777, "price": 97.9, "volume": 100.0, "ts": 5000}
+    assert src.cancel_order(777) is False                                                                  # ya llena: no se retira
+    src.place_limit("NAS100", "long", 500.0, 98.0, 93.0, 108.0)
+    assert src.cancel_order(777) is True and src.pending_state(777) == {"state": "anulada"}
+    with pytest.raises(TradeError, match="ya ha llegado"):                                                 # el precio ya está en el 0,5
+        src.place_limit("NAS100", "long", 500.0, 100.6, 95.0, 110.0)
+
+
+class FakeLimitSource(FakeSource):
+    def __init__(self):
+        super().__init__()
+        self.state = {"state": "pendiente"}
+
+    def place_limit(self, symbol, direction, risk, price, stop, target, comment):
+        self.calls.append(("limit", symbol, direction, risk, price, stop, target))
+        self.state = {"state": "pendiente"}
+        return Fill(777, "NAS100.s", 100.0, price, 500.0)
+
+    def pending_state(self, ticket):
+        return dict(self.state)
+
+    def cancel_order(self, ticket):
+        self.calls.append(("cancel", ticket))
+        if self.state["state"] != "pendiente":
+            return False
+        self.state = {"state": "anulada"}
+        return True
+
+
+def armed_order(**kw):
+    from dataclasses import replace
+    from tradingbot.skills.setup import live
+    now = live.server_now(None)
+    return replace(ORDER, entry_ts=now - 900, close_ts=now + 3600, **kw)
+
+
+def test_la_limitada_llena_es_la_posicion_y_su_patron_no_abre_otra(tmp_path):
+    source = FakeLimitSource()
+    manager, bus, got = run_live(source, tmp_path)
+    wait(got["account"])
+    order = armed_order()
+    until = order.close_ts
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": [(order, until)]}, source="cortex")
+    time.sleep(0.3)
+    setup = manager.skills["setup"]
+    assert source.calls == [("limit", "NAS100", "long", 500.0, 100.0, 95.0, 110.0)] and len(setup.pending) == 1
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": [(order, until)]}, source="cortex")       # la misma: no se toca
+    time.sleep(0.2)
+    assert len(source.calls) == 1 and (tmp_path / "limitadas.json").exists()
+    source.state = {"state": "llena", "position": 888, "price": 99.98, "volume": 100.0, "ts": order.entry_ts + 1000}
+    setup.tick()
+    wait(got["executed"])
+    o = setup.positions[0]
+    assert (o.ticket, o.price, o.signal_price, o.entry_ts, o.risk_money) == (888, 99.98, 100.0, (order.entry_ts + 1000) // 900 * 900, 500.0)
+    assert setup.pending == [] and "Limitada llena" in got["executed"][0].payload["note"]
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")                # el patrón al cerrar la vela: ya está dentro
+    time.sleep(0.3)
+    manager.stop()
+    assert [c for c in source.calls if c[0] == "open"] == [] and len(got["executed"]) == 1 and got["skipped"] == []
+
+
+def test_la_limitada_se_retira_si_el_fibo_cambia_y_sin_llenar_se_entra_a_mercado(tmp_path):
+    source = FakeLimitSource()
+    manager, bus, got = run_live(source, tmp_path)
+    wait(got["account"])
+    order = armed_order()
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": [(order, order.close_ts)]}, source="cortex")
+    time.sleep(0.3)
+    moved = armed_order(price=101.0, stop=96.0)                                           # el 0 se movió: nueva limitada
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": [(moved, moved.close_ts)]}, source="cortex")
+    time.sleep(0.3)
+    assert [c[0] for c in source.calls] == ["limit", "cancel", "limit"] and source.calls[-1][4:6] == (101.0, 96.0)
+    bus.publish("setup.order", {"order": fresh_order()}, source="cortex")                # tocó el 0,5 sin llenarla: a mercado
+    wait(got["executed"])
+    setup = manager.skills["setup"]
+    manager.stop()
+    assert [c[0] for c in source.calls] == ["limit", "cancel", "limit", "cancel", "open"] and setup.pending == []
+    assert setup.positions[0].ticket == 555
+
+
+def test_la_limitada_se_retira_cuando_el_fibo_ya_no_espera(tmp_path):
+    source = FakeLimitSource()
+    manager, bus, got = run_live(source, tmp_path)
+    wait(got["account"])
+    order = armed_order()
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": [(order, order.close_ts)]}, source="cortex")
+    time.sleep(0.3)
+    bus.publish("setup.pending", {"symbol": "NAS100", "orders": []}, source="cortex")     # invalidado o vencido
+    time.sleep(0.3)
+    setup = manager.skills["setup"]
+    manager.stop()
+    assert [c[0] for c in source.calls] == ["limit", "cancel"] and setup.pending == [] and setup.positions == []
+
+
+def test_cortex_pasa_los_fibos_que_esperan_el_05_y_no_bloquea_el_suyo(tmp_path):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from tradingbot.core import EventBus, Services, SkillManager
+    from tradingbot.skills._comun.contratos import ARMED, DETECTED, PatternHit
+    import tradingbot.skills  # noqa: F401
+    bus, pend, orders = EventBus(), [], []
+    bus.subscribe("t", "setup.pending", pend.append)
+    bus.subscribe("t", "setup.order", orders.append)
+    cfg = {"app": {"strategy": "barrido_nyam", "data_dir": str(tmp_path)}}
+    manager = SkillManager(bus, Services(None, None, cfg, EnvConfig()), [{"type": "cortex"}])
+    manager.start()
+    tbr = SimpleNamespace(zone="NY Open", day=date(2026, 11, 17), high=105.0, low=95.0, mid=100.0)
+    levels = {"stop": 95.0, "target": 110.0}
+    hit = PatternHit("p", "Patrón de prueba", "long", 5, 100.0, "", levels, 1000, ARMED)
+    bus.publish("pattern.armed", {"symbol": "NAS100", "armed": [{"symbol": "NAS100", "timeframe": "15m", "tbr": tbr, "hit": hit,
+                                                                 "session_close": 90_000, "until": 50_000}]}, source="pattern")
+    wait(pend)
+    (order, until), = pend[0].payload["orders"]                                          # Barrido: no depende del sesgo
+    from tradingbot.skills.bias.models import Bias, BiasResult
+    result = BiasResult(Bias.BULLISH, None, (), {}, "alcista", 3.0, 1.0, False)
+    bus.publish("bias.updated", {"symbol": "NAS100", "result": result, "background": True}, source="bias")   # para decidir el patrón
+    time.sleep(0.2)
+    assert (order.price, order.stop, order.target, until) == (100.0, 95.0, 110.0, 50_000)
+    bus.publish("setup.executed", {"order": replace(order, ticket=888, entry_ts=1900), "sent": True}, source="setup")
+    time.sleep(0.2)
+    found = PatternHit("p", "Patrón de prueba", "long", 6, 100.0, "", levels, 1900, DETECTED)
+    bus.publish("pattern.detected", {"symbol": "NAS100", "timeframe": "15m", "tbr": tbr, "hit": found, "session_close": 90_000},
+                source="pattern")
+    wait(orders)
+    manager.stop()
+    assert len(orders) == 1                                                                # su patrón no queda en NO GO
