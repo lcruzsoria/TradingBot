@@ -56,7 +56,7 @@ class TelegramSkill(Skill):
                    "que se abre en el navegador del móvil. Los secretos (token, chat, clave) van fuera del repositorio.")
     subscribes = ("candles.loaded", "quotes.updated", "bias.updated", "cortex.decision", "setup.executed", "setup.closed",
                   "telegram.capture", "clock.offset", "crt.pending", "crt.blocked", "enigma369.updated",
-                  "setup.challenge", "setup.trading")
+                  "setup.challenge", "setup.trading", "setup.account")
     publishes = ("telegram.capture.request",)
     slot = "aux1"
     interval = 3.0                                          # cada cuánto se miran los comandos que llegan por Telegram
@@ -81,6 +81,7 @@ class TelegramSkill(Skill):
         self._enigma: dict[str, tuple] = {}                  # mercado -> última alineación de Enigma369 vista
         self._enigma_symbol = str(app.get("symbol") or "")    # mercado de /enigma369_1m y /enigma369_5m (el del gráfico)
         self._shots: dict[str, str] = {}                     # pie de foto de cada imagen pedida a la interfaz
+        self._account: dict | None = None                    # último setup.account (saldo y challenge): lo contesta /challenge
         self.server: PanelServer | None = None
         self.board = PanelState(self.services.app_cfg, env.section("STATS").get("FORWARD_DIR"))
         self.telegram = False
@@ -135,7 +136,8 @@ class TelegramSkill(Skill):
     def _extra_commands(self) -> list[tuple[str, str]]:
         """Los de cada cuenta y, en el perfil Enigma369, sus gráficos."""
         enigma = list(messages.ENIGMA_COMMANDS) if self._strategy == "enigma369" else []
-        return [*enigma, *self.accounts.items()]
+        live = list(messages.LIVE_COMMANDS) if (self.services.app_cfg.get("app") or {}).get("send_orders") else []
+        return [*live, *enigma, *self.accounts.items()]
 
     @property
     def _strategy(self) -> str:
@@ -215,6 +217,9 @@ class TelegramSkill(Skill):
         if command == "captura":                             # la ventana la dibuja la interfaz (hilo de Qt): se le pide
             self._capture_asked = time.monotonic()
             self.publish("telegram.capture.request", {"request_id": "tg"})
+            return
+        if command == "challenge":                           # cómo va el challenge del perfil que opera de verdad
+            self._send(messages.challenge_status(self._account, self.profile))
             return
         if command in messages.ENIGMA_SHOTS and self._strategy == "enigma369":
             self._enigma_shot(command, text.split()[1:])
@@ -387,6 +392,8 @@ class TelegramSkill(Skill):
         elif topic == "crt.blocked":                            # setup CRT que no entró porque el stop supera el máximo: se avisa como una apertura
             if self.telegram and "abre" in self.notify and self._live(p["symbol"], p["entry_ts"]):
                 self._send(messages.blocked(p, self.profile))
+        elif topic == "setup.account":                              # saldo y challenge: los guarda para /challenge
+            self._account = p
         elif topic == "setup.challenge" and self.telegram:          # challenge simulado: siempre se avisa
             self._send(messages.challenge(p, self.profile))
         elif topic == "setup.trading" and self.telegram:            # MT5 deja de aceptar órdenes (o vuelve): siempre se avisa

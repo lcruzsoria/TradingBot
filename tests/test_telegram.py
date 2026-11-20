@@ -564,3 +564,40 @@ def test_la_imagen_de_enigma369_se_dibuja_con_sus_franjas():
 def messages_mod():
     from tradingbot.skills.telegram import messages
     return messages
+
+
+def test_el_comando_challenge_contesta_con_la_fase_el_saldo_y_lo_que_falta(sent, monkeypatch, tmp_path):
+    """/challenge (solo en el perfil que opera de verdad): fase, saldo real más recuperadas, objetivo y margen al drawdown."""
+    from tradingbot.skills.telegram import telegram as client
+    menu = []
+    monkeypatch.setattr(client, "set_commands", lambda token, commands: menu.extend(commands))
+    manager, bus = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n",
+                             {"data_dir": str(tmp_path / "perfil"), "profile_name": "puprime_live", "send_orders": True})
+    skill = manager.skills["telegram"]
+    INBOX.append(message(1, "/challenge"))
+    skill.tick()                                                                         # sin lectura de la cuenta todavía
+    bus.publish("setup.account", {"balance": 105086.04, "real_balance": 100424.53, "recovered": 4661.51, "currency": "USD",
+                                  "risk_amount": 1004.25, "live": True,
+                                  "challenge": {"phase": 1, "phases": 2, "status": "en curso", "start": 100000.0,
+                                                "target": 108800.0, "floor": 93500.0, "target_pct": 8.8, "max_dd_pct": 6.5,
+                                                "currency": "USD", "attempt": 1, "frozen_until": None}}, source="setup")
+    time.sleep(0.3)
+    INBOX.append(message(2, "/challenge"))
+    skill.tick()
+    manager.stop()
+    assert "challenge" in [c for c, _ in menu]
+    assert "Aún no ha llegado" in sent[0][2]
+    text = sent[1][2]
+    assert "fase 1 de 2 · en curso" in text and "105,086.04 USD" in text and "+5.09 %" in text
+    assert "recuperadas 4,661.51 USD" in text and "faltan 3,713.96 USD" in text and "margen 11,586.04 USD" in text
+    assert "faltan 3.7 R" in text
+
+
+def test_sin_operativa_real_no_hay_comando_challenge(sent, monkeypatch, tmp_path):
+    from tradingbot.skills.telegram import telegram as client
+    menu = []
+    monkeypatch.setattr(client, "set_commands", lambda token, commands: menu.extend(commands))
+    manager, _ = run_skill("TELEGRAM_ENABLED=true\nTELEGRAM_NOTIFY_START=false\n",
+                           {"data_dir": str(tmp_path / "perfil"), "profile_name": "puprime"})
+    manager.stop()
+    assert "challenge" not in [c for c, _ in menu]

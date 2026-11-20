@@ -141,6 +141,41 @@ def challenge(p: dict, profile: str | None = None) -> str:
     return f"{head}\n{body}{_footer(profile)}"
 
 
+def challenge_status(acc: dict | None, profile: str | None = None) -> str:
+    """/challenge: fase, saldo (el real de MT5 más las recuperadas), lo que falta al objetivo y el margen hasta el drawdown."""
+    c = (acc or {}).get("challenge")
+    if not c:
+        why = ("Aún no ha llegado la lectura de la cuenta: prueba en unos segundos." if acc is None
+               else "Este perfil no tiene challenge en marcha (solo los perfiles que operan de verdad).")
+        return f"<b>Challenge</b>\n{why}{_footer(profile)}"
+    cur = f" {_e(c.get('currency') or acc.get('currency') or '')}".rstrip()
+
+    def money(v) -> str:
+        return f"{float(v):,.2f}{cur}"
+    start, bal = float(c["start"]), float(acc["balance"])
+    pct = (bal - start) / start * 100 if start else 0.0
+    icon = {"en curso": "🏁", "congelado": "🧊", "superado": "🏆", "suspendido": "⛔"}.get(c["status"], "🏁")
+    lines = [f"{icon} <b>Challenge · fase {c['phase']} de {c['phases']} · {_e(c['status'])}</b>"
+             + (f" (intento {c['attempt']})" if c.get("attempt", 1) > 1 else ""),
+             f"Saldo <b>{money(bal)}</b> ({pct:+.2f} % desde {money(start)})"]
+    if acc.get("recovered"):
+        lines.append(f"  real en MT5 {money(acc.get('real_balance', bal - acc['recovered']))} + recuperadas {money(acc['recovered'])}")
+    if c.get("target") is not None:
+        left = float(c["target"]) - bal
+        lines.append(f"🎯 Objetivo +{c['target_pct']:g} %: {money(c['target'])}"
+                     + (f" · faltan {money(left)}" if left > 0 else " · alcanzado"))
+        lines.append(f"🛑 Drawdown -{c['max_dd_pct']:g} %: mínimo {money(c['floor'])} · margen {money(bal - float(c['floor']))}")
+        if acc.get("risk_amount"):
+            lines.append(f"Riesgo por operación {money(acc['risk_amount'])}: faltan {max(left, 0) / acc['risk_amount']:.1f} R")
+    if c.get("frozen_until"):
+        until = c["frozen_until"]
+        nxt = f"; luego la fase {c['next_phase']}" if c.get("next_phase") else ""
+        lines.append(f"Cuenta congelada hasta el {until[8:10]}/{until[5:7]} a las {until[11:16]}{nxt}.")
+    if c.get("reason"):
+        lines.append(f"<i>{_e(c['reason'])}</i>")
+    return "\n".join(lines) + _footer(profile)
+
+
 def started(profile: str | None = None) -> str:
     return f"🤖 <b>TradingBot en marcha</b>{_footer(profile)}"
 
@@ -179,6 +214,8 @@ COMMANDS = (("panel", "Imagen del panel"), ("captura", "Captura de la ventana de
             ("estado", "Abiertas, resultado de hoy y sesgo"), ("abiertas", "Operaciones abiertas con su R"),
             ("hoy", "Cierres y resultado de hoy"), ("sesgo", "Sesgo de cada mercado"),
             ("decisiones", "Últimos GO / NO GO de Cortex"), ("ayuda", "Lista de comandos"))
+# perfil que opera de verdad (MT5_<PERFIL>_SEND_ORDERS)
+LIVE_COMMANDS = (("challenge", "Cómo va el challenge: fase, saldo, objetivo y drawdown"),)
 # perfil Enigma369: gráfico con las zonas -> (timeframe, horas que se ven, modo de las franjas)
 ENIGMA_SHOTS = {"enigma369_1m": ("1m", 6, "dia"), "enigma369_5m": ("5m", 24, "semana")}
 ENIGMA_COMMANDS = (("enigma369_1m", "Últimas 6 h en 1m con las zonas de Enigma369 (Día → Micro)"),
