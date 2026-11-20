@@ -222,7 +222,7 @@ def main() -> None:
         raise SystemExit(f"No hay backtests en {args.analisis}: ejecuta antes scripts/backtest_patrones.py")
     if args.salida.exists():                                           # los grupos CRT, Enigma369 y Barrido_NYAM no salen de analisis/*.xlsx: se conservan
         kept = [g for g in json.loads(gzip.decompress(args.salida.read_bytes()).decode("utf-8")).get("grupos", [])
-                if g.get("perfil") in ("crt", "enigma369", "barrido_nyam")]   # (se regeneran con exportar_backtest_crt.py, _enigma369.py y _barrido.py)
+                if g.get("perfil") in ("crt", "enigma369", "barrido_nyam", "ventana9_55")]   # (se regeneran con exportar_backtest_crt.py, _enigma369.py, _barrido.py y _ventana955.py)
         out["grupos"].extend(kept)
         if kept:
             print(f"  conservados {len(kept)} grupos CRT / Enigma369 / Barrido del fichero actual")

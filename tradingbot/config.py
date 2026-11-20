@@ -82,19 +82,21 @@ class Mt5Profile:
 
 STRATEGY_SKILLS_OFF = {"calendario": ("pattern", "tbr"), "tbrvwap": ("calendario",),
                        "barrido_nyam": ("calendario", "pattern"),   # tiene su propia skill (barrido, sin Pattern); mantiene TBR y Bias
+                       "ventana9_55": ("calendario", "pattern"),    # como Barrido_NYAM: skill barrido con su único setup (ventana_955)
                        "crt": ("pattern", "tbr", "calendario", "bias"),
                        "enigma369": ("pattern", "tbr", "calendario")}   # skills que un perfil de estrategia no usa (solo opera la suya; CRT tiene su propio sesgo)
 
 STRATEGY_SKILLS_ON = {"crt": ({"type": "crt", "slot": "aux2"},),
-                      "barrido_nyam": ({"type": "barrido", "slot": 4}, {"type": "smt", "slot": "aux2"}),   # en el hexágono grande que ocupa Pattern en los demás perfiles
+                      "barrido_nyam": ({"type": "barrido", "slot": 4}, {"type": "smt", "slot": "aux2"}),
+                      "ventana9_55": ({"type": "barrido", "slot": 4},),   # en el hexágono grande que ocupa Pattern en los demás perfiles
                       "enigma369": ({"type": "enigma369", "slot": 2},)}   # skills que solo existen en ese perfil de estrategia
 
-STRATEGY_TIMEFRAMES = {"crt": "5m", "barrido_nyam": "5m", "enigma369": "5m"}   # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
+STRATEGY_TIMEFRAMES = {"crt": "5m", "barrido_nyam": "5m", "enigma369": "5m", "ventana9_55": "5m"}   # timeframe de arranque de un perfil de estrategia (CRT busca el iFVG en M1, M3 o M5)
 
 STRATEGY_PATTERNS = {"tbrvwap": ("tbr_vwap",)}      # patrones que busca un perfil de estrategia (y solo esos)
 
 
-BARRIDO_STRATEGIES = ("barrido_nyam",)   # perfiles Greenbird: el sesgo se muestra pero no decide, TBR y Entradas a la vista, sin Fibo
+BARRIDO_STRATEGIES = ("barrido_nyam", "ventana9_55")   # perfiles Greenbird: el sesgo se muestra pero no decide, TBR y Entradas a la vista, sin Fibo
 
 
 def strategy_skills(skills: list[dict], strategy: str) -> list[dict]:

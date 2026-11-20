@@ -11,7 +11,8 @@ Cada setup tiene su propio módulo de reglas y su propio bloque de ajustes (BARR
 con las TBR de la skill TBR y las velas del gráfico evalúa cada día (o noche) con el rango ya cerrado y publica lo mismo que publica Pattern
 (`pattern.updated`, `pattern.detected`, `pattern.discarded`, `pattern.swept`) para que Cortex, Setup, Stats y la ventana la traten igual.
 Los tipos de esos mensajes viven en `skills/_comun/contratos.py`. Es independiente de la skill Pattern. La señal llega en cuanto cierra la
-vela de entrada. `BARRIDO_SETUPS` (rth, asia_continuacion, pdh, londres, continuacion, preny) elige qué setups busca.
+vela de entrada. `BARRIDO_SETUPS` (rth, asia_continuacion, pdh, londres, continuacion, preny) elige qué setups busca; un perfil de estrategia
+propio puede fijar los suyos con `<ESTRATEGIA>_BARRIDO_SETUPS` (Ventana9_55: `ventana_955`, `ventana.py`).
 """
 from __future__ import annotations
 
@@ -22,10 +23,12 @@ from ...core import Event, Skill, background_of, register_skill
 from ...timeframes import display_label, minutes
 from .._comun.contratos import DETECTED
 from ..feed.datasource import aggregate_candles
-from . import asia_continuacion, continuacion, londres, pdh, preny, rth
+from . import asia_continuacion, continuacion, londres, pdh, preny, rth, ventana
 from .rth import cierre_del_dia
 
-SETUPS = {"rth": rth, "asia_continuacion": asia_continuacion, "pdh": pdh, "londres": londres, "continuacion": continuacion, "preny": preny}        # clave del setup -> su módulo (KEY, Ajustes, contextos, analizar)
+SETUPS = {"rth": rth, "asia_continuacion": asia_continuacion, "pdh": pdh, "londres": londres, "continuacion": continuacion, "preny": preny,
+          "ventana_955": ventana}        # clave del setup -> su módulo (KEY, Ajustes, contextos, analizar)
+OWN_PROFILE_SETUPS = ("ventana_955",)   # solo para su perfil (<ESTRATEGIA>_BARRIDO_SETUPS): no entran por defecto en Barrido_NYAM
 DEFAULT_HISTORY_DAYS = 30        # días pasados de los que se dibujan las entradas
 RECENT_SECONDS = 24 * 3600       # un rango cerrado en el último día siempre se evalúa y se avisa
 DEFAULT_INDEX_DAY_START = "18:00"
@@ -66,7 +69,9 @@ class BarridoSkill(Skill):
                    "10:00 y las 11:00 y la primera vela M5 posterior que cierra dentro (antes de las 12:00) da la entrada; stop sobre el extremo del barrido "
                    "(fijo de 40 puntos si queda más cerca), objetivo 1 en el lado contrario del RTH y breakeven al tomar el Low/High de NY Open. Continuación de Asia: la "
                    "primera vela M5 que cierra fuera del rango de Asia entre las 00:00 y las 00:30 da la entrada a favor de la rotura; stop 30 puntos y objetivo 3R. PDH/PDL: "
-                   "nivel del día anterior sin tocar que se barre entre las 20:00 y las 21:00; entrada en el primer cierre de vuelta dentro y objetivo en el otro lado de Asia. Londres: lo mismo entre las 02:00 y las 03:00 con salida al cierre de Londres (05:00). Continuación: tras tocar el 50 % del RTH, la primera vela M5 que cierra fuera del rango (antes de las 11:00) da la entrada a favor; stop 40 puntos y objetivo 2R (Nasdaq). Pre-NY: el PDH/PDL fresco barrido entre las 05:00 y las 09:00, con entrada en el cierre de vuelta y objetivo fijo 2R. Cortex los "
+                   "nivel del día anterior sin tocar que se barre entre las 20:00 y las 21:00; entrada en el primer cierre de vuelta dentro y objetivo en el otro lado de Asia. Londres: lo mismo entre las 02:00 y las 03:00 con salida al cierre de Londres (05:00). Continuación: tras tocar el 50 % del RTH, la primera vela M5 que cierra fuera del rango (antes de las 11:00) da la entrada a favor; stop 40 puntos y objetivo 2R (Nasdaq). Pre-NY: el PDH/PDL fresco barrido entre las 05:00 y las 09:00, con entrada en el cierre de vuelta y objetivo fijo 2R. Ventana 9:55 (perfil "
+                   "Ventana9_55): la vela de las 10:00 barre la de las 09:55 y cierra del color contrario; entrada a su cierre en contra del barrido, "
+                   "stop en su punta y objetivo 3R (Nasdaq). Cortex los "
                    "valida; solo informa, no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
     publishes = ("pattern.updated", "pattern.detected", "pattern.discarded", "pattern.swept")
@@ -89,7 +94,10 @@ class BarridoSkill(Skill):
 
     def _load_settings(self) -> None:
         # tradingbot.env, bloque BARRIDO: BARRIDO_SETUPS, BARRIDO_HISTORY_DAYS y, por setup, BARRIDO_RTH_*, BARRIDO_ASIA_CONTINUACION_*, BARRIDO_PDH_*, BARRIDO_LONDRES_* y BARRIDO_CONTINUACION_*
-        names = [n.lower() for n in self.settings.get_list("SETUPS", list(SETUPS))]
+        env = self.services.env
+        strategy = (self.services.app_cfg["app"].get("strategy") or "") if self.services.app_cfg else ""
+        own = env.section(f"{strategy}_BARRIDO") if env is not None and strategy else None   # <ESTRATEGIA>_BARRIDO_SETUPS: solo ese perfil
+        names = [n.lower() for n in ((own.get_list("SETUPS", []) if own is not None else []) or self.settings.get_list("SETUPS", [k for k in SETUPS if k not in OWN_PROFILE_SETUPS]))]
         unknown = [n for n in names if n not in SETUPS]
         if unknown or not names:
             raise ValueError(f"BARRIDO_SETUPS={', '.join(names)}: setup desconocido {', '.join(unknown)}. Disponibles: {', '.join(SETUPS)}.")
@@ -97,13 +105,11 @@ class BarridoSkill(Skill):
         self.history_days = self.settings.get_int("HISTORY_DAYS", DEFAULT_HISTORY_DAYS)
         if self.history_days < 1:
             raise ValueError(f"BARRIDO_HISTORY_DAYS={self.history_days} debe ser 1 o más.")
-        env = self.services.env
         self.since = _forward_start(env)
         levels = env.section("LEVELS") if env is not None else None          # el día de trading de los índices USA acaba cuando empieza el siguiente
         self.day_end = _hhmm(levels.get("INDEX_DAY_START", DEFAULT_INDEX_DAY_START) if levels else DEFAULT_INDEX_DAY_START, "LEVELS_INDEX_DAY_START")
         setup = env.section("SETUP") if env is not None else None            # el breakeven del dibujo es el mismo que aplica Setup
         risk_pct, be_pct = (setup.get_float("RISK_PCT", 1.0), setup.get_float("BE_TRIGGER_PCT", 1.0)) if setup else (1.0, 1.0)
-        strategy = (self.services.app_cfg["app"].get("strategy") or "") if self.services.app_cfg else ""
         if env is not None and strategy:                                     # <ESTRATEGIA>_SETUP_BE_TRIGGER_PCT: 0 = sin breakeven por % de ganancia
             be_pct = env.section(f"{strategy}_SETUP").get_float("BE_TRIGGER_PCT", be_pct)
         self.be_r = be_pct / risk_pct if risk_pct > 0 and be_pct > 0 else None

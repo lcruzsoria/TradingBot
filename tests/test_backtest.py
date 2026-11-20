@@ -119,8 +119,8 @@ def test_ventana_backtest_con_el_resumen_real():
     bt = load()
     assert [g.key for g in bt.groups] == ["puprime:indices", "puprime:forex", "puprime:oro", "puprime:cripto", "metaquotes:indices",
                                           "metaquotes:forex", "metaquotes:oro", "calendario", "enigma369:indices", "crt:indices", "crt:forex",
-                                          "barrido_nyam:indices"]
-    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "enigma369", "crt", "barrido_nyam"]
+                                          "barrido_nyam:indices", "ventana9_55:indices"]
+    assert [p for p, _ in bt.profiles] == ["puprime", "metaquotes", "calendario", "enigma369", "crt", "barrido_nyam", "ventana9_55"]
     dlg = BacktestDialog(None, bt)
     assert dlg.group_key == "puprime:indices" and dlg.profile_key == "puprime" and dlg.blocks["n"].value.text() != "-"
     assert dlg.by_market.rows and dlg.compare.rows and dlg.by_year.values

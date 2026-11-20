@@ -949,3 +949,42 @@ def test_barrido_stop_fijo_por_mercado():
         assert "STOP_POINTS_DJ30" in str(e)
     else:
         raise AssertionError("debe rechazar puntos <= 0")
+
+
+# -- perfil Ventana9_55: la vela de las 10:00 barre la de las 09:55 --------------------------------------------------
+def test_ventana_955_la_vela_de_las_10_barre_la_de_las_955_y_se_entra_en_contra_con_stop_en_su_punta_y_3r():
+    from tradingbot.skills.barrido.ventana import Ajustes, KEY, analizar
+    v1 = (95, 98, 93, 97)                                                 # 09:55, de cualquier color
+    hits, figs = analizar(_barrido_ctx([v1, (97, 100, 94, 95), (95, 96, 90, 91)]))      # 10:00 supera su High (98) y cierra negra: corto
+    assert [(h.key, h.direction, h.x, h.price, h.levels) for h in hits] == [(KEY, "short", 1, 95.0, {"stop": 100.0, "target": 80.0})]
+    assert hits[0].ts == 10 * 3600 + 5 * 60 and len(figs) == 1          # la señal llega al cierre de la vela de las 10:00
+    hits, _ = analizar(_barrido_ctx([(97, 98, 93, 94), (94, 96, 91, 95.5)]))             # baja de su Low (93) y cierra blanca: largo
+    assert [(h.direction, h.levels) for h in hits] == [("long", {"stop": 91.0, "target": 109.0})]
+    hits, _ = analizar(_barrido_ctx([v1, (97, 99, 92, 94)]))                              # toca los dos lados: decide su color (negra)
+    assert [(h.direction, h.levels["stop"]) for h in hits] == [("short", 99.0)]
+    assert analizar(_barrido_ctx([v1, (96, 100, 95, 99)]))[0] == []      # supera el High pero cierra blanca: no hay setup
+    assert analizar(_barrido_ctx([v1, (97, 97.5, 94, 95)]))[0] == []     # negra sin barrer el High
+    assert analizar(_barrido_ctx([v1, (97, 100, 94, 95)], symbol="SP500"))[0] == []      # solo Nasdaq
+    assert analizar(_barrido_ctx([v1]))[0] == []                         # la vela de las 10:00 aún no ha cerrado
+    a = Ajustes.desde(EnvConfig(parse("RR=2\n")))
+    assert analizar(_barrido_ctx([v1, (97, 100, 94, 95)]), a)[0][0].levels["target"] == 85.0
+    with pytest.raises(ValueError, match="BARRIDO_VENTANA_955_RR"):
+        Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
+def test_el_perfil_ventana9_55_solo_busca_su_setup_y_barrido_nyam_no_lo_ve():
+    from tradingbot.config import BARRIDO_STRATEGIES, STRATEGY_TIMEFRAMES, strategy_skills
+    from tradingbot.core import EventBus, Services, SkillManager
+    import tradingbot.skills  # noqa: F401
+
+    def skill(strategy, text):
+        s = SkillManager(EventBus(), Services(None, None, {"app": {"strategy": strategy}}, EnvConfig(parse(text))), [{"type": "barrido"}]).skills["barrido"]
+        s.on_start()
+        return s
+    env = "BARRIDO_SETUPS=rth, continuacion\nVENTANA9_55_BARRIDO_SETUPS=ventana_955\n"
+    assert list(skill("ventana9_55", env).setups) == ["ventana_955"]
+    assert list(skill("barrido_nyam", env).setups) == ["rth", "continuacion"]
+    assert "ventana_955" not in skill("barrido_nyam", "").setups          # sin BARRIDO_SETUPS tampoco entra en Barrido_NYAM
+    kept = strategy_skills([{"type": "cortex"}, {"type": "pattern"}, {"type": "tbr"}, {"type": "calendario"}], "ventana9_55")
+    assert [(s["type"], s.get("slot")) for s in kept] == [("cortex", None), ("tbr", None), ("barrido", 4)]
+    assert "ventana9_55" in BARRIDO_STRATEGIES and STRATEGY_TIMEFRAMES["ventana9_55"] == "5m"
