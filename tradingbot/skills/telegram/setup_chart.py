@@ -1,5 +1,6 @@
 """El dibujo de un setup ejecutado (comando /dibujar de Telegram): velas, caja de la TBR con el color de su zona, fibo (1, 0,5, 0 y
--0,2) y la posición con su SL y su TP. Se dibuja con Qt sobre una imagen en memoria, como la tarjeta del panel.
+-0,2) y la posición con su SL y su TP. El fibo es el de la señal; si la orden real se llenó en otro precio, esa entrada se ve
+aparte (naranja). El stop movido (breakeven o asegurado) se dibuja desde que se movió. Se dibuja con Qt sobre una imagen en memoria, como la tarjeta del panel.
 
 Criterio de colores:
 - la TBR, del color de su zona (los de la skill TBR: Asia, London, NY Open);
@@ -25,6 +26,7 @@ BARS_AFTER = 6                                               # velas después de
 UP, DOWN = "#26A69A", "#5C6370"
 SL_PINK, TP_GREEN, TP_GRAY = "#D81B60", "#2E7D32", "#9E9E9E"
 ONE, ZERO, HALF, TARGET = "#6A1B9A", "#6A1B9A", "#2E7D32", "#1565C0"
+FILL = "#EF6C00"                                             # la entrada real en MT5 cuando no es la de la señal
 SIDE = {"long": "largo", "short": "corto"}
 RESULT = {"objetivo": "TP", "stop": "SL", "breakeven": "BE", "asegurado": "SL+", "tiempo": "T"}
 FALLBACK_COLOR = "#9E9E9E"
@@ -80,6 +82,9 @@ def _swing(df, first: int, entry: int, stop: float, zero: float, long: bool) -> 
             if _same(hi[i] if long else lo[i], zero):
                 zero_i = i
                 break
+        if zero_i is None:                                   # el 0 puede ser de antes del 1: el más cercano a él
+            before = [i for i in range(first, one) if _same(hi[i] if long else lo[i], zero)]
+            zero_i = before[-1] if before else None
     return one, zero_i
 
 
@@ -90,13 +95,19 @@ def render(order: dict, closed: dict | None, df, offset: int | None, zones: list
     o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
     long = order["direction"] == "long"
     entry_px, stop, target = float(order["price"]), float(order["stop"]), float(order["target"])
-    zero = 2 * entry_px - stop                                # el fibo: 1 = stop, 0,5 = entrada, 0, -0,2 = objetivo
+    # El fibo es el de la señal: 1 = stop, 0,5 = entrada de la señal, 0, -0,2 = objetivo. En la operativa real la orden se
+    # llena a mercado (order["price"]) y puede quedar lejos del 0,5 (signal_price): el fibo no se recoloca con ella.
+    signal_px = float(order.get("signal_price") or entry_px)
+    zero = 2 * signal_px - stop
+    filled_apart = not _same(signal_px, entry_px)
     zone = zone_of(order.get("tbr_zone", ""), zones)
     color = zone.color if zone else FALLBACK_COLOR
     entry_i = int(np.searchsorted(ts, int(order["entry_ts"])))
     entry_i = min(entry_i, len(ts) - 1)
     result = closed["result"] if closed else None
-    exit_i = min(int(np.searchsorted(ts, int(closed["exit_ts"]))), len(ts) - 1) if closed and closed.get("exit_ts") else len(ts) - 1
+    # la vela en la que se salió: la que contiene la hora de salida (en la real no cae en la apertura de una vela)
+    exit_i = (min(max(int(np.searchsorted(ts, int(closed["exit_ts"]), side="right")) - 1, 0), len(ts) - 1)
+              if closed and closed.get("exit_ts") else len(ts) - 1)
     exit_i = max(exit_i, entry_i)
     box = tbr_bars(ts, zone, offset, entry_i) if zone else None
     first = max((box[0] if box else entry_i - 12) - BARS_BEFORE, 0)
@@ -177,11 +188,23 @@ def render(order: dict, closed: dict | None, df, offset: int | None, zones: list
     if zero_i is not None:
         dot(zero_i, zero, ZERO)
         text(X(zero_i) - 4, Y(zero) + (24 if not long else -12), "0", ZERO, 14, True)
-    dot(entry_i, entry_px, HALF)
+    dot(entry_i, entry_px, FILL if filled_apart else HALF)
+
+    # stop movido (breakeven o asegurado): desde la vela en que se movió hasta la salida
+    moved = None
+    if closed and closed.get("be_ts") is not None:
+        moved = float(order["be_stop"]) if order.get("be_stop") is not None else entry_px
+        be_i = min(max(int(np.searchsorted(ts, int(closed["be_ts"]), side="right")) - 1, entry_i), exit_i)
+        p.setPen(QPen(QColor(SL_PINK), 2, Qt.PenStyle.DashLine))
+        p.drawLine(int(X(be_i) - cw / 2), int(Y(moved)), int(X(exit_i) + cw / 2), int(Y(moved)))
+        text(X(be_i), Y(moved) + (14 if long else -6), f"stop movido  {fmt_price(moved)}", "#AD1457", 12, True)
 
     # niveles del fibo, a la derecha
-    for name, price, col in (("1 · stop", stop, ONE), ("0,5 · entrada", entry_px, HALF), ("0", zero, ZERO),
-                             ("-0,2 · objetivo", target, TARGET)):
+    levels = [("1 · stop", stop, ONE), ("0,5 · entrada" if not filled_apart else "0,5 · señal", signal_px, HALF),
+              ("0", zero, ZERO), ("-0,2 · objetivo", target, TARGET)]
+    if filled_apart:
+        levels.append(("entrada en MT5", entry_px, FILL))
+    for name, price, col in levels:
         p.setPen(QPen(QColor(col), 1.2, Qt.PenStyle.DashLine))
         p.drawLine(int(X(one_i if one_i is not None else entry_i) - cw), int(Y(price)), int(WIDTH - RIGHT), int(Y(price)))
         text(WIDTH - RIGHT + 8, Y(price) + 4, f"{name}  {fmt_price(price)}", col, 13, True)
@@ -197,7 +220,8 @@ def render(order: dict, closed: dict | None, df, offset: int | None, zones: list
         short = RESULT.get(result, str(result))
         ny_exit, _ = ny_from_server(int(ts[exit_i]), offset)
         col = {"TP": "#2E7D32", "SL": "#B71C1C"}.get(short, "#616161")
-        level = stop if short == "SL" else target if short == "TP" else entry_px
+        level = (stop if short == "SL" else target if short == "TP" else moved if moved is not None and short in ("BE", "SL+")
+                 else float(closed.get("exit_price") or entry_px))
         text(X(exit_i) - 60, Y(level) + (-10 if (short == "SL") != long else 22),
              f"{short} ({ny_exit.strftime('%H:%M')} NY): {float(closed['r']):+.2f} R".replace(".", ","), col, 14, True)
 
@@ -212,7 +236,8 @@ def render(order: dict, closed: dict | None, df, offset: int | None, zones: list
     else:
         sub = "Operación abierta"
     text(LEFT, 54, sub, "#444444", 14)
-    text(LEFT, 74, f"Entrada {SIDE.get(order['direction'], '')} {ny_entry_hm} NY · sesgo {order.get('bias', '')} · entrada {fmt_price(entry_px)} · stop {fmt_price(stop)} · objetivo {fmt_price(target)}",
+    fill_note = f" (señal {fmt_price(signal_px)})" if filled_apart else ""
+    text(LEFT, 74, f"Entrada {SIDE.get(order['direction'], '')} {ny_entry_hm} NY · sesgo {order.get('bias', '')} · entrada {fmt_price(entry_px)}{fill_note} · stop {fmt_price(stop)} · objetivo {fmt_price(target)}",
          "#666666", 13)
     p.end()
     data = QByteArray()

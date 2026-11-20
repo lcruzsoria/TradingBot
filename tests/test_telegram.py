@@ -446,6 +446,30 @@ def test_el_dibujo_del_setup_es_una_imagen_con_el_tramo_del_tp_segun_el_resultad
     assert all(png[:4] == b"\x89PNG" and len(png) > 3000 for png in (tp, sl, open_)) and tp != sl
 
 
+def test_el_fibo_del_dibujo_es_el_de_la_senal_aunque_la_orden_real_se_llene_en_otro_precio(monkeypatch):
+    """Operativa real: la orden se llena a mercado lejos del 0,5. El 0 sale de la señal (no de la entrada) y la entrada real
+    se dibuja aparte; la salida cae en la vela que contiene su hora."""
+    import numpy as np
+    import pandas as pd
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.skills.telegram import setup_chart
+    QApplication.instance() or QApplication([])
+    ts = 1_795_140_000 + np.arange(40) * 900
+    lows = np.full(40, 26300.0)
+    highs = np.full(40, 26340.0)
+    lows[20], highs[24] = 26270.12, 26371.38                 # el 0 (antes del 1) y el 1, que fija el stop
+    df = pd.DataFrame({"ts": ts, "open": 26320.0, "high": highs, "low": lows, "close": 26310.0})
+    order = {"symbol": "NAS100ft.s", "timeframe": "15m", "direction": "short", "pattern": "Continuación", "tbr_zone": "",
+             "tbr_high": 26544.75, "tbr_low": 26350.0, "price": 26291.37, "signal_price": 26320.75, "stop": 26371.38,
+             "target": 26249.868, "entry_ts": int(ts[28]), "bias": "Bearish"}
+    swings, labels = [], []
+    real_swing, real_text = setup_chart._swing, setup_chart.fmt_price
+    monkeypatch.setattr(setup_chart, "_swing", lambda *a: swings.append(a[4]) or real_swing(*a))
+    png = setup_chart.render(order, {"result": "objetivo", "exit_ts": int(ts[30]) + 539, "r": 0.52}, df, 7200)
+    assert png[1:4] == b"PNG" and swings == [pytest.approx(26270.12)]          # 0 = 2 × señal − stop, no 2 × entrada − stop
+    assert real_swing(df, 0, 28, 26371.38, 26270.12, False) == (24, 20)            # el 0 de antes del 1 también se marca
+
+
 def test_dibujar_manda_los_setups_de_hoy_y_no_los_de_dias_anteriores(sent, tmp_path):
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
