@@ -26,7 +26,7 @@ UP, DOWN = "#26A69A", "#5C6370"
 SL_PINK, TP_GREEN, TP_GRAY = "#D81B60", "#2E7D32", "#9E9E9E"
 ONE, ZERO, HALF, TARGET = "#6A1B9A", "#6A1B9A", "#2E7D32", "#1565C0"
 SIDE = {"long": "largo", "short": "corto"}
-RESULT = {"objetivo": "TP", "stop": "SL", "breakeven": "BE", "tiempo": "T"}
+RESULT = {"objetivo": "TP", "stop": "SL", "breakeven": "BE", "asegurado": "SL+", "tiempo": "T"}
 FALLBACK_COLOR = "#9E9E9E"
 
 

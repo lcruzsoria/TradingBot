@@ -39,6 +39,7 @@ class Order:
     be_sent: bool = False
     be_at: int | None = None
     be_price: float | None = None  # precio que, al tocarlo, pasa el stop a la entrada (Barrido RTH: el Low/High de NY Open); None: sin este breakeven
+    be_stop: float | None = None   # adónde pasa el stop al tocar `be_price` (Continuación del RTH: +1,5 R asegurados); None: a la entrada
     solo_tiempo: bool = False      # sin objetivo: la posición cierra en el stop o por tiempo, al precio de mercado (Barrido PDH/PDL); `target` solo es una referencia
 
     @property
@@ -68,7 +69,7 @@ def build_order(payload: dict, decision, bias_result) -> Order:
                  tbr.high, tbr.low, tbr.mid, hit.price, hit.levels.get("stop"), hit.levels.get("target"),
                  bias_result.bias.value, float(bias_result.score), decision.reason, "cierre del rango" if hit.levels.get("cierre") else "fin del día de trading",
                  hit.ts or None, close_time(hit.ts, payload.get("session_close")), caso=getattr(hit, "variant", "") or "",
-                 be_price=hit.levels.get("be"), solo_tiempo=bool(hit.levels.get("solo_tiempo")), **_lateral(bias_result))
+                 be_price=hit.levels.get("be"), be_stop=hit.levels.get("be_stop"), solo_tiempo=bool(hit.levels.get("solo_tiempo")), **_lateral(bias_result))
 
 
 def build_calendar_order(payload: dict, bias_result, reason: str) -> Order:

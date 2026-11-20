@@ -10,8 +10,12 @@ Reglas (velas de `BARRIDO_CONTINUACION_TF`, M5 al inicio; todo debe ocurrir entr
    (la vela debe abrir antes de `BARRIDO_CONTINUACION_END`). La primera vela que cierra fuera decide: si aún no se ha tocado el 50 %, no hay setup hoy.
    El toque de la propia vela que rompe no cuenta.
 4. Entrada: a mercado al cierre de esa vela, a favor de la rotura (sobre el High: largo; bajo el Low: corto).
-5. Stop fijo a `BARRIDO_CONTINUACION_STOP_POINTS` (40) puntos de la entrada y objetivo a `BARRIDO_CONTINUACION_RR` (2) R. Sin breakeven
-   (en el backtest lo empeora). Si no hay rotura antes de las 11:00, el setup queda anulado. Cierre por tiempo al final del día de trading.
+5. Stop fijo a `BARRIDO_CONTINUACION_STOP_POINTS` (40) puntos de la entrada.
+6. Objetivo (regla del usuario del 2026-11-20): el otro lado del RTH, es decir, la distancia de la entrada al Low del RTH en un largo (al High
+   en un corto) llevada a favor de la operación, si queda más allá de `BARRIDO_CONTINUACION_RR` (2) R; si no, 2 R.
+7. Al tocar +`BARRIDO_CONTINUACION_LOCK_AT` (2) R el stop pasa a +`BARRIDO_CONTINUACION_LOCK_R` (1,5) R («asegurado») y la operación sigue
+   hacia el objetivo. LOCK_AT=0 lo desactiva. Si no hay rotura antes de las 11:00, el setup queda anulado. Si al final del día de trading no ha
+   tocado ni stop ni objetivo, cierra por tiempo (como el resto de setups).
 
 Solo los mercados de `BARRIDO_CONTINUACION_MARKETS` (NAS100 al inicio: es el único con el stop validado).
 """
@@ -35,6 +39,8 @@ DEFAULT_END = "11:00"
 DEFAULT_STOP_POINTS = 40.0
 DEFAULT_RR = 2.0
 DEFAULT_MARKETS = "NAS100"
+DEFAULT_LOCK_AT = 2.0            # R a favor que mueven el stop...
+DEFAULT_LOCK_R = 1.5             # ...a estos R de ganancia
 PREFIX = "BARRIDO_CONTINUACION"
 
 
@@ -55,6 +61,8 @@ class Ajustes:
     rr: float = DEFAULT_RR
     markets: tuple = (DEFAULT_MARKETS,)
     stop_mercado: tuple = ()
+    lock_at: float = DEFAULT_LOCK_AT
+    lock_r: float = DEFAULT_LOCK_R
 
     @classmethod
     def desde(cls, settings) -> "Ajustes":
@@ -70,6 +78,12 @@ class Ajustes:
         markets = tuple(m.strip().upper() for m in str(get("MARKETS", DEFAULT_MARKETS)).split(",") if m.strip())
         a = cls(tf, minutos(get("START", DEFAULT_START), "START"), minutos(get("END", DEFAULT_END), "END"), points, rr, markets,
                 stops.leer(settings, PREFIX, points, 0.0))
+        try:
+            a = replace(a, lock_at=float(get("LOCK_AT", DEFAULT_LOCK_AT)), lock_r=float(get("LOCK_R", DEFAULT_LOCK_R)))
+        except ValueError:
+            raise ValueError(f"{PREFIX}_LOCK_AT y {PREFIX}_LOCK_R deben ser números.") from None
+        if a.lock_at < 0 or (a.lock_at and not 0 <= a.lock_r < a.lock_at):
+            raise ValueError(f"{PREFIX}_LOCK_R debe estar entre 0 y {PREFIX}_LOCK_AT (0 desactiva el stop asegurado).")
         if a.end <= a.start:
             raise ValueError(f"{PREFIX}_END={a.end // 60:02d}:{a.end % 60:02d} debe ser posterior a START.")
         return a
@@ -101,16 +115,25 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
             close = float(ctx.close[i])
             sign = 1.0 if up else -1.0
             puntos, _ = a.stop_de(ctx.symbol)
-            stop, target = close - sign * puntos, close + sign * puntos * a.rr
+            stop = close - sign * puntos
+            otro = abs(close - (rth.low if up else rth.high))                 # el otro lado del RTH, llevado a favor
+            lejos = otro > puntos * a.rr
+            target = close + sign * (otro if lejos else puntos * a.rr)
+            levels = {"stop": stop, "target": target}
             detail = (f"el precio toca el 50 % del RTH ({mid:.5g}) y a las {hora_ny(ctx, i)} una vela cierra fuera del {side} del RTH "
                       f"({rth.high if up else rth.low:.5g}) en {close:.5g}. Entrada a mercado a ese cierre, a favor de la rotura, stop fijo a "
-                      f"{puntos:g} puntos ({stop:.5g}) y objetivo a {a.rr:g} R ({target:.5g}). Sin breakeven")
+                      f"{puntos:g} puntos ({stop:.5g}) y objetivo en {target:.5g} ("
+                      + (f"el otro lado del RTH, {otro / puntos:.1f} R" if lejos else f"{a.rr:g} R: el otro lado del RTH queda más cerca") + ")")
+            if a.lock_at and abs(target - close) > puntos * a.lock_at:       # stop asegurado: a +lock_at R pasa a +lock_r R
+                levels.update(be=close + sign * puntos * a.lock_at, be_stop=close + sign * puntos * a.lock_r)
+                detail += f"; a +{a.lock_at:g} R ({levels['be']:.5g}) el stop pasa a +{a.lock_r:g} R ({levels['be_stop']:.5g})"
             ts_hit = int(ctx.ts[i]) + ctx.tf_minutes * 60
             figures = []
             if i + 1 < len(ctx.ts):
-                fig = _rth._figura_posicion(ctx, direction, i + 1, close, stop, target, f"Continuación {'▲' if up else '▼'}", None, KEY)
+                fig = _rth._figura_posicion(ctx, direction, i + 1, close, stop, target, f"Continuación {'▲' if up else '▼'}",
+                                            levels.get("be"), KEY, levels.get("be_stop"))
                 figures = [replace(fig, levels={**fig.levels, "entrada_ts": float(ctx.ts[i])})]
-            return [PatternHit(KEY, TITLE, direction, int(i), close, detail, {"stop": stop, "target": target}, ts_hit, DETECTED)], figures
+            return [PatternHit(KEY, TITLE, direction, int(i), close, detail, levels, ts_hit, DETECTED)], figures
         if ctx.low[i] <= mid <= ctx.high[i]:
             touched = True
     return [], []

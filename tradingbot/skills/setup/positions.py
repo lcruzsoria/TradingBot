@@ -10,7 +10,7 @@ MARKET_CLOSED_SECONDS = 2 * 3600     # sin velas durante más de esto = mercado 
 
 @dataclass(frozen=True)
 class Closed:
-    result: str              # "objetivo", "stop", "breakeven" (stop ya movido a la entrada) o "tiempo"
+    result: str              # "objetivo", "stop", "breakeven" (stop ya movido a la entrada), "asegurado" (stop movido con ganancia) o "tiempo"
     exit_price: float
     exit_ts: int             # hora de servidor de la vela en que se cierra
     r: float                 # resultado en R (sin spread)
@@ -50,6 +50,9 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
     be_ts = None
     solo_tiempo = bool(getattr(order, "solo_tiempo", False))     # sin objetivo (Barrido PDH/PDL): solo stop o cierre por tiempo
     be_price = getattr(order, "be_price", None)       # breakeven por precio (Barrido RTH): al tocarlo el stop pasa a la entrada, además del de +be_r R
+    be_stop = getattr(order, "be_stop", None)         # adónde pasa el stop en ese momento (Continuación del RTH: +1,5 R); None: a la entrada
+    moved = entry if be_stop is None else float(be_stop)
+    moved_result = "breakeven" if moved == entry else "asegurado"
 
     def done(result: str, price: float, i: int) -> Closed:
         move = sign * (price - entry)
@@ -71,11 +74,11 @@ def resolve(order, ts, high, low, close, be_r: float | None = None, bar_seconds:
             return done("tiempo", float(close[last]), last)        # el mercado cerró entre las dos velas
         if ts[i] >= order.close_ts:
             return done("tiempo", float(close[last]), last) if last is not None else None
-        current = entry if be_ts is not None else stop
+        current = moved if be_ts is not None else stop
         hit_stop = low[i] <= current if long else high[i] >= current
         hit_target = not solo_tiempo and (high[i] >= target if long else low[i] <= target)
         if hit_stop:
-            return done("breakeven" if be_ts is not None else "stop", current, i)
+            return done(moved_result if be_ts is not None else "stop", current, i)
         if hit_target:
             return done("objetivo", target, i)
         if be_ts is None and ((be_r is not None and sign * ((high[i] if long else low[i]) - entry) / risk >= be_r)

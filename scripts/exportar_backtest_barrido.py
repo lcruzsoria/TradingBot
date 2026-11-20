@@ -42,7 +42,7 @@ SETUPS = ((b_rth, "BARRIDO_RTH", ["PRE_NY", "ASIA", "LONDON"], "Barrido RTH", "R
           (b_con, "BARRIDO_CONTINUACION", ["PRE_NY"], "Continuación RTH", "RTH"),
           (b_pre, "BARRIDO_PRENY", ["LONDON"], "Barrido PDH/PDL Pre-NY", "Pre-NY"))
 OUTCOMES = ["objetivo", "stop", "breakeven", "tiempo"]
-OUTCOME_OF = {"objetivo": "objetivo", "stop": "stop", "breakeven": "breakeven", "tiempo": "tiempo"}
+OUTCOME_OF = {"objetivo": "objetivo", "asegurado": "objetivo", "stop": "stop", "breakeven": "breakeven", "tiempo": "tiempo"}   # asegurado: stop movido a +1,5 R (cuenta como objetivo)
 ZONES = ["RTH", "Asia", "London", "Pre-NY"]
 FILTER = "sin filtro de sesgo"                       # el bloque de filtros de la ventana: aquí no hay sesgo, un solo filtro
 
@@ -77,7 +77,7 @@ def group_json(trades: list[dict], periods: dict, updated: str) -> dict:
         "key": f"{PROFILE}:indices", "nombre": "Índices", "tipo": "barrido", "perfil": PROFILE, "perfil_nombre": PROFILE_NAME, "actualizado": updated,
         "cats": {"m": markets, "p": names, "z": ZONES, "o": OUTCOMES, "s": ["a favor", "en contra", "sin sesgo"]}, "ops": cols,
         "patrones": ["Todos"] + names, "filtros": {FILTER: "Todas las operaciones"}, "zonas": ZONES,
-        "descripcion": "Barrido RTH, Continuación de Asia, Barrido PDH/PDL (Asia y Londres) y Continuación RTH (solo Nasdaq) del modelo Greenbird en M5 · stop 30 puntos o swing + 5 (continuación: 40 puntos, 2R) · "
+        "descripcion": "Barrido RTH, Continuación de Asia, Barrido PDH/PDL (Asia y Londres) y Continuación RTH (solo Nasdaq) del modelo Greenbird en M5 · stop 30 puntos o swing + 5 (continuación: 40 puntos, objetivo el otro lado del RTH o 2R, a +2R el stop pasa a +1,5R) · "
                        "sin costes (el spread no se simula) · una posición por setup y mercado",
         "datos": [{"mercado": m, "velas M15": periods[m][0], "desde (NY)": str(periods[m][1]), "hasta (NY)": str(periods[m][2]), "TBR evaluadas": None}
                   for m in markets if m in periods],

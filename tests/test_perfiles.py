@@ -437,9 +437,30 @@ def test_barrido_continuacion_toca_el_50_y_entra_a_favor_de_la_rotura_con_stop_4
     assert analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"))[0] == []   # solo Nasdaq
     a = Ajustes.desde(EnvConfig(parse("STOP_POINTS=10\nRR=3\nMARKETS=SP500\n")))
     hits, _ = analizar(_barrido_ctx([IN, toca, (97, 104, 96, 103)], symbol="SP500"), a)
-    assert hits[0].levels == {"stop": 93.0, "target": 133.0}
+    assert hits[0].levels == {"stop": 93.0, "target": 133.0, "be": 123.0, "be_stop": 118.0}   # objetivo a 3R: a +2R asegura +1,5R
     with pytest.raises(ValueError, match="BARRIDO_CONTINUACION_RR"):
         Ajustes.desde(EnvConfig(parse("RR=0\n")))
+
+
+def test_barrido_continuacion_objetivo_en_el_otro_lado_del_rth_y_stop_asegurado_a_2r():
+    from types import SimpleNamespace
+    from tradingbot.skills.barrido.continuacion import Ajustes, analizar
+    from tradingbot.skills.setup.positions import resolve
+    rango = (100.0, 0.0)                                                 # RTH de 100 puntos: 50 % en 50
+    hits, _ = analizar(_barrido_ctx([(50, 60, 45, 55), (55, 60, 48, 58), (58, 104, 57, 103)], rth=rango))
+    # largo en 103: el otro lado (el Low, 0) queda a 103 puntos = 2,6 R > 2R -> objetivo 206; a +2R (183) el stop pasa a +1,5R (163)
+    assert hits[0].levels == {"stop": 63.0, "target": 206.0, "be": 183.0, "be_stop": 163.0}
+    sin_lock = Ajustes.desde(EnvConfig(parse("LOCK_AT=0\n")))
+    assert analizar(_barrido_ctx([(50, 60, 45, 55), (55, 60, 48, 58), (58, 104, 57, 103)], rth=rango), sin_lock)[0][0].levels == {
+        "stop": 63.0, "target": 206.0}
+    with pytest.raises(ValueError, match="LOCK_R"):
+        Ajustes.desde(EnvConfig(parse("LOCK_R=2\n")))
+    # Setup: toca +2R, el stop pasa a +1,5R desde la vela siguiente y, si vuelve, cierra «asegurado» con +1,5 R
+    order = SimpleNamespace(direction="long", price=103.0, stop=63.0, target=206.0, entry_ts=0, close_ts=10_000, be_price=183.0,
+                            be_stop=163.0)
+    ts = np.array([0, 300, 600, 900])
+    done = resolve(order, ts, np.array([110, 190, 170, 165]), np.array([100, 150, 165, 160]), np.array([105, 180, 168, 161]), None, 300)
+    assert (done.result, done.exit_price, round(done.r, 2)) == ("asegurado", 163.0, 1.5)
 
 
 def test_barrido_rth_casos_sin_setup():

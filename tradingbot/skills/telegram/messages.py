@@ -9,7 +9,7 @@ from ..crt import engine
 from ..levels.daylevels import DEFAULT_US_INDICES, is_us_index
 
 SIDE = {"long": "Largo", "short": "Corto"}
-RESULT = {"objetivo": ("✅", "TP"), "stop": ("❌", "SL"), "breakeven": ("⚪", "BE"), "tiempo": ("⏱", "T")}
+RESULT = {"objetivo": ("✅", "TP"), "stop": ("❌", "SL"), "breakeven": ("⚪", "BE"), "asegurado": ("✅", "SL+"), "tiempo": ("⏱", "T")}
 
 
 def _e(value) -> str:

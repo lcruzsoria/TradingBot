@@ -1466,7 +1466,7 @@ class MainWindow(QMainWindow):
             for m in setups:
                 if m.get("entry_ts") == o.entry_ts and m["direction"] == o.direction:
                     c = trade.closed
-                    m["state"] = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
+                    m["state"] = {"objetivo": "objetivo", "asegurado": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
                     m["simulated"] = False
                     m["pos"].update(entry=o.price, stop=o.stop, target=o.target)
                     if c:
@@ -1496,7 +1496,7 @@ class MainWindow(QMainWindow):
                 continue
             c = trade.closed
             end = c.exit_ts if c else o.close_ts
-            state = {"objetivo": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
+            state = {"objetivo": "objetivo", "asegurado": "objetivo", "stop": "stop", "breakeven": "be", "tiempo": "tiempo"}.get(c.result, "tiempo") if c else "abierta"
             out[x0] = {"x0": x0, "x1": min(int(np.searchsorted(ts, end, "left")), n + 4) if end else n + 4,
                        "entry": o.price, "stop": o.stop, "target": o.target, "direction": o.direction, "state": state,
                        "label": "Calendario", "decision": "GO", "reason": "forwardtest", "session": ("calendario", o.entry_ts)}
@@ -1642,7 +1642,7 @@ class MainWindow(QMainWindow):
         o, c = p["order"], p["closed"]
         self.ring.trade_closed(c.result, c.r, o.symbol)
         why = {"objetivo": "objetivo alcanzado", "stop": "stop alcanzado", "tiempo": f"cierre por tiempo ({o.close_at})",
-               "breakeven": "stop en breakeven (en la entrada) alcanzado"}.get(c.result, c.result)
+               "breakeven": "stop en breakeven (en la entrada) alcanzado", "asegurado": "stop asegurado (con ganancia) alcanzado"}.get(c.result, c.result)
         opened = f"{self._ny(o.entry_ts):%d/%m %H:%M}" if o.entry_ts else "-"
         closed = f"{self._ny(c.exit_ts):%d/%m %H:%M}"
         lines = [f"Orden:    {o.label}", f"Entrada:  {fmt_price(o.price)} ({opened} NY)   Salida: {fmt_price(c.exit_price)} ({closed} NY)",
@@ -1664,7 +1664,7 @@ class MainWindow(QMainWindow):
             money = f", resultado {real['profit']:+,.2f}" if real.get("profit") is not None else ""
             lines.append(f"MT5: posición {real['ticket']} ({real.get('volume') or 0:g} lotes) {how}{money}.")
         verdict = {"objetivo": "GANADA (objetivo)", "stop": "PERDIDA (stop)", "tiempo": "cerrada por tiempo",
-                   "breakeven": "BREAKEVEN (stop en la entrada)"}.get(c.result, c.result)
+                   "breakeven": "BREAKEVEN (stop en la entrada)", "asegurado": "STOP ASEGURADO (con ganancia)"}.get(c.result, c.result)
         self.log(f"setup: posición {'real' if real and not real.get('error') else 'simulada'} {verdict} - {o.label}: {c.r:+.2f} R, {c.pct:+.2f} % ({opened} -> {closed} NY)",
                  chr(10).join(lines), "go" if c.r > 0 else "nogo" if c.r < 0 else "info")
 

@@ -45,10 +45,10 @@ def trades_of(symbol: str, df: pd.DataFrame, zones, ajustes: Ajustes, since: dat
                 continue
             close_ts = min(hit.ts + 24 * 3600, cierre_del_dia(hit.ts, AHEAD, DAY_END))
             order = SimpleNamespace(direction=hit.direction, price=hit.price, stop=hit.levels["stop"], target=hit.levels["target"],
-                                    entry_ts=hit.ts, close_ts=close_ts)
+                                    entry_ts=hit.ts, close_ts=close_ts, be_price=hit.levels.get("be"), be_stop=hit.levels.get("be_stop"))
             closed = resolve(order, ts, h, l, c, None, TF_MIN * 60)
             out.append({"symbol": symbol, "day": ctx.tbr.day, "direction": hit.direction, "entry_ts": hit.ts, "entry": hit.price,
-                        "stop": order.stop, "target": order.target, "be": None,
+                        "stop": order.stop, "target": order.target, "be": order.be_price,
                         "result": closed.result if closed else "abierta", "r": closed.r if closed else None,
                         "exit_ts": closed.exit_ts if closed else None, "risk": abs(hit.price - order.stop)})
     return out

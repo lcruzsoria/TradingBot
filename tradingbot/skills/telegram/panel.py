@@ -31,7 +31,7 @@ PAGE = Path(__file__).with_name("panel.html")
 MAX_DECISIONS = 30
 MAX_CLOSED = 30
 SIDE = {"long": "Largo", "short": "Corto"}
-RESULT = {"objetivo": "TP", "stop": "SL", "breakeven": "BE", "tiempo": "T"}
+RESULT = {"objetivo": "TP", "stop": "SL", "breakeven": "BE", "asegurado": "SL+", "tiempo": "T"}
 ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0b0e14"/>'
         '<path d="M32 9l20 11.5v23L32 55 12 43.5v-23z" fill="none" stroke="#378ADD" stroke-width="4"/>'
         '<path d="M22 38l7-8 6 5 8-11" fill="none" stroke="#26A69A" stroke-width="4" stroke-linecap="round" '
