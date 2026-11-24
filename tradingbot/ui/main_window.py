@@ -1171,7 +1171,7 @@ class MainWindow(QMainWindow):
 
     def _paint_trades(self) -> None:
         """Tarjeta Operaciones: las del Forwardtest con entrada hoy (fecha de Nueva York), igual que la ventana con «Hoy»:
-        ganadas (G), perdidas (P), en breakeven (B: 0 R) y las que siguen abiertas."""
+        ganadas (G), perdidas (P), en breakeven (B: 0 R), cerradas por tiempo (T) y las que siguen abiertas."""
         today = trading_day(_ny_today())
         self._trades_day = today
         stats = self.stats if getattr(self, "stats", None) is not None else TradeStats()   # aún sin la skill Stats
@@ -1182,13 +1182,17 @@ class MainWindow(QMainWindow):
             self.markets.set_trades(open_trades)
         s = stats.only(lambda t: bool(t.order.entry_ts) and trading_day(self._ny(t.order.entry_ts)) == today,
                             lambda x: bool(x.ts) and trading_day(self._ny(x.ts)) == today)
-        wins, losses, be, opened = s.wins, s.losses, s.flat, len(s.open)
+        timed = s.by_time                                       # cerradas por tiempo (T): aparte, ganen o pierdan algo
+        plain = [t for t in s.done if t.closed.result != "tiempo"]
+        wins, losses, be = (sum(1 for t in plain if cond(t.r)) for cond in (lambda r: r > 0, lambda r: r < 0, lambda r: r == 0))
+        opened = len(s.open)
         dot = '<span style="color:{};">●</span>'
         hollow = '<span style="color:{};">○</span>'                  # bola transparente: las NO GO de Cortex (NG)
         self.stat_trades.value.setText(f"{dot.format(theme.BULL)} {wins} G&nbsp;&nbsp;{dot.format(theme.BEAR)} {losses} P"
                                        f"&nbsp;&nbsp;{dot.format(BE_GREY)} {be} B"
+                                       f"&nbsp;&nbsp;{dot.format(theme.WARN)} {timed} T"
                                        f"&nbsp;&nbsp;{hollow.format(theme.MUTED)} {s.nogo} NG")
-        n = wins + losses + be
+        n = wins + losses + be + timed
         parts = [f"{n} cerrada{'s' if n != 1 else ''}"] if n else []
         if opened:
             parts.append(f"{opened} abierta{'s' if opened != 1 else ''}")
@@ -1196,9 +1200,9 @@ class MainWindow(QMainWindow):
         if n:
             text += f" · {s.total_r:+.2f} R"
         tip = (f"Operaciones del Forwardtest con entrada hoy (día de trading del {today:%d/%m/%Y}: desde las 20:00 NY del día anterior, inicio de Asia): ganadas (G), "
-               "perdidas (P) y en breakeven (B: 0 R), más las que siguen abiertas.\nPulsa para abrir o cerrar el "
+               "perdidas (P), en breakeven (B: 0 R) y cerradas por tiempo (T: sin tocar stop ni objetivo), más las que siguen abiertas.\nPulsa para abrir o cerrar el "
                "Forwardtest con el día en curso; el botón Forwardtest lo abre con todo el diario.")
-        reached = [f"{name}: {avg:.2f} R" for result, name in (("stop", "stops"), ("breakeven", "breakeven"))
+        reached = [f"{name}: {avg:.2f} R" for result, name in (("stop", "stops"), ("breakeven", "breakeven"), ("tiempo", "por tiempo"))
                    if (avg := s.avg_max_r(result)) is not None]
         if reached:                                             # hasta dónde llegaron antes de cerrar sin ganar
             tip += "\nMáximo a favor medio de hoy antes de cerrar (" + ", ".join(reached) + ")."

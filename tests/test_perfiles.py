@@ -317,15 +317,16 @@ def test_la_tarjeta_operaciones_muestra_solo_el_dia_en_curso(tmp_path, monkeypat
     noon = _ny_today().replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
     now = int(noon.timestamp()) + win.ny_shift                                  # hoy a mediodía NY, hora del servidor
     s = TradeStats()
-    for i, (r, when) in enumerate(((2.0, now - 60), (-1.0, now - 120), (0.0, now - 180), (2.0, now - 2 * 86400))):
+    for i, (r, when, how) in enumerate(((2.0, now - 60, "objetivo"), (-1.0, now - 120, "stop"), (0.0, now - 180, "stop"),
+                                        (2.0, now - 2 * 86400, "objetivo"), (0.4, now - 90, "tiempo"))):
         o = replace(order(), entry_ts=when, symbol=f"M{i}")
         s.executed(o)
-        s.closed(o, Closed("objetivo" if r > 0 else "stop", 0.0, when + 60, r, 0.1))
+        s.closed(o, Closed(how, 0.0, when + 60, r, 0.1))
     s.executed(replace(order(), entry_ts=now - 30, symbol="ABIERTA"))
     win._on_stats_session({"stats": s})
     text = win.stat_trades.value.text()
-    assert "1 G" in text and "1 P" in text and "1 B" in text                     # la de hace dos días no cuenta
-    assert win.stat_trades.sub.text() == "3 cerradas · 1 abierta hoy · +1.00 R"
+    assert "1 G" in text and "1 P" in text and "1 B" in text and "1 T" in text    # la de hace dos días no cuenta; la de tiempo, en T y no en G
+    assert win.stat_trades.sub.text() == "4 cerradas · 1 abierta hoy · +1.40 R"
     assert "○" in text and "0 NG" in text                                         # bola transparente: las NO GO de hoy
     from tradingbot.skills.stats.session import Signal
     s.decision(False, Signal(False, "USTEC", "15m", "Reversión", "long", "contra el sesgo", now - 10, "London"))
