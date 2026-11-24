@@ -553,7 +553,7 @@ class StatsDialog(QDialog):
                      f"peor {_colored(_r(worst.r), _tone(worst.r))} {worst.order.symbol}",
                      f"racha {streak}",
                      f"duración media {_span(s.avg_duration)}"]
-            for result, name in (("stop", "stops"), ("breakeven", "breakeven")):
+            for result, name in (("stop", "stops"), ("breakeven", "breakeven"), ("tiempo", "cierres por tiempo")):
                 avg = s.avg_max_r(result)
                 if avg is not None:
                     parts.append(f"máx medio en {name} {avg:.2f} R")
@@ -664,7 +664,7 @@ class StatsDialog(QDialog):
                            {"stop": theme.BEAR, "objetivo": theme.BULL, "breakeven": BE_GREY}.get(t.closed.result))
                 min_r = getattr(t.closed, "min_r", None)
                 self._cell(self.history, i, 8, "-" if max_r is None else f"{max_r:.2f} R",
-                           theme.WARN if t.closed.result in ("stop", "breakeven") and (max_r or 0) >= 1 else None)
+                           theme.WARN if t.closed.result in ("stop", "breakeven", "tiempo") and (max_r or 0) >= 1 else None)   # llegó a +1R y no lo cobró
                 self._cell(self.history, i, 9, "-" if min_r is None else f"{min_r:.2f} R", theme.BEAR if (min_r or 0) <= -0.99 else None)
                 self.history.item(i, 9).setToolTip("Lo más en contra que llegó a ir el precio desde la entrada, en R (un stop es -1 R)")
                 self.history.item(i, 8).setToolTip("Máximo a favor que llegó a alcanzar el precio entre la entrada y el cierre, en R"
