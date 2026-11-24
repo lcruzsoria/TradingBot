@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QFrame, QGridLa
 from ..clock import NY, trading_day
 from ..skills.setup import challenge
 from ..skills.stats.backtest import PATTERNS
+
+ALL = "Todos"                     # primer chip de Patrón: todo lo que opera el perfil (también los setups de Barrido o Ventana 9:55)
+CHIPS = (ALL,) + PATTERNS[1:]
 from ..skills.stats.journal import month_label
 from ..skills.stats.session import (ALIGNMENTS, SESSIONS, Group, Signal, Trade, TradeStats, alignment_of,  # noqa: F401
                                     reason_of, session_of)
@@ -235,7 +238,7 @@ class StatsDialog(QDialog):
         self.window_days: int | None = DEFAULT_WINDOW
         self.month = LIVE                                       # LIVE o el mes guardado que se está viendo (AAAA-MM)
         self.archive: TradeStats | None = None
-        self.pattern = PATTERNS[0]                              # «Ambos» o el patrón que se está viendo
+        self.pattern = ALL                                      # «Todos» (cualquier patrón o setup) o el que se está viendo
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
@@ -284,7 +287,7 @@ class StatsDialog(QDialog):
         pat_row.addSpacing(8)
         self.pattern_group = QButtonGroup(self)
         self.pattern_btns: dict[str, QPushButton] = {}
-        for name in PATTERNS:
+        for name in CHIPS:
             btn = QPushButton(name)
             btn.setCheckable(True)
             btn.setProperty("chip", "true")
@@ -459,7 +462,7 @@ class StatsDialog(QDialog):
         return self._to_ny(t.order.entry_ts) if t.order.entry_ts else None
 
     def _is_pattern(self, name: str) -> bool:
-        return name in PATTERNS[1:] if self.pattern == PATTERNS[0] else name == self.pattern
+        return self.pattern == ALL or name == self.pattern
 
     def _in_window(self, t: Trade) -> bool:
         return self._recent(t.order.entry_ts) and self._is_pattern(t.order.pattern)

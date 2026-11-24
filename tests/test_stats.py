@@ -144,3 +144,14 @@ def test_maximo_medio_de_los_stops_y_breakeven():
         s.executed(o)
         s.closed(o, Closed(res, 100.0, 1_500 + i * 900, r, r, None, mx))
     assert s.avg_max_r("stop") == 0.7 and s.avg_max_r("breakeven") == 1.6 and s.avg_max_r("tiempo") is None
+
+
+def test_la_ventana_forwardtest_con_todos_cuenta_tambien_los_setups_de_barrido_y_ventana():
+    from PySide6.QtWidgets import QApplication
+    from tradingbot.ui.stats_dialog import ALL, StatsDialog
+    QApplication.instance() or QApplication([])
+    dlg = StatsDialog.__new__(StatsDialog)
+    dlg.pattern = ALL
+    assert all(dlg._is_pattern(p) for p in ("Continuación", "Reversión", "Ventana 9:55", "Barrido del RTH"))
+    dlg.pattern = "Continuación"
+    assert dlg._is_pattern("Continuación") and not dlg._is_pattern("Ventana 9:55")
