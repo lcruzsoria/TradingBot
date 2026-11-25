@@ -510,6 +510,9 @@ class Backtest:
         return (self.comparison.get("notas_mercado") or {}).get(market, "")
 
 
+PROFILE_ORDER = ("enigma369", "crt", "barrido_nyam", "ventana9_55")   # perfiles de estrategia, tras los de patrones
+
+
 def load(path: str | Path | None = None) -> Backtest:
     """Lee el backtest (.json.gz o .json). Lanza FileNotFoundError / ValueError si falta o no es válido."""
     path = Path(path) if path else DEFAULT_FILE
@@ -519,6 +522,10 @@ def load(path: str | Path | None = None) -> Backtest:
         text = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
         data = json.loads(text.decode("utf-8"))
         groups = [Group(g["key"], g["nombre"], g) for g in data["grupos"]]
+        # Orden fijo de los perfiles de estrategia (cada exportador añade su grupo al final y la actualización nocturna los ejecuta en
+        # otro orden); los de patrones (puprime, metaquotes, calendario) van delante, como los escribe exportar_backtest.py.
+        rank = {p: i for i, p in enumerate(PROFILE_ORDER)}
+        groups.sort(key=lambda g: rank.get(g.raw.get("perfil", ""), -1))
         for g in groups:
             if "ops" not in g.raw or "cats" not in g.raw:
                 raise KeyError(f"el grupo {g.name} no trae operaciones")
