@@ -89,15 +89,16 @@ def group_json(trades: list[dict], periods: dict, updated: str, ajustes: Ajustes
         "key": f"{PROFILE}:indices", "nombre": "Nasdaq", "tipo": "barrido", "perfil": PROFILE, "perfil_nombre": PROFILE_NAME, "actualizado": updated,
         "cats": {"m": markets, "p": [NAME], "z": ZONES, "o": OUTCOMES, "s": ["a favor", "en contra", "sin sesgo"]}, "ops": cols,
         "patrones": ["Todos", NAME], "filtros": {FILTER: "Todas las operaciones"}, "zonas": ZONES,
-        "descripcion": f"Ventana 9:55 en NAS100 M5 · la vela de las 10:00 barre la de las 09:55 y cierra del color contrario · stop en su punta · "
+        "descripcion": f"Ventana 9:55 en NAS100 M5 · la vela de las 10:00 barre la de las 09:55 y cierra de vuelta dentro · stop en su punta · "
                        f"objetivo {ajustes.rr:g}R · sin costes (el spread no se simula)",
         "datos": [{"mercado": m, "velas M5": periods[m][0], "desde (NY)": str(periods[m][1]), "hasta (NY)": str(periods[m][2]), "TBR evaluadas": None}
                   for m in markets if m in periods],
         "metodologia": [
             ["Qué es", "El setup del perfil Ventana9_55, simulado con el mismo código que la skill Barrido del bot (contextos + analizar de ventana.py) "
                        "y la regla de cierre de Setup (stop, objetivo o fin del día de trading, 18:00 NY)."],
-            ["Velas", "Vela 1: la de las 09:55 NY, de cualquier color. Vela 2: la de las 10:00; corto si supera el High de la 1 y cierra negra, largo si baja "
-                      "del Low de la 1 y cierra blanca (si toca los dos lados decide su color). Sin condición de zona ni del 50 %."],
+            ["Velas", "Vela 1: la de las 09:55 NY, de cualquier color. Vela 2: la de las 10:00, de cualquier color; corto si supera el High de la 1 y cierra de "
+                      "vuelta por debajo de él, largo si baja del Low de la 1 y cierra de vuelta por encima (si toca los dos lados decide su color). "
+                      "Sin condición de zona ni del 50 %."],
             ["Entrada y salida", f"A mercado al cierre de la vela 2 (10:05), en contra del barrido; stop en la punta de la vela 2; objetivo {ajustes.rr:g}R; "
                                  "sin breakeven. Si no toca nada, cierra al final del día de trading."],
             ["Límites", "Sin costes ni deslizamiento. Solo NAS100. Una operación al día como máximo."]]}

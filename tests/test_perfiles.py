@@ -963,7 +963,12 @@ def test_ventana_955_la_vela_de_las_10_barre_la_de_las_955_y_se_entra_en_contra_
     assert [(h.direction, h.levels) for h in hits] == [("long", {"stop": 91.0, "target": 109.0})]
     hits, _ = analizar(_barrido_ctx([v1, (97, 99, 92, 94)]))                              # toca los dos lados: decide su color (negra)
     assert [(h.direction, h.levels["stop"]) for h in hits] == [("short", 99.0)]
-    assert analizar(_barrido_ctx([v1, (96, 100, 95, 99)]))[0] == []      # supera el High pero cierra blanca: no hay setup
+    hits, _ = analizar(_barrido_ctx([v1, (96, 100, 95, 97.5)]))          # blanca, pero cierra de vuelta bajo el High (98): corto
+    assert [(h.direction, h.price, h.levels["stop"]) for h in hits] == [("short", 97.5, 100.0)]
+    assert analizar(_barrido_ctx([v1, (96, 100, 95, 99)]))[0] == []      # supera el High y cierra por encima: no hay setup
+    hits, _ = analizar(_barrido_ctx([(97, 98, 93, 94), (94, 96, 91, 93.5)]))             # negra, pero cierra de vuelta sobre el Low (93): largo
+    assert [(h.direction, h.levels["stop"]) for h in hits] == [("long", 91.0)]
+    assert analizar(_barrido_ctx([(97, 98, 93, 94), (94, 96, 91, 92)]))[0] == []         # baja del Low y cierra por debajo: no hay setup
     assert analizar(_barrido_ctx([v1, (97, 97.5, 94, 95)]))[0] == []     # negra sin barrer el High
     assert analizar(_barrido_ctx([v1, (97, 100, 94, 95)], symbol="SP500"))[0] == []      # solo Nasdaq
     assert analizar(_barrido_ctx([v1]))[0] == []                         # la vela de las 10:00 aún no ha cerrado
