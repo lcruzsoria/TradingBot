@@ -5,13 +5,14 @@ Es una HIPÓTESIS SIN VALIDAR: solo simula, como todo el bot con SETUP_SEND_ORDE
 Reglas del usuario (2026-11-20), velas de `BARRIDO_VENTANA_955_TF` (M5), hora de NY, sin zona (no importa dónde esté el precio respecto al RTH):
 
 1. Vela 1: la de las 09:55 (`BARRIDO_VENTANA_955_VELA`). Su color no importa.
-2. Vela 2: la siguiente (10:00). Corto si supera el High de la vela 1 y cierra NEGRA; largo si baja del Low de la vela 1 y cierra BLANCA.
-   Si toca los dos lados decide su color. Sin barrido del lado de su color no hay setup.
+2. Vela 2: la siguiente (10:00), de CUALQUIER color. Corto si supera el High de la vela 1 y cierra de vuelta por debajo de ese High; largo si
+   baja del Low de la vela 1 y cierra de vuelta por encima de ese Low (2026-11-25: antes se exigía el color contrario, que es un caso de esto).
+   Si toca los dos lados y cierra dentro, decide su color (sin color, doji, no hay setup).
 3. Entrada: a mercado al cierre de la vela 2 (la apertura de la de las 10:05), en contra del barrido.
 4. Stop: en la punta de la vela 2 (su High en un corto, su Low en un largo).
 5. Objetivo: `BARRIDO_VENTANA_955_RR` (3) R. Sin breakeven. Si al final del día de trading no ha tocado ni stop ni objetivo, cierra por tiempo.
 
-Solo los mercados de `BARRIDO_VENTANA_955_MARKETS` (NAS100). Backtest NAS100 feb-2024 a nov-2026: 236 operaciones, +49,7 R con 3R.
+Solo los mercados de `BARRIDO_VENTANA_955_MARKETS` (NAS100). Backtest NAS100 feb-2024 a 25-nov-2026: 339 operaciones, +61,1 R con 3R (con la regla del color eran 238 y +42,1 R; drawdown 25 R frente a 15 R).
 """
 from __future__ import annotations
 
@@ -80,9 +81,12 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     h1, l1 = float(ctx.high[i]), float(ctx.low[i])
     j = i + 1
     o2, h2, l2, c2 = float(ctx.open[j]), float(ctx.high[j]), float(ctx.low[j]), float(ctx.close[j])
-    if c2 < o2 and h2 > h1:
+    up, down = h2 > h1 and c2 < h1, l2 < l1 and c2 > l1                         # barre un lado y cierra de vuelta dentro de la vela 1
+    if up and down:                                                                # los dos lados: decide el color
+        up, down = c2 < o2, c2 > o2
+    if up:
         direction, stop, side, sign = "short", h2, "High", -1.0
-    elif c2 > o2 and l2 < l1:
+    elif down:
         direction, stop, side, sign = "long", l2, "Low", 1.0
     else:
         return [], []
@@ -92,7 +96,7 @@ def analizar(ctx: Contexto, a: Ajustes = Ajustes()) -> tuple[list[PatternHit], l
     target = c2 + sign * a.rr * risk
     levels = {"stop": stop, "target": target}
     detail = (f"la vela de las {hora_ny(ctx, j)} barre el {side} de la de las {hora_ny(ctx, i)} ({h1 if sign < 0 else l1:.5g}) y cierra "
-              f"{'negra' if sign < 0 else 'blanca'} en {c2:.5g}. Entrada a mercado a ese cierre, en contra del barrido, stop en su "
+              f"de vuelta dentro en {c2:.5g}. Entrada a mercado a ese cierre, en contra del barrido, stop en su "
               f"{'máximo' if sign < 0 else 'mínimo'} ({stop:.5g}, {risk:.5g} puntos) y objetivo {a.rr:g} R ({target:.5g})")
     ts_hit = int(ctx.ts[j]) + step
     figures = []

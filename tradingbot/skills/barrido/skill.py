@@ -70,7 +70,7 @@ class BarridoSkill(Skill):
                    "(fijo de 40 puntos si queda más cerca), objetivo 1 en el lado contrario del RTH y breakeven al tomar el Low/High de NY Open. Continuación de Asia: la "
                    "primera vela M5 que cierra fuera del rango de Asia entre las 00:00 y las 00:30 da la entrada a favor de la rotura; stop 30 puntos y objetivo 3R. PDH/PDL: "
                    "nivel del día anterior sin tocar que se barre entre las 20:00 y las 21:00; entrada en el primer cierre de vuelta dentro y objetivo en el otro lado de Asia. Londres: lo mismo entre las 02:00 y las 03:00 con salida al cierre de Londres (05:00). Continuación: tras tocar el 50 % del RTH, la primera vela M5 que cierra fuera del rango (antes de las 11:00) da la entrada a favor; stop 40 puntos y objetivo 2R (Nasdaq). Pre-NY: el PDH/PDL fresco barrido entre las 05:00 y las 09:00, con entrada en el cierre de vuelta y objetivo fijo 2R. Ventana 9:55 (perfil "
-                   "Ventana9_55): la vela de las 10:00 barre la de las 09:55 y cierra del color contrario; entrada a su cierre en contra del barrido, "
+                   "Ventana9_55): la vela de las 10:00 barre la de las 09:55 y cierra de vuelta dentro de ella; entrada a su cierre en contra del barrido, "
                    "stop en su punta y objetivo 3R (Nasdaq). Cortex los "
                    "valida; solo informa, no envía órdenes.")
     subscribes = ("candles.loaded", "tbr.updated", "clock.offset")
